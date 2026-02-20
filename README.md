@@ -95,10 +95,11 @@ sudo ./stop.sh     # 停止网关
 | 网关 | Mac 的 IP（`start.sh` 会告诉你） |
 | DNS | Mac 的 IP（同上） |
 
-> **各设备详细图文指南：**
-> - [Nintendo Switch 设置](docs/switch-setup.md)
-> - Apple TV：设置 → 网络 → Wi-Fi → 手动配置
-> - PS5：设置 → 网络 → 设定网络连接 → 手动设置
+> **各设备详细设置指南：**
+> - [Nintendo Switch](docs/switch-setup.md)
+> - [Apple TV](docs/appletv-setup.md)
+> - [PS5 / Xbox](docs/ps5-setup.md)
+> - [iPhone / Android 手机](docs/phone-setup.md)
 
 ## 工作原理
 
@@ -137,7 +138,10 @@ lan-proxy-gateway/
 │   └── template.yaml     # mihomo 配置模板
 ├── .secret.example       # 敏感配置示例
 └── docs/
-    └── switch-setup.md   # Switch 设置指南
+    ├── switch-setup.md   # Switch 设置指南
+    ├── appletv-setup.md  # Apple TV 设置指南
+    ├── ps5-setup.md      # PS5 设置指南
+    └── phone-setup.md    # 手机/平板设置指南
 ```
 
 ## FAQ
