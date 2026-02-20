@@ -14,9 +14,13 @@ external-ui: ui
 # TUN 模式 - 透明代理核心
 tun:
   enable: true
-  stack: gvisor
+  stack: mixed            # mixed: TCP 走系统内核栈(高性能)，UDP 走 gvisor(兼容性好)
   auto-route: true
   auto-detect-interface: true
+  mtu: 1500
+
+# 性能优化
+tcp-concurrent: true      # TCP 并发连接
 
 # DNS 设置
 dns:
