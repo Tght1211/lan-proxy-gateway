@@ -37,11 +37,11 @@ else
 fi
 
 # TUN 接口
-# pf 重定向
-if pfctl -s info 2>/dev/null | grep -q "Status: Enabled"; then
-    echo -e "  pf 重定向: ${GREEN}已启用${NC}"
+tun_if="$(ifconfig 2>/dev/null | grep -B1 "inet 198.18" | head -1 | cut -d: -f1)"
+if [[ -n "$tun_if" ]]; then
+    echo -e "  TUN 接口:  ${GREEN}${tun_if}${NC}"
 else
-    echo -e "  pf 重定向: ${RED}未启用${NC}"
+    echo -e "  TUN 接口:  ${YELLOW}未检测到${NC}"
 fi
 
 echo -e "  本机 IP:   ${lan_ip}"
