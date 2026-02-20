@@ -111,6 +111,6 @@ echo -e "${BOLD}设备配置${NC}"
 separator
 echo -e "  将设备网关和 DNS 设为: ${CYAN}${lan_ip}${NC}"
 echo ""
-echo -e "  ${DIM}API 面板: http://${lan_ip}:${api_port}${NC}"
+echo -e "  ${DIM}API 面板: http://${lan_ip}:${api_port}/ui${NC}"
 echo -e "  ${DIM}日志: tail -f ${LOG_FILE}${NC}"
 echo ""

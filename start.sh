@@ -82,7 +82,7 @@ separator
 echo ""
 echo -e "  ${BOLD}本机 IP:${NC}     ${lan_ip}"
 echo -e "  ${BOLD}网络接口:${NC}    ${iface}"
-echo -e "  ${BOLD}API 面板:${NC}    http://${lan_ip}:${API_PORT:-9090}"
+echo -e "  ${BOLD}API 面板:${NC}    http://${lan_ip}:${API_PORT:-9090}/ui"
 echo ""
 echo -e "  ${BOLD}其他设备网络设置:${NC}"
 echo -e "  ┌───────────────────────────────┐"
