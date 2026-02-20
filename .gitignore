@@ -1,0 +1,41 @@
+# === 隐私保护 - 绝对不能提交的文件 ===
+.secret
+.secret.bak
+
+# 运行时生成的配置（包含订阅信息）
+data/
+config.yaml
+
+# mihomo 数据文件
+*.mmdb
+*.dat
+*.db
+Country.mmdb
+GeoIP.dat
+GeoSite.dat
+cache.db
+
+# mihomo UI
+ui/
+
+# 日志
+*.log
+/tmp/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 备份文件
+*.bak
+*.backup
+*.orig
