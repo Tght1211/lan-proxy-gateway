@@ -11,16 +11,15 @@ log-level: info
 external-controller: 0.0.0.0:{{API_PORT}}
 external-ui: ui
 
-# TUN 模式 - 透明代理核心
-tun:
-  enable: true
-  stack: mixed            # mixed: TCP 走系统内核栈(高性能)，UDP 走 gvisor(兼容性好)
-  auto-route: true
-  auto-detect-interface: true
-  mtu: 1500
+# ============================================
+# 透明代理方案：pf 重定向（非 TUN）
+# pf 在内核态将 LAN 设备的 TCP 流量重定向到 redir-port，
+# 避免 TUN 用户态拆包的性能瓶颈，吞吐量接近线速。
+# pf 规则由 start.sh 自动配置，无需手动操作。
+# ============================================
 
 # 性能优化
-tcp-concurrent: true      # TCP 并发连接
+tcp-concurrent: true
 
 # DNS 设置
 dns:
