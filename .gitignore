@@ -1,10 +1,16 @@
 # === 隐私保护 - 绝对不能提交的文件 ===
 .secret
 .secret.bak
+gateway.yaml
 
 # 运行时生成的配置（包含订阅信息）
 data/
 config.yaml
+
+# Go 构建产物
+/gateway
+/gateway.exe
+/dist/
 
 # mihomo 数据文件
 *.mmdb

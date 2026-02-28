@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.lan-proxy-gateway</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/tght/develop/project/2025/have-try/lan-proxy-gateway/start.sh</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/tght/develop/project/2025/have-try/lan-proxy-gateway/logs/service.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/tght/develop/project/2025/have-try/lan-proxy-gateway/logs/service-error.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/tght/develop/project/2025/have-try/lan-proxy-gateway</string>
+
+    <key>UserName</key>
+    <string>root</string>
+</dict>
+</plist>

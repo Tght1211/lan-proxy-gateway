@@ -1,0 +1,24 @@
+# lan-proxy-gateway 配置文件
+# 此文件包含敏感信息，请勿提交到 Git
+
+# 代理来源: "url" (订阅链接) 或 "file" (本地配置文件)
+proxy_source: url
+
+# 订阅链接 (proxy_source: url 时必填)
+subscription_url: "https://your-subscription-url-here"
+
+# 本地配置文件路径 (proxy_source: file 时必填)
+# proxy_config_file: /path/to/your/clash-config.yaml
+
+# 代理源名称
+subscription_name: subscription
+
+# 端口配置
+ports:
+  mixed: 7890     # 混合代理 (HTTP + SOCKS5)
+  redir: 7892     # 透明代理
+  api: 9090       # mihomo API 面板
+  dns: 53         # DNS 服务
+
+# API 密钥 (留空则无需认证)
+api_secret: ""

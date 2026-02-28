@@ -87,47 +87,119 @@ download_file "$GEOIP_URL" "${DATA_DIR}/country.mmdb"
 download_file "$GEOSITE_URL" "${DATA_DIR}/geosite.dat"
 download_file "$GEOIP_DAT_URL" "${DATA_DIR}/geoip.dat"
 
-# ========== Step 4: 配置订阅链接 ==========
-step "4/6" "配置订阅链接..."
+# ========== Step 4: 配置代理来源 ==========
+step "4/6" "配置代理来源..."
+
+need_reconfig=true
 
 if [[ -f "$SECRET_FILE" ]]; then
     source "$SECRET_FILE"
-    if [[ -n "$SUBSCRIPTION_URL" ]]; then
-        info "已有订阅配置"
+    local_proxy_source="${PROXY_SOURCE:-url}"
+
+    if [[ "$local_proxy_source" == "url" && -n "$SUBSCRIPTION_URL" ]]; then
+        info "已有配置 [订阅链接模式]"
         echo "  当前订阅: ${SUBSCRIPTION_URL:0:40}..."
+        need_reconfig=false
+    elif [[ "$local_proxy_source" == "file" && -n "$PROXY_CONFIG_FILE" ]]; then
+        info "已有配置 [配置文件模式]"
+        echo "  配置文件: ${PROXY_CONFIG_FILE}"
+        need_reconfig=false
+    fi
+
+    if [[ "$need_reconfig" == "false" ]]; then
         echo ""
         read -p "是否重新配置？[y/N] " -n 1 -r
         echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            info "保留现有配置"
-        else
-            unset SUBSCRIPTION_URL
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            need_reconfig=true
         fi
     fi
 fi
 
-if [[ -z "$SUBSCRIPTION_URL" ]]; then
+if $need_reconfig; then
     echo ""
-    echo -e "${BOLD}请输入你的代理订阅链接:${NC}"
-    echo -e "${DIM}（通常是机场提供的 Clash/mihomo 订阅 URL）${NC}"
+    echo -e "${BOLD}请选择代理来源:${NC}"
+    echo "  1) 订阅链接（机场提供的 Clash/mihomo 订阅 URL）"
+    echo "  2) 配置文件（本地 Clash/mihomo YAML 配置文件）"
     echo ""
-    read -p "> " sub_url
+    read -p "请选择 [1/2]: " source_choice
 
-    if [[ -z "$sub_url" ]]; then
-        error "订阅链接不能为空"
-        exit 1
-    fi
+    case "$source_choice" in
+        2)
+            # === 配置文件模式 ===
+            echo ""
+            echo -e "${BOLD}请输入配置文件的路径:${NC}"
+            echo -e "${DIM}（支持包含 proxies 段落的 Clash/mihomo YAML 配置）${NC}"
+            echo ""
+            read -p "> " config_path
 
-    echo ""
-    read -p "给订阅起个名字 [subscription]: " sub_name
-    sub_name="${sub_name:-subscription}"
+            # 展开 ~ 为 HOME
+            config_path="${config_path/#\~/$HOME}"
 
-    # 写入 .secret
-    cat > "$SECRET_FILE" << EOF
+            if [[ -z "$config_path" || ! -f "$config_path" ]]; then
+                error "文件不存在: $config_path"
+                exit 1
+            fi
+
+            # 验证文件中包含 proxies 段落
+            if ! grep -q "^proxies:" "$config_path"; then
+                error "配置文件中未找到 proxies: 段落"
+                exit 1
+            fi
+
+            local_proxy_count=$(grep -c "  - name:" "$config_path")
+            info "检测到 ${local_proxy_count} 个代理节点"
+
+            echo ""
+            read -p "给代理源起个名字 [subscription]: " sub_name
+            sub_name="${sub_name:-subscription}"
+
+            cat > "$SECRET_FILE" << EOF
 # lan-proxy-gateway 敏感配置
 # ！！！此文件包含隐私信息，绝对不要提交到 Git ！！！
 
-# 代理订阅链接
+# 代理来源: url（订阅链接）或 file（本地配置文件）
+PROXY_SOURCE="file"
+
+# 配置文件路径
+PROXY_CONFIG_FILE="${config_path}"
+
+# 代理源名称
+SUBSCRIPTION_NAME="${sub_name}"
+
+# --- 可选配置（取消注释并修改）---
+# MIXED_PORT=7890
+# REDIR_PORT=7892
+# API_PORT=9090
+# API_SECRET=your_secret_here
+# DNS_LISTEN_PORT=53
+EOF
+            ;;
+        *)
+            # === 订阅链接模式（默认）===
+            echo ""
+            echo -e "${BOLD}请输入你的代理订阅链接:${NC}"
+            echo -e "${DIM}（通常是机场提供的 Clash/mihomo 订阅 URL）${NC}"
+            echo ""
+            read -p "> " sub_url
+
+            if [[ -z "$sub_url" ]]; then
+                error "订阅链接不能为空"
+                exit 1
+            fi
+
+            echo ""
+            read -p "给订阅起个名字 [subscription]: " sub_name
+            sub_name="${sub_name:-subscription}"
+
+            cat > "$SECRET_FILE" << EOF
+# lan-proxy-gateway 敏感配置
+# ！！！此文件包含隐私信息，绝对不要提交到 Git ！！！
+
+# 代理来源: url（订阅链接）或 file（本地配置文件）
+PROXY_SOURCE="url"
+
+# 代理��阅链接
 SUBSCRIPTION_URL="${sub_url}"
 SUBSCRIPTION_NAME="${sub_name}"
 
@@ -138,9 +210,13 @@ SUBSCRIPTION_NAME="${sub_name}"
 # API_SECRET=your_secret_here
 # DNS_LISTEN_PORT=53
 EOF
+            ;;
+    esac
 
     chmod 600 "$SECRET_FILE"
-    success "订阅配置已保存到 .secret"
+    success "代理配置已保存到 .secret"
+else
+    info "保留现有配置"
 fi
 
 # ========== Step 5: 网络检测 & 生成配置 ==========
@@ -171,7 +247,7 @@ check_file() {
 
 check_file "$mihomo_bin" "mihomo 可执行文件"
 check_file "$CONFIG_FILE" "运行时配置文件"
-check_file "$SECRET_FILE" "订阅配置文件"
+check_file "$SECRET_FILE" "代理配置文件"
 
 echo ""
 if $all_ok; then
