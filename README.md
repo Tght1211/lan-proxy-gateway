@@ -65,7 +65,25 @@ graph TD
 
 **方式一：下载编译好的二进制**
 
-从 [Releases](https://github.com/Tght1211/lan-proxy-gateway/releases) 下载对应平台的文件，放到 PATH 中即可。
+从 [Releases](https://github.com/Tght1211/lan-proxy-gateway/releases) 下载对应你系统的文件：
+
+| 你的电脑 | 下载哪个文件 |
+|----------|-------------|
+| **Mac（Apple 芯片：M1/M2/M3/M4）** | `gateway-darwin-arm64` |
+| **Mac（Intel 芯片）** | `gateway-darwin-amd64` |
+| **Linux（x86_64）** | `gateway-linux-amd64` |
+| **Linux（ARM，如树莓派）** | `gateway-linux-arm64` |
+| **Windows** | `gateway-windows-amd64.exe` |
+
+> 不确定 Mac 是哪种芯片？点左上角  → "关于本机"，看到 M1/M2/M3/M4 就选 arm64，看到 Intel 就选 amd64。
+
+下载后放到 PATH 中即可：
+
+```bash
+# macOS / Linux 示例
+chmod +x gateway-*        # 添加执行权限
+sudo mv gateway-* /usr/local/bin/gateway   # 移到 PATH 中
+```
 
 **方式二：从源码编译**（需要 [Go 1.21+](https://go.dev/dl/)）
 
