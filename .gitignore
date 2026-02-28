@@ -22,7 +22,7 @@ GeoSite.dat
 cache.db
 
 # mihomo UI
-ui/
+/ui/
 
 # 日志
 *.log
