@@ -20,7 +20,7 @@ type DownloadSource struct {
 func GeoDataSources(dataDir string) []DownloadSource {
 	base := "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest"
 	mirror := func(url string) string {
-		return strings.Replace(url, "github.com", "mirror.ghproxy.com/https://github.com", 1)
+		return strings.Replace(url, "https://github.com", "https://ghfast.top/https://github.com", 1)
 	}
 	files := []string{"country.mmdb", "geosite.dat", "geoip.dat"}
 
