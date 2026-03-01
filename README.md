@@ -151,7 +151,7 @@ make install   # 编译并安装到 /usr/local/bin（会要求输入 sudo 密码
 ### 三步完成
 
 ```bash
-# 1. 安装向导（引导你配置订阅链接或本地配置文件）
+# 1. 安装向导（自动下载 mihomo，引导配置代理来源）
 gateway install
 
 # 2. 启动网关
@@ -160,6 +160,8 @@ sudo gateway start
 # 3. 查看状态
 gateway status
 ```
+
+> 安装向导会自动下载并安装 mihomo 代理内核。如果遇到网络问题，会自动尝试镜像源下载。
 
 启动后终端会显示你的 IP，把其他设备的**网关**和 **DNS** 改成这个 IP 就行了。
 

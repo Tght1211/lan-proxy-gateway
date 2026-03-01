@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -23,6 +24,91 @@ var installCmd = &cobra.Command{
 	Run:   runInstall,
 }
 
+// downloadMihomo automatically downloads and installs mihomo
+func downloadMihomo() error {
+	ui.Info("正在自动下载 mihomo...")
+
+	// Detect platform
+	goos := runtime.GOOS
+	goarch := runtime.GOARCH
+
+	// Map architectures
+	var mihomoArch string
+	switch goarch {
+	case "amd64":
+		mihomoArch = "linux-amd64"
+	case "arm64":
+		mihomoArch = "linux-arm64"
+	default:
+		return fmt.Errorf("不支持的架构: %s", goarch)
+	}
+
+	// Get latest version (hardcoded to avoid dependency)
+	version := "v1.19.8"
+	url := fmt.Sprintf("https://github.com/MetaCubeX/mihomo/releases/download/%s/mihomo-%s", version, mihomoArch)
+
+	// Try mirrors in order
+	mirrors := []string{
+		url,
+		"https://ghp.ci/" + url,
+		"https://hub.gitmirror.com/" + url,
+		"https://github.moeyy.xyz/" + url,
+	}
+
+	// Find binary installation path
+	p := platform.New()
+	binPath := p.GetBinaryPath()
+
+	// Create directory if needed
+	if err := os.MkdirAll(filepath.Dir(binPath), 0755); err != nil {
+		return fmt.Errorf("创建目录失败: %v", err)
+	}
+
+	// Try downloading from each URL
+	for i, mirrorURL := range mirrors {
+		ui.Info("尝试从 %s 下载...", getDomain(mirrorURL))
+
+		// Download with curl
+		cmd := exec.Command("curl", "-fsSL", "-o", binPath, mirrorURL)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		err := cmd.Run()
+		if err == nil {
+			// Make executable
+			if err := os.Chmod(binPath, 0755); err != nil {
+				return fmt.Errorf("设置权限失败: %v", err)
+			}
+
+			ui.Success("mihomo 下载成功")
+			return nil
+		}
+
+		// Remove partially downloaded file
+		os.Remove(binPath)
+
+		if i == len(mirrors)-1 {
+			return fmt.Errorf("所有镜像都下载失败")
+		}
+	}
+
+	return fmt.Errorf("mihomo 下载失败")
+}
+
+// Extract domain from URL for display
+func getDomain(url string) string {
+	if strings.Contains(url, "ghp.ci") {
+		return "ghp.ci"
+	} else if strings.Contains(url, "gitmirror.com") {
+		return "gitmirror"
+	} else if strings.Contains(url, "moeyy.xyz") {
+		return "moeyy.xyz"
+	} else if strings.Contains(url, "github.com") {
+		return "GitHub"
+	}
+	return "未知"
+}
+
 func init() {
 	rootCmd.AddCommand(installCmd)
 }
@@ -38,24 +124,22 @@ func runInstall(cmd *cobra.Command, args []string) {
 	ui.Step(1, 6, "检查系统环境...")
 	fmt.Printf("  系统: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 
-	// Step 2: Check mihomo
+	// Step 2: Check and install mihomo
 	ui.Step(2, 6, "检查 mihomo...")
 	p := platform.New()
 
 	binary, err := p.FindBinary()
 	if err != nil {
-		ui.Warn("未找到 mihomo")
-		if runtime.GOOS == "darwin" {
-			fmt.Println("  建议通过 Homebrew 安装: brew install mihomo")
-		} else {
-			fmt.Println("  请从 https://github.com/MetaCubeX/mihomo/releases 下载对应平台版本")
+		ui.Warn("未找到 mihomo，正在自动下载...")
+		err = downloadMihomo()
+		if err != nil {
+			ui.Error("mihomo 下载失败: %v", err)
+			ui.Error("请手动安装 mihomo: https://github.com/MetaCubeX/mihomo/releases")
+			os.Exit(1)
 		}
-		fmt.Println()
-		fmt.Print("mihomo 安装完成后按 Enter 继续（或 Ctrl+C 退出）...")
-		reader.ReadString('\n')
 		binary, err = p.FindBinary()
 		if err != nil {
-			ui.Error("仍未找到 mihomo，请确认安装后重试")
+			ui.Error("mihomo 安装失败，请手动检查")
 			os.Exit(1)
 		}
 	}
