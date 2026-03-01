@@ -6,47 +6,46 @@ BINARY="gateway"
 # 可通过环境变量指定镜像前缀，如 GITHUB_MIRROR=https://hub.gitmirror.com/
 GITHUB_MIRROR="${GITHUB_MIRROR:-}"
 
+MIRRORS=(
+  "https://hub.gitmirror.com/"
+  "https://mirror.ghproxy.com/"
+  "https://github.moeyy.xyz/"
+  "https://gh.ddlc.top/"
+)
+
 info()  { printf "\033[1;32m%s\033[0m\n" "$*"; }
 warn()  { printf "\033[1;33m%s\033[0m\n" "$*"; }
 error() { printf "\033[1;31m%s\033[0m\n" "$*" >&2; exit 1; }
 
-# try curl with timeout, return 0 on success
-try_curl() {
-  curl -fsSL --connect-timeout 5 -o /dev/null "$1" 2>/dev/null
-}
+# download with automatic mirror fallback
+# usage: gh_download URL OUTPUT_FILE [--progress]
+gh_download() {
+  local url="$1" output="$2" show_progress="${3:-}"
+  local curl_opts="-fSL --connect-timeout 10 --max-time 60"
+  [ "$show_progress" = "--progress" ] && curl_opts="$curl_opts --progress-bar" || curl_opts="$curl_opts -s"
 
-# --- auto-detect mirror ---
-detect_mirror() {
+  # if user specified a mirror, use it directly
   if [ -n "$GITHUB_MIRROR" ]; then
-    info "使用指定镜像: ${GITHUB_MIRROR}"
-    return
-  fi
-  # test direct GitHub
-  if try_curl "https://api.github.com"; then
-    GITHUB_MIRROR=""
-    return
+    curl $curl_opts -o "$output" "${GITHUB_MIRROR}${url}" && return 0
+    error "下载失败: ${GITHUB_MIRROR}${url}"
   fi
 
-  warn "直连 GitHub 超时，尝试镜像加速..."
-  local mirrors=(
-    "https://hub.gitmirror.com/"
-    "https://mirror.ghproxy.com/"
-    "https://github.moeyy.xyz/"
-    "https://gh.ddlc.top/"
-  )
-  for m in "${mirrors[@]}"; do
-    if try_curl "${m}https://api.github.com"; then
-      GITHUB_MIRROR="$m"
-      info "使用镜像: ${m}"
-      return
+  # try direct first
+  if curl $curl_opts -o "$output" "$url" 2>/dev/null; then
+    return 0
+  fi
+
+  # direct failed, try mirrors
+  warn "直连 GitHub 失败，尝试镜像加速..."
+  for m in "${MIRRORS[@]}"; do
+    info "尝试镜像: ${m}"
+    if curl $curl_opts -o "$output" "${m}${url}" 2>/dev/null; then
+      info "镜像下载成功"
+      return 0
     fi
   done
-  error "无法连接 GitHub 或任何镜像站。请手动设置: GITHUB_MIRROR=https://你的镜像/ bash install.sh"
-}
 
-# prefix a URL with mirror if needed
-mirror() {
-  echo "${GITHUB_MIRROR}${1}"
+  error "所有下载方式均失败。请手动设置: GITHUB_MIRROR=https://你的镜像/ bash install.sh"
 }
 
 # --- detect OS ---
@@ -82,28 +81,24 @@ ASSET="${BINARY}-${OS}-${ARCH}"
 
 info "检测到系统: ${OS}/${ARCH}"
 info "安装目录: ${INSTALL_DIR}"
-
-detect_mirror
-
 info "正在获取最新版本..."
 
 # --- get latest release tag ---
-API_URL=$(mirror "https://api.github.com/repos/${REPO}/releases/latest")
-TAG=$(curl -fsSL "$API_URL" \
-  | grep '"tag_name"' | head -1 | cut -d'"' -f4)
+API_TMPFILE=$(mktemp)
+gh_download "https://api.github.com/repos/${REPO}/releases/latest" "$API_TMPFILE"
+TAG=$(grep '"tag_name"' "$API_TMPFILE" | head -1 | cut -d'"' -f4)
+rm -f "$API_TMPFILE"
 
 [ -z "$TAG" ] && error "无法获取最新版本号"
 
 info "最新版本: ${TAG}"
 
-# --- download ---
-URL=$(mirror "https://github.com/${REPO}/releases/download/${TAG}/${ASSET}")
+# --- download binary ---
 TMPFILE=$(mktemp)
 trap 'rm -f "$TMPFILE"' EXIT
 
 info "下载 ${ASSET}..."
-curl -fSL --progress-bar -o "$TMPFILE" "$URL" \
-  || error "下载失败: ${URL}"
+gh_download "https://github.com/${REPO}/releases/download/${TAG}/${ASSET}" "$TMPFILE" --progress
 
 chmod +x "$TMPFILE"
 
@@ -128,7 +123,7 @@ esac
 
 info ""
 info "安装成功! 🎉"
-info "版本: $(\"$TARGET\" --version 2>/dev/null || echo "${TAG}")"
+info "版本: $("$TARGET" --version 2>/dev/null || echo "${TAG}")"
 info ""
 info "快速开始:"
 info "  gateway install    # 安装向导"
