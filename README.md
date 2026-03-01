@@ -71,8 +71,9 @@ macOS / Linux:
 # 国际网络
 curl -fsSL https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.sh | bash
 
-# 国内镜像
-curl -fsSL https://ghp.ci/https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.sh | bash
+# 国内镜像（二选一）
+curl -fsSL https://raw.gitmirror.com/Tght1211/lan-proxy-gateway/main/install.sh | bash
+curl -fsSL https://mirror.ghproxy.com/https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.sh | bash
 ```
 
 Windows (PowerShell):
@@ -81,11 +82,12 @@ Windows (PowerShell):
 # 国际网络
 irm https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.ps1 | iex
 
-# 国内镜像
-irm https://ghp.ci/https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.ps1 | iex
+# 国内镜像（二选一）
+irm https://raw.gitmirror.com/Tght1211/lan-proxy-gateway/main/install.ps1 | iex
+irm https://mirror.ghproxy.com/https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.ps1 | iex
 ```
 
-脚本会自动检测网络环境，GitHub 直连超时时自动切换镜像下载。macOS 安装到 `/usr/local/bin`，Linux 安装到 `/usr/local/bin` 或 `~/.local/bin`，Windows 安装到 `%LOCALAPPDATA%\Programs\gateway`。
+脚本会自动检测网络环境，GitHub 直连超时时自动切换镜像下载二进制文件。macOS 安装到 `/usr/local/bin`，Linux 安装到 `/usr/local/bin` 或 `~/.local/bin`，Windows 安装到 `%LOCALAPPDATA%\Programs\gateway`。
 
 **方式二：手动下载**
 
