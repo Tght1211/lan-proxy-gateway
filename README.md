@@ -63,7 +63,15 @@ graph TD
 
 ### 安装
 
-**方式一：下载编译好的二进制**
+**方式一：一键安装**（推荐，macOS / Linux）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.sh | bash
+```
+
+自动检测系统和架构，下载最新版本并安装到 `/usr/local/bin/gateway`。
+
+**方式二：手动下载**
 
 从 [Releases](https://github.com/Tght1211/lan-proxy-gateway/releases) 下载对应你系统的文件：
 
@@ -85,7 +93,7 @@ chmod +x gateway-*        # 添加执行权限
 sudo mv gateway-* /usr/local/bin/gateway   # 移到 PATH 中
 ```
 
-**方式二：从源码编译**（需要 [Go 1.21+](https://go.dev/dl/)）
+**方式三：从源码编译**（需要 [Go 1.21+](https://go.dev/dl/)）
 
 ```bash
 git clone https://github.com/Tght1211/lan-proxy-gateway.git
