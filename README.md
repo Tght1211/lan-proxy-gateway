@@ -89,11 +89,33 @@ irm https://mirror.ghproxy.com/https://raw.githubusercontent.com/Tght1211/lan-pr
 
 脚本会自动检测网络环境，GitHub 直连超时时自动切换镜像下载二进制文件。macOS 安装到 `/usr/local/bin`，Linux 安装到 `/usr/local/bin` 或 `~/.local/bin`，Windows 安装到 `%LOCALAPPDATA%\Programs\gateway`。
 
-> **如果以上命令都下载不了脚本？** 直接复制本项目中的 [`install.sh`](install.sh)（或 Windows 的 [`install.ps1`](install.ps1)）内容到服务器上：
+> **如果以上命令都下载不了脚本？** 直接复制本项目中的文件内容到服务器上：
+>
+> **mihomo 安装**（必须先完成）：
 > ```bash
-> vim install.sh        # 粘贴 install.sh 的内容，保存退出
+> # 1. 复制以下内容到 download-mihomo.sh 并保存
+> vim download-mihomo.sh
+> # 粘贴 https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/download-mihomo.sh 内容
+> chmod +x download-mihomo.sh
+> ./download-mihomo.sh
+> ```
+>
+> **gateway 安装**：
+> ```bash
+> # 2. 复制以下内容到 install.sh 并保存
+> vim install.sh
+> # 粘贴 https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.sh 内容
 > chmod +x install.sh
-> ./install.sh          # 脚本内部会自动通过镜像下载二进制
+> ./install.sh
+> ```
+>
+> **终极方案**：在其他能访问 GitHub 的机器下载 mihomo，然后 scp 传到服务器：
+> ```bash
+> # 本地下载
+> wget https://github.com/MetaCubeX/mihomo/releases/download/v1.19.8/mihomo-linux-amd64
+> # 上传到服务器
+> scp mihomo root@你的服务器IP:/usr/local/bin/
+> ssh root@你的服务器IP "chmod +x /usr/local/bin/mihomo"
 > ```
 
 **方式二：手动下载**
