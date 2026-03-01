@@ -68,16 +68,24 @@ graph TD
 macOS / Linux:
 
 ```bash
+# 国际网络
 curl -fsSL https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.sh | bash
+
+# 国内镜像
+curl -fsSL https://ghp.ci/https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.sh | bash
 ```
 
 Windows (PowerShell):
 
 ```powershell
+# 国际网络
 irm https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.ps1 | iex
+
+# 国内镜像
+irm https://ghp.ci/https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.ps1 | iex
 ```
 
-自动检测系统和架构，下载最新版本。macOS 安装到 `/usr/local/bin`，Linux 安装到 `/usr/local/bin` 或 `~/.local/bin`，Windows 安装到 `%LOCALAPPDATA%\Programs\gateway`。
+脚本会自动检测网络环境，GitHub 直连超时时自动切换镜像下载。macOS 安装到 `/usr/local/bin`，Linux 安装到 `/usr/local/bin` 或 `~/.local/bin`，Windows 安装到 `%LOCALAPPDATA%\Programs\gateway`。
 
 **方式二：手动下载**
 
