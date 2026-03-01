@@ -63,13 +63,21 @@ graph TD
 
 ### 安装
 
-**方式一：一键安装**（推荐，macOS / Linux）
+**方式一：一键安装**（推荐）
+
+macOS / Linux:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.sh | bash
 ```
 
-自动检测系统和架构，下载最新版本并安装到 `/usr/local/bin/gateway`。
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.ps1 | iex
+```
+
+自动检测系统和架构，下载最新版本。macOS 安装到 `/usr/local/bin`，Linux 安装到 `/usr/local/bin` 或 `~/.local/bin`，Windows 安装到 `%LOCALAPPDATA%\Programs\gateway`。
 
 **方式二：手动下载**
 
