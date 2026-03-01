@@ -89,6 +89,13 @@ irm https://mirror.ghproxy.com/https://raw.githubusercontent.com/Tght1211/lan-pr
 
 脚本会自动检测网络环境，GitHub 直连超时时自动切换镜像下载二进制文件。macOS 安装到 `/usr/local/bin`，Linux 安装到 `/usr/local/bin` 或 `~/.local/bin`，Windows 安装到 `%LOCALAPPDATA%\Programs\gateway`。
 
+> **如果以上命令都下载不了脚本？** 直接复制本项目中的 [`install.sh`](install.sh)（或 Windows 的 [`install.ps1`](install.ps1)）内容到服务器上：
+> ```bash
+> vim install.sh        # 粘贴 install.sh 的内容，保存退出
+> chmod +x install.sh
+> ./install.sh          # 脚本内部会自动通过镜像下载二进制
+> ```
+
 **方式二：手动下载**
 
 从 [Releases](https://github.com/Tght1211/lan-proxy-gateway/releases) 下载对应你系统的文件：
