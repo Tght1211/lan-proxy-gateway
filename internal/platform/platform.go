@@ -15,6 +15,7 @@ type Platform interface {
 
 	// Process
 	FindBinary() (string, error)
+	GetBinaryPath() string
 	IsRunning() (bool, int, error)
 	StartProcess(binary, dataDir, logFile string) (int, error)
 	StopProcess() error

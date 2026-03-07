@@ -171,10 +171,13 @@ gateway status
 gateway status               # 查看状态：节点、连接数、流量
 sudo gateway start           # 启动网关
 sudo gateway stop            # 停止网关
+sudo gateway restart         # 重启网关
+sudo gateway update          # 一键升级到最新版本
+sudo gateway health          # 健康检查，异常时自动修复
 gateway switch               # 查看当前代理来源
 gateway switch url           # 切换到订阅链接模式
 gateway switch file /path    # 切换到配置文件模式
-sudo gateway service install # 开机自启动
+sudo gateway service install # 开机自启动 + 定时健康检查
 ```
 
 ## 代理来源
@@ -270,6 +273,20 @@ api_secret: ""
 | `gateway.yaml` | **No** | 你的订阅 URL，仅存本地 |
 | `data/config.yaml` | **No** | 运行时自动生成，包含实际配置 |
 
+## 稳定性保障
+
+网关长期运行难免遇到网络波动，项目内置了多层稳定性保障：
+
+| 机制 | 说明 |
+|------|------|
+| **节点健康检查** | 每 120 秒自动检测节点可用性，失效自动切换 |
+| **Fallback 兜底** | Auto 节点不可用时自动降级到 Fallback 组 |
+| **进程崩溃自愈** | launchd / systemd 检测到崩溃后自动重启 |
+| **定时健康检查** | 安装服务后每天 4:00 和 12:00 自动执行 `gateway health` |
+| **日志轮转** | 每次启动自动轮转旧日志，保留最近 3 份，防止磁盘占满 |
+| **IPv6 禁用** | 避免 IPv6 不通导致的连接超时（大多数家庭网络不支持 IPv6） |
+| **一键升级** | `sudo gateway update` 自动下载最新版本并重启 |
+
 ## 项目结构
 
 ```
@@ -280,8 +297,11 @@ lan-proxy-gateway/
 │   ├── install.go                # gateway install
 │   ├── start.go                  # gateway start
 │   ├── stop.go                   # gateway stop
+│   ├── restart.go                # gateway restart
 │   ├── status.go                 # gateway status
 │   ├── switch.go                 # gateway switch
+│   ├── update.go                 # gateway update（一键升级）
+│   ├── health.go                 # gateway health（健康检查）
 │   └── service.go                # gateway service install/uninstall
 ├── internal/
 │   ├── platform/                 # 跨平台抽象 (darwin/linux/windows)
@@ -316,13 +336,19 @@ lan-proxy-gateway/
 **Q: 关掉网关电脑后其他设备怎么办？**
 > 需要把设备的网络设置改回"自动获取"，否则无法上网。
 
+**Q: 怎么升级到最新版本？**
+> `sudo gateway update`，自动下载、替换、重启，一条命令搞定。GitHub 直连超时时会自动切换镜像。
+
+**Q: 长时间运行会不稳定吗？**
+> 安装服务后（`sudo gateway service install`），系统会在崩溃时自动重启，并在每天 4:00 和 12:00 自动执行健康检查。也可以随时手动 `sudo gateway health` 检查。
+
 **Q: 和软路由比有什么优缺点？**
 > | | LAN Proxy Gateway | 软路由 |
 > |---|---|---|
 > | 成本 | 利用现有电脑，零成本 | 需要额外买设备 |
 > | 配置难度 | 一个 CLI 命令 | 刷固件 + 配置 OpenWrt |
 > | 跨平台 | macOS / Linux / Windows | 通常仅 Linux |
-> | 稳定性 | 电脑有时需要重启 | 专用设备更稳定 |
+> | 稳定性 | 崩溃自愈 + 定时健康检查 | 专用设备更稳定 |
 > | 适合场景 | 家里有闲置电脑的用户 | 追求 7×24 极致稳定 |
 
 ## License

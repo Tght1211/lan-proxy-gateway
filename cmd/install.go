@@ -28,20 +28,23 @@ var installCmd = &cobra.Command{
 func downloadMihomo() error {
 	ui.Info("正在自动下载 mihomo...")
 
-	// Detect platform
-	goos := runtime.GOOS
 	goarch := runtime.GOARCH
+	goos := runtime.GOOS
 
-	// Map architectures
 	var mihomoArch string
-	switch goarch {
-	case "amd64":
+	switch {
+	case goos == "darwin" && goarch == "arm64":
+		mihomoArch = "darwin-arm64"
+	case goos == "darwin" && goarch == "amd64":
+		mihomoArch = "darwin-amd64"
+	case goos == "linux" && goarch == "amd64":
 		mihomoArch = "linux-amd64"
-	case "arm64":
+	case goos == "linux" && goarch == "arm64":
 		mihomoArch = "linux-arm64"
 	default:
-		return fmt.Errorf("不支持的架构: %s", goarch)
+		return fmt.Errorf("不支持的平台: %s/%s", goos, goarch)
 	}
+	_ = goos
 
 	// Get latest version (hardcoded to avoid dependency)
 	version := "v1.19.8"

@@ -7,25 +7,26 @@ redir-port: {{REDIR_PORT}}
 allow-lan: true
 bind-address: '*'
 mode: rule
-log-level: info
+log-level: warning
 external-controller: 0.0.0.0:{{API_PORT}}
 external-ui: ui
+ipv6: false
 
 # TUN 模式 - 透明代理核心
 tun:
   enable: true
-  stack: mixed            # mixed: TCP 走系统内核栈(高性能)，UDP 走 gvisor(兼容性好)
+  stack: mixed
   auto-route: true
   auto-detect-interface: true
   mtu: 1500
 
-# 性能优化
-tcp-concurrent: true      # TCP 并发连接
+tcp-concurrent: true
 
 # DNS 设置
 dns:
   enable: true
   listen: 0.0.0.0:{{DNS_LISTEN_PORT}}
+  ipv6: false
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
   fake-ip-filter:
@@ -53,11 +54,11 @@ proxy-providers:
   {{SUBSCRIPTION_NAME}}:
     type: http
     url: "{{SUBSCRIPTION_URL}}"
-    interval: 3600
+    interval: 1800
     path: ./proxy_provider/{{SUBSCRIPTION_NAME}}.yaml
     health-check:
       enable: true
-      interval: 600
+      interval: 120
       url: http://www.gstatic.com/generate_204
 
 # 代理组 - 使用 proxy-providers 中的节点
@@ -76,14 +77,15 @@ proxy-groups:
     use:
       - {{SUBSCRIPTION_NAME}}
     url: http://www.gstatic.com/generate_204
-    interval: 300
+    interval: 120
+    tolerance: 100
 
   - name: Fallback
     type: fallback
     use:
       - {{SUBSCRIPTION_NAME}}
     url: http://www.gstatic.com/generate_204
-    interval: 300
+    interval: 120
 
 # ============================================
 # 分流规则
@@ -196,6 +198,7 @@ rules:
   - DOMAIN-SUFFIX,meituan.net,DIRECT
   - DOMAIN-SUFFIX,mi.com,DIRECT
   - DOMAIN-SUFFIX,miaopai.com,DIRECT
+  - DOMAIN-SUFFIX,events.data.microsoft.com,Proxy
   - DOMAIN-SUFFIX,microsoft.com,DIRECT
   - DOMAIN-SUFFIX,microsoftonline.com,DIRECT
   - DOMAIN-SUFFIX,miui.com,DIRECT

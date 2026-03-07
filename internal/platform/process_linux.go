@@ -28,6 +28,10 @@ func (p *impl) FindBinary() (string, error) {
 	return "", fmt.Errorf("未找到 mihomo 可执行文件")
 }
 
+func (p *impl) GetBinaryPath() string {
+	return "/usr/local/bin/mihomo"
+}
+
 func (p *impl) IsRunning() (bool, int, error) {
 	out, err := exec.Command("pgrep", "-x", "mihomo").Output()
 	if err != nil {
@@ -45,6 +49,8 @@ func (p *impl) IsRunning() (bool, int, error) {
 }
 
 func (p *impl) StartProcess(binary, dataDir, logFile string) (int, error) {
+	rotateLog(logFile)
+
 	logF, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return 0, fmt.Errorf("无法创建日志文件: %w", err)
@@ -65,6 +71,21 @@ func (p *impl) StartProcess(binary, dataDir, logFile string) (int, error) {
 	logF.Close()
 
 	return pid, nil
+}
+
+func rotateLog(logFile string) {
+	const maxBackups = 3
+	info, err := os.Stat(logFile)
+	if err != nil || info.Size() == 0 {
+		return
+	}
+
+	for i := maxBackups - 1; i >= 1; i-- {
+		src := fmt.Sprintf("%s.%d", logFile, i)
+		dst := fmt.Sprintf("%s.%d", logFile, i+1)
+		os.Rename(src, dst)
+	}
+	os.Rename(logFile, logFile+".1")
 }
 
 func (p *impl) StopProcess() error {

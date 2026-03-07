@@ -41,6 +41,9 @@ cache.db
 *.swo
 *~
 
+# 本地开发脚本
+upgrade-local.sh
+
 # 备份文件
 *.bak
 *.backup

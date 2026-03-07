@@ -105,6 +105,43 @@ func (c *Client) GetConnections() (*ConnectionsInfo, error) {
 	return &info, nil
 }
 
+// UpdateProxyProvider triggers mihomo to re-fetch the subscription.
+func (c *Client) UpdateProxyProvider(name string) error {
+	req, err := http.NewRequest("PUT", c.BaseURL+"/providers/proxies/"+name, nil)
+	if err != nil {
+		return err
+	}
+	if c.Secret != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Secret)
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("update provider failed: HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// CloseAllConnections closes all active connections to free resources.
+func (c *Client) CloseAllConnections() error {
+	req, err := http.NewRequest("DELETE", c.BaseURL+"/connections", nil)
+	if err != nil {
+		return err
+	}
+	if c.Secret != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Secret)
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
+
 // FormatAPIURL returns the full API URL string.
 func FormatAPIURL(ip string, port int) string {
 	return fmt.Sprintf("http://%s:%d", ip, port)
