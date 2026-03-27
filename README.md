@@ -274,6 +274,11 @@ make build-all   # 一次编译 5 个平台二进制（dist/ 目录下）
 
 ## 配置文件
 
+当前推荐配置：`gateway.yaml`（安装向导默认生成）。
+
+- 新用户：请直接使用 `gateway.yaml` / `gateway.example.yaml`
+- 旧用户：`.secret` 仍可兼容，但属于历史格式，建议迁移到 `gateway.yaml`
+
 安装向导会自动生成 `gateway.yaml`，你也可以手动编辑：
 
 ```yaml
@@ -287,9 +292,16 @@ ports:
   api: 9090
   dns: 53
 api_secret: ""
+ui:
+  listen: "127.0.0.1:9091"
+regions:
+  enabled: false
+  include: ["HK", "JP"]
+  auto_switch: true
+  strategy: "latency"
 ```
 
-> 从旧版 `.secret` 格式迁移？运行 `gateway install` 会自动检测并迁移。
+> 从旧版 `.secret` 格式迁移？运行 `gateway install` 或 `sudo gateway update` 会自动检测并迁移。
 
 ## 隐私安全
 
