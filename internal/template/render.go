@@ -2,6 +2,7 @@ package template
 
 import (
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -14,16 +15,22 @@ import (
 func RenderTemplate(cfg *config.Config, iface, ip, outputPath string) error {
 	result := embed.TemplateContent
 
+	regionFilter := ""
+	if cfg.Regions.Enabled {
+		regionFilter = buildRegionFilter(cfg)
+	}
+
 	replacements := map[string]string{
-		"{{MIXED_PORT}}":        strconv.Itoa(cfg.Ports.Mixed),
-		"{{REDIR_PORT}}":        strconv.Itoa(cfg.Ports.Redir),
-		"{{API_PORT}}":          strconv.Itoa(cfg.Ports.API),
-		"{{API_SECRET}}":        cfg.APISecret,
-		"{{DNS_LISTEN_PORT}}":   strconv.Itoa(cfg.Ports.DNS),
-		"{{SUBSCRIPTION_URL}}":  cfg.SubscriptionURL,
-		"{{SUBSCRIPTION_NAME}}": cfg.SubscriptionName,
-		"{{LAN_INTERFACE}}":     iface,
-		"{{LAN_IP}}":            ip,
+		"{{MIXED_PORT}}":          strconv.Itoa(cfg.Ports.Mixed),
+		"{{REDIR_PORT}}":          strconv.Itoa(cfg.Ports.Redir),
+		"{{API_PORT}}":            strconv.Itoa(cfg.Ports.API),
+		"{{API_SECRET}}":          cfg.APISecret,
+		"{{DNS_LISTEN_PORT}}":     strconv.Itoa(cfg.Ports.DNS),
+		"{{SUBSCRIPTION_URL}}":    cfg.SubscriptionURL,
+		"{{SUBSCRIPTION_NAME}}":   cfg.SubscriptionName,
+		"{{LAN_INTERFACE}}":       iface,
+		"{{LAN_IP}}":              ip,
+		"{{REGION_FILTER_BLOCK}}": regionFilter,
 	}
 
 	for placeholder, value := range replacements {
@@ -36,6 +43,53 @@ func RenderTemplate(cfg *config.Config, iface, ip, outputPath string) error {
 	}
 
 	return os.WriteFile(outputPath, []byte(result), 0644)
+}
+
+func buildRegionFilter(cfg *config.Config) string {
+	keywords := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, code := range cfg.Regions.Include {
+		for _, keyword := range cfg.Regions.Mapping[code] {
+			keyword = strings.TrimSpace(keyword)
+			if keyword == "" {
+				continue
+			}
+			if _, ok := seen[keyword]; ok {
+				continue
+			}
+			seen[keyword] = struct{}{}
+			keywords = append(keywords, keyword)
+		}
+	}
+	if len(keywords) == 0 {
+		return ""
+	}
+	sort.Strings(keywords)
+	escaped := make([]string, 0, len(keywords))
+	for _, keyword := range keywords {
+		escaped = append(escaped, regexpQuote(keyword))
+	}
+	return "    filter: '(?i)(" + strings.Join(escaped, "|") + ")'\n"
+}
+
+func regexpQuote(s string) string {
+	replacer := strings.NewReplacer(
+		`\\`, `\\\\`,
+		`.`, `\\.`,
+		`+`, `\\+`,
+		`*`, `\\*`,
+		`?`, `\\?`,
+		`(`, `\\(`,
+		`)`, `\\)`,
+		`[`, `\\[`,
+		`]`, `\\]`,
+		`{`, `\\{`,
+		`}`, `\\}`,
+		`^`, `\\^`,
+		`$`, `\\$`,
+		`|`, `\\|`,
+	)
+	return replacer.Replace(s)
 }
 
 // patchForFileMode modifies the generated config to use local file

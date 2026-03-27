@@ -165,20 +165,24 @@ gateway status
 
 启动后终端会显示你的 IP，把其他设备的**网关**和 **DNS** 改成这个 IP 就行了。
 
-### 日常使用
+### 本地个性化配置页面
+
+当配置项变多时，可以直接启动本地页面管理高频个性化设置：
 
 ```bash
-gateway status               # 查看状态：节点、连接数、流量
-sudo gateway start           # 启动网关
-sudo gateway stop            # 停止网关
-sudo gateway restart         # 重启网关
-sudo gateway update          # 一键升级到最新版本
-sudo gateway health          # 健康检查，异常时自动修复
-gateway switch               # 查看当前代理来源
-gateway switch url           # 切换到订阅链接模式
-gateway switch file /path    # 切换到配置文件模式
-sudo gateway service install # 开机自启动 + 定时健康检查
+gateway ui
 ```
+
+默认地址：`http://127.0.0.1:9091`
+
+页面支持：
+- 代理来源切换（url/file）
+- 地区限制与自动选优开关
+- 常用端口配置
+- 一键保存与应用配置
+- 最佳节点分析（dry-run / apply）
+
+
 
 ## 代理来源
 
@@ -188,6 +192,30 @@ sudo gateway service install # 开机自启动 + 定时健康检查
 |------|------|------|
 | **订阅链接** | 机场提供的 Clash/mihomo URL，自动拉取节点 | `gateway switch url` |
 | **配置文件** | 本地 Clash/mihomo YAML 文件，自动提取 proxies | `gateway switch file /path/to/config.yaml` |
+
+## 地区限制与自动切换
+
+你可以在 `gateway.yaml` 中限定地区，只在这些地区里自动选节点：
+
+```yaml
+regions:
+  enabled: true
+  include: ["HK", "JP", "SG"]
+  auto_switch: true
+  strategy: "latency"
+  mapping:
+    HK: ["香港", "HK", "Hong Kong"]
+    JP: ["日本", "JP", "Tokyo", "Osaka"]
+    SG: ["新加坡", "SG", "Singapore"]
+```
+
+常用命令：
+
+```bash
+gateway switch best                 # 在限定地区内选优并切换
+gateway switch best --dry-run       # 只分析，不切换
+gateway switch best --region HK,JP  # 临时覆盖地区限制
+```
 
 ## 设备配置
 
@@ -280,7 +308,8 @@ api_secret: ""
 | 机制 | 说明 |
 |------|------|
 | **节点健康检查** | 每 120 秒自动检测节点可用性，失效自动切换 |
-| **Fallback 兜底** | Auto 节点不可用时自动降级到 Fallback 组 |
+| **地区内自动选优** | 启用地区限制后，`gateway health` 会在限定地区内自动选择最佳节点 |
+| **国内流量优先直连** | 规则模式下优先命中 `GEOSITE,CN` 和 `GEOIP,CN`，避免大陆流量误走代理 |
 | **进程崩溃自愈** | launchd / systemd 检测到崩溃后自动重启 |
 | **定时健康检查** | 安装服务后每天 4:00 和 12:00 自动执行 `gateway health` |
 | **日志轮转** | 每次启动自动轮转旧日志，保留最近 3 份，防止磁盘占满 |

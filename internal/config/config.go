@@ -7,12 +7,26 @@ import (
 )
 
 type Config struct {
-	ProxySource      string      `yaml:"proxy_source"`
-	SubscriptionURL  string      `yaml:"subscription_url,omitempty"`
-	ProxyConfigFile  string      `yaml:"proxy_config_file,omitempty"`
-	SubscriptionName string      `yaml:"subscription_name"`
-	Ports            PortsConfig `yaml:"ports"`
-	APISecret        string      `yaml:"api_secret,omitempty"`
+	ProxySource      string       `yaml:"proxy_source"`
+	SubscriptionURL  string       `yaml:"subscription_url,omitempty"`
+	ProxyConfigFile  string       `yaml:"proxy_config_file,omitempty"`
+	SubscriptionName string       `yaml:"subscription_name"`
+	Ports            PortsConfig  `yaml:"ports"`
+	APISecret        string       `yaml:"api_secret,omitempty"`
+	Regions          RegionConfig `yaml:"regions,omitempty"`
+	UI               UIConfig     `yaml:"ui,omitempty"`
+}
+
+type UIConfig struct {
+	Listen string `yaml:"listen,omitempty"`
+}
+
+type RegionConfig struct {
+	Enabled    bool                `yaml:"enabled"`
+	Include    []string            `yaml:"include,omitempty"`
+	AutoSwitch bool                `yaml:"auto_switch"`
+	Strategy   string              `yaml:"strategy,omitempty"`
+	Mapping    map[string][]string `yaml:"mapping,omitempty"`
 }
 
 type PortsConfig struct {
@@ -32,6 +46,37 @@ func DefaultConfig() *Config {
 			API:   9090,
 			DNS:   53,
 		},
+		Regions: RegionConfig{
+			Enabled:    false,
+			Include:    []string{},
+			AutoSwitch: true,
+			Strategy:   "latency",
+			Mapping: map[string][]string{
+				"HK": []string{"香港", "HK", "Hong Kong"},
+				"JP": []string{"日本", "JP", "Tokyo", "Osaka"},
+				"SG": []string{"新加坡", "SG", "Singapore"},
+				"US": []string{"美国", "US", "United States", "Los Angeles", "San Jose", "Seattle"},
+				"TW": []string{"台湾", "TW", "Taiwan", "Taipei"},
+			},
+		},
+		UI: UIConfig{
+			Listen: "127.0.0.1:9091",
+		},
+	}
+}
+
+func normalizeConfig(cfg *Config) {
+	if cfg.Regions.Include == nil {
+		cfg.Regions.Include = []string{}
+	}
+	if cfg.Regions.Strategy == "" {
+		cfg.Regions.Strategy = "latency"
+	}
+	if cfg.Regions.Mapping == nil {
+		cfg.Regions.Mapping = DefaultConfig().Regions.Mapping
+	}
+	if cfg.UI.Listen == "" {
+		cfg.UI.Listen = DefaultConfig().UI.Listen
 	}
 }
 
@@ -44,6 +89,7 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
+	normalizeConfig(cfg)
 	return cfg, nil
 }
 

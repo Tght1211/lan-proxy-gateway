@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/tght/lan-proxy-gateway/internal/config"
 	"github.com/tght/lan-proxy-gateway/internal/ui"
 )
 
@@ -46,7 +47,7 @@ func runUpdate(cmd *cobra.Command, args []string) {
 	checkRoot()
 
 	ui.ShowLogo()
-	ui.Step(1, 4, "检查最新版本...")
+	ui.Step(1, 5, "检查最新版本...")
 
 	latest, err := fetchLatestTag()
 	if err != nil {
@@ -63,7 +64,7 @@ func runUpdate(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	ui.Step(2, 4, "下载新版本...")
+	ui.Step(2, 5, "下载新版本...")
 
 	asset := fmt.Sprintf("gateway-%s-%s", runtime.GOOS, runtime.GOARCH)
 	downloadURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repo, latest, asset)
@@ -85,7 +86,7 @@ func runUpdate(cmd *cobra.Command, args []string) {
 		ui.Success("下载完成")
 	}
 
-	ui.Step(3, 4, "替换二进制文件...")
+	ui.Step(3, 5, "替换二进制文件...")
 
 	self, err := os.Executable()
 	if err != nil {
@@ -109,10 +110,40 @@ func runUpdate(cmd *cobra.Command, args []string) {
 	os.Remove(backupPath)
 	ui.Success("二进制文件已更新: %s", self)
 
-	ui.Step(4, 4, "重启网关...")
+	ui.Step(4, 5, "升级配置兼容性...")
+	if err := ensureUpdatedConfig(); err != nil {
+		ui.Warn("配置升级跳过: %s", err)
+	} else {
+		ui.Success("配置兼容升级完成")
+	}
 
+	ui.Step(5, 5, "重启网关...")
 	runStop(cmd, args)
 	runStart(cmd, args)
+	ui.Info("可通过 gateway ui 打开本地个性化配置页面")
+}
+
+func ensureUpdatedConfig() error {
+	path := resolveConfigPath()
+	if path == ".secret" {
+		cfg, err := config.MigrateFromSecret(path)
+		if err != nil {
+			return err
+		}
+		if cfg == nil {
+			return nil
+		}
+		return config.Save(cfg, "gateway.yaml")
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return config.Save(cfg, path)
 }
 
 func fetchLatestTag() (string, error) {

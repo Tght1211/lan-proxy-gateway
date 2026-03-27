@@ -1,10 +1,12 @@
 package mihomo
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -44,6 +46,29 @@ func (c *Client) get(path string, result interface{}) error {
 	return json.Unmarshal(body, result)
 }
 
+func (c *Client) request(method, path string, payload interface{}) (*http.Response, error) {
+	var body io.Reader
+	if payload != nil {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		body = bytes.NewReader(data)
+	}
+
+	req, err := http.NewRequest(method, c.BaseURL+path, body)
+	if err != nil {
+		return nil, err
+	}
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.Secret != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Secret)
+	}
+	return c.client.Do(req)
+}
+
 // IsAvailable checks if the mihomo API is reachable.
 func (c *Client) IsAvailable() bool {
 	req, _ := http.NewRequest("GET", c.BaseURL+"/version", nil)
@@ -71,19 +96,52 @@ func (c *Client) GetVersion() (*VersionInfo, error) {
 	return &v, nil
 }
 
+type DelayHistory struct {
+	Time  string `json:"time"`
+	Delay int    `json:"delay"`
+}
+
+type ProxyNode struct {
+	Name    string         `json:"name"`
+	Type    string         `json:"type"`
+	Alive   bool           `json:"alive"`
+	History []DelayHistory `json:"history"`
+}
+
 type ProxyGroup struct {
-	Now     string   `json:"now"`
-	All     []string `json:"all"`
-	Type    string   `json:"type"`
-	Name    string   `json:"name"`
+	Now  string   `json:"now"`
+	All  []string `json:"all"`
+	Type string   `json:"type"`
+	Name string   `json:"name"`
 }
 
 func (c *Client) GetProxyGroup(name string) (*ProxyGroup, error) {
 	var pg ProxyGroup
-	if err := c.get("/proxies/"+name, &pg); err != nil {
+	if err := c.get("/proxies/"+url.PathEscape(name), &pg); err != nil {
 		return nil, err
 	}
 	return &pg, nil
+}
+
+func (c *Client) GetProxyNode(name string) (*ProxyNode, error) {
+	var node ProxyNode
+	if err := c.get("/proxies/"+url.PathEscape(name), &node); err != nil {
+		return nil, err
+	}
+	node.Name = name
+	return &node, nil
+}
+
+func (c *Client) SetProxyGroup(name, target string) error {
+	resp, err := c.request("PUT", "/proxies/"+url.PathEscape(name), map[string]string{"name": target})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("set proxy group failed: HTTP %d", resp.StatusCode)
+	}
+	return nil
 }
 
 type ConnectionsInfo struct {
@@ -107,18 +165,11 @@ func (c *Client) GetConnections() (*ConnectionsInfo, error) {
 
 // UpdateProxyProvider triggers mihomo to re-fetch the subscription.
 func (c *Client) UpdateProxyProvider(name string) error {
-	req, err := http.NewRequest("PUT", c.BaseURL+"/providers/proxies/"+name, nil)
+	resp, err := c.request("PUT", "/providers/proxies/"+url.PathEscape(name), nil)
 	if err != nil {
 		return err
 	}
-	if c.Secret != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Secret)
-	}
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
+	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("update provider failed: HTTP %d", resp.StatusCode)
 	}
@@ -127,14 +178,7 @@ func (c *Client) UpdateProxyProvider(name string) error {
 
 // CloseAllConnections closes all active connections to free resources.
 func (c *Client) CloseAllConnections() error {
-	req, err := http.NewRequest("DELETE", c.BaseURL+"/connections", nil)
-	if err != nil {
-		return err
-	}
-	if c.Secret != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Secret)
-	}
-	resp, err := c.client.Do(req)
+	resp, err := c.request("DELETE", "/connections", nil)
 	if err != nil {
 		return err
 	}

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LAN Proxy Gateway - 本地配置</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>LAN Proxy Gateway 本地配置</h1>
+
+      <section class="card" id="status-card">
+        <h2>运行状态</h2>
+        <p id="status-text">加载中...</p>
+      </section>
+
+      <section class="card">
+        <h2>基础配置</h2>
+        <label>代理来源
+          <select id="proxy_source">
+            <option value="url">订阅链接</option>
+            <option value="file">本地配置文件</option>
+          </select>
+        </label>
+
+        <label>订阅链接
+          <input id="subscription_url" placeholder="https://..." />
+        </label>
+
+        <label>本地配置文件路径
+          <input id="proxy_config_file" placeholder="/path/to/config.yaml" />
+        </label>
+
+        <label>代理源名称
+          <input id="subscription_name" placeholder="subscription" />
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>地区策略</h2>
+        <label><input type="checkbox" id="regions_enabled" /> 启用地区限制</label>
+        <label><input type="checkbox" id="regions_auto_switch" /> 健康检查时自动地区内选优</label>
+        <label>地区代码（逗号分隔）
+          <input id="regions_include" placeholder="HK,JP,SG" />
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>高级配置</h2>
+        <label>mixed 端口 <input id="port_mixed" type="number" /></label>
+        <label>redir 端口 <input id="port_redir" type="number" /></label>
+        <label>api 端口 <input id="port_api" type="number" /></label>
+        <label>dns 端口 <input id="port_dns" type="number" /></label>
+        <label>本地页面监听
+          <input id="ui_listen" placeholder="127.0.0.1:9091" />
+        </label>
+      </section>
+
+      <section class="actions">
+        <button id="save-btn">保存配置</button>
+        <button id="apply-btn">保存并应用</button>
+        <button id="dry-run-btn">分析最佳节点(dry-run)</button>
+        <button id="switch-btn">应用最佳节点</button>
+      </section>
+
+      <pre id="output"></pre>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

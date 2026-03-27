@@ -44,9 +44,10 @@ func runHealth(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	apiURL := mihomo.FormatAPIURL("127.0.0.1", cfg.Ports.API)
+	client := mihomo.NewClient(apiURL, cfg.APISecret)
+
 	if running {
-		apiURL := mihomo.FormatAPIURL("127.0.0.1", cfg.Ports.API)
-		client := mihomo.NewClient(apiURL, cfg.APISecret)
 		if !client.IsAvailable() {
 			ui.Error("[health] mihomo API 不可用")
 			healthy = false
@@ -64,9 +65,19 @@ func runHealth(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// Proactive: clear stale connections to free resources
-	apiURL := mihomo.FormatAPIURL("127.0.0.1", cfg.Ports.API)
-	client := mihomo.NewClient(apiURL, cfg.APISecret)
+	if cfg.Regions.Enabled && cfg.Regions.AutoSwitch && client.IsAvailable() {
+		best, candidateCount, err := analyzeBestCandidate(client, cfg, "Auto", cfg.Regions.Include)
+		if err != nil {
+			ui.Warn("[health] 地区节点分析失败: %s", err)
+		} else {
+			if err := client.SetProxyGroup("Auto", best.Name); err != nil {
+				ui.Warn("[health] 自动切换最佳节点失败: %s", err)
+			} else {
+				ui.Info("[health] 已在限定地区内选中最佳节点: %s（候选 %d 个）", best.Name, candidateCount)
+			}
+		}
+	}
+
 	if conn, err := client.GetConnections(); err == nil && len(conn.Connections) > 500 {
 		ui.Info("[health] 活跃连接数 %d 较高，清理旧连接...", len(conn.Connections))
 		client.CloseAllConnections()

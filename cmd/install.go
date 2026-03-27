@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/fatih/color"
@@ -114,6 +115,68 @@ func getDomain(url string) string {
 
 func init() {
 	rootCmd.AddCommand(installCmd)
+}
+
+func promptRegionSelection(reader *bufio.Reader, cfg *config.Config) {
+	fmt.Println()
+	color.New(color.Bold).Println("是否启用地区限制？")
+	fmt.Println("  1) 不启用（默认，全量节点）")
+	fmt.Println("  2) 启用（只在选定地区中选节点）")
+	fmt.Println()
+	fmt.Print("请选择 [1/2]: ")
+	choice, _ := reader.ReadString('\n')
+	choice = strings.TrimSpace(choice)
+
+	if choice != "2" {
+		cfg.Regions.Enabled = false
+		cfg.Regions.Include = []string{}
+		return
+	}
+
+	keys := make([]string, 0, len(cfg.Regions.Mapping))
+	for key := range cfg.Regions.Mapping {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	fmt.Println()
+	color.New(color.Bold).Println("请输入允许的地区代码，多个用逗号分隔:")
+	fmt.Printf("  可选: %s\n", strings.Join(keys, ", "))
+	fmt.Println("  示例: HK,JP,SG")
+	fmt.Println()
+	fmt.Print("> ")
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(strings.ToUpper(input))
+
+	selected := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, item := range strings.Split(input, ",") {
+		code := strings.TrimSpace(strings.ToUpper(item))
+		if code == "" {
+			continue
+		}
+		if _, ok := cfg.Regions.Mapping[code]; !ok {
+			ui.Warn("忽略未知地区: %s", code)
+			continue
+		}
+		if _, ok := seen[code]; ok {
+			continue
+		}
+		seen[code] = struct{}{}
+		selected = append(selected, code)
+	}
+
+	if len(selected) == 0 {
+		ui.Warn("未选择有效地区，将保持全量节点模式")
+		cfg.Regions.Enabled = false
+		cfg.Regions.Include = []string{}
+		return
+	}
+
+	cfg.Regions.Enabled = true
+	cfg.Regions.Include = selected
+	cfg.Regions.AutoSwitch = true
+	cfg.Regions.Strategy = "latency"
 }
 
 func runInstall(cmd *cobra.Command, args []string) {
@@ -269,6 +332,8 @@ func runInstall(cmd *cobra.Command, args []string) {
 			}
 		}
 
+		promptRegionSelection(reader, cfg)
+
 		// Save config
 		yamlPath := "gateway.yaml"
 		if err := config.Save(cfg, yamlPath); err != nil {
@@ -291,6 +356,9 @@ func runInstall(cmd *cobra.Command, args []string) {
 	fmt.Printf("  %-14s %s\n", "局域网 IP:", ip)
 	fmt.Printf("  %-14s %s\n", "网关地址:", gateway)
 	fmt.Printf("  %-14s %s\n", "mihomo:", binary)
+	if cfg.Regions.Enabled {
+		fmt.Printf("  %-14s %s\n", "地区限制:", strings.Join(cfg.Regions.Include, ", "))
+	}
 	ui.Separator()
 
 	configPath := filepath.Join(dDir, "config.yaml")

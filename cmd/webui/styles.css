@@ -1,0 +1,60 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #f5f7fb;
+  color: #1f2937;
+}
+.container {
+  max-width: 900px;
+  margin: 24px auto;
+  padding: 0 16px 40px;
+}
+h1 { font-size: 24px; margin-bottom: 16px; }
+.card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 14px;
+  border: 1px solid #e5e7eb;
+}
+.card h2 { margin-top: 0; font-size: 18px; }
+label {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+input, select {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+button {
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+button:hover { background: #1d4ed8; }
+#output {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #0b1020;
+  color: #e5e7eb;
+  min-height: 96px;
+  overflow: auto;
+  font-size: 12px;
+}

@@ -22,3 +22,20 @@ ports:
 
 # API 密钥 (留空则无需认证)
 api_secret: ""
+
+# 本地个性化配置页面监听地址
+ui:
+  listen: "127.0.0.1:9091"
+
+# 地区限制（可选）
+regions:
+  enabled: false
+  include: ["HK", "JP"]
+  auto_switch: true
+  strategy: latency
+  mapping:
+    HK: ["香港", "HK", "Hong Kong"]
+    JP: ["日本", "JP", "Tokyo", "Osaka"]
+    SG: ["新加坡", "SG", "Singapore"]
+    US: ["美国", "US", "United States", "Los Angeles", "San Jose", "Seattle"]
+    TW: ["台湾", "TW", "Taiwan", "Taipei"]

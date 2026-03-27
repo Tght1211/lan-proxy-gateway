@@ -76,7 +76,7 @@ proxy-groups:
     type: url-test
     use:
       - {{SUBSCRIPTION_NAME}}
-    url: http://www.gstatic.com/generate_204
+{{REGION_FILTER_BLOCK}}    url: http://www.gstatic.com/generate_204
     interval: 120
     tolerance: 100
 
@@ -84,7 +84,7 @@ proxy-groups:
     type: fallback
     use:
       - {{SUBSCRIPTION_NAME}}
-    url: http://www.gstatic.com/generate_204
+{{REGION_FILTER_BLOCK}}    url: http://www.gstatic.com/generate_204
     interval: 120
 
 # ============================================
@@ -338,7 +338,8 @@ rules:
   - IP-CIDR,224.0.0.0/4,DIRECT
   - IP-CIDR6,fe80::/10,DIRECT
 
-  # --- GeoIP 中国直连 ---
+  # --- GeoSite / GeoIP 中国直连（优先命中国内规则） ---
+  - GEOSITE,CN,DIRECT
   - DOMAIN-SUFFIX,cn,DIRECT
   - DOMAIN-KEYWORD,-cn,DIRECT
   - GEOIP,CN,DIRECT

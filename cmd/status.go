@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -98,6 +99,12 @@ func runStatus(cmd *cobra.Command, args []string) {
 		fmt.Printf("  下载总量:    %s\n", ui.FormatBytes(conn.DownloadTotal))
 	}
 
+	if cfg.Regions.Enabled {
+		fmt.Printf("  地区限制:    %s\n", strings.Join(cfg.Regions.Include, ", "))
+	} else {
+		fmt.Printf("  地区限制:    %s\n", color.New(color.Faint).Sprint("未启用"))
+	}
+
 	// Device setup info
 	fmt.Println()
 	ui.Separator()
@@ -106,6 +113,7 @@ func runStatus(cmd *cobra.Command, args []string) {
 	fmt.Printf("  网关 (Gateway):  %s\n", color.CyanString(ip))
 	fmt.Printf("  DNS:             %s\n", color.CyanString(ip))
 	fmt.Printf("  API 面板:        http://%s:%d/ui\n", ip, apiPort)
+	fmt.Printf("  本地配置页:      http://%s\n", cfg.UI.Listen)
 	fmt.Println()
 }
 
