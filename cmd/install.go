@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -25,7 +24,6 @@ var installCmd = &cobra.Command{
 	Run:   runInstall,
 }
 
-// downloadMihomo automatically downloads and installs mihomo
 func downloadMihomo() error {
 	ui.Info("正在自动下载 mihomo...")
 
@@ -45,72 +43,18 @@ func downloadMihomo() error {
 	default:
 		return fmt.Errorf("不支持的平台: %s/%s", goos, goarch)
 	}
-	_ = goos
 
-	// Get latest version (hardcoded to avoid dependency)
-	version := "v1.19.8"
-	url := fmt.Sprintf("https://github.com/MetaCubeX/mihomo/releases/download/%s/mihomo-%s", version, mihomoArch)
-
-	// Try mirrors in order
-	mirrors := []string{
-		url,
-		"https://ghp.ci/" + url,
-		"https://hub.gitmirror.com/" + url,
-		"https://github.moeyy.xyz/" + url,
-	}
-
-	// Find binary installation path
 	p := platform.New()
 	binPath := p.GetBinaryPath()
-
-	// Create directory if needed
-	if err := os.MkdirAll(filepath.Dir(binPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(binPath), 0o755); err != nil {
 		return fmt.Errorf("创建目录失败: %v", err)
 	}
 
-	// Try downloading from each URL
-	for i, mirrorURL := range mirrors {
-		ui.Info("尝试从 %s 下载...", getDomain(mirrorURL))
-
-		// Download with curl
-		cmd := exec.Command("curl", "-fsSL", "-o", binPath, mirrorURL)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		err := cmd.Run()
-		if err == nil {
-			// Make executable
-			if err := os.Chmod(binPath, 0755); err != nil {
-				return fmt.Errorf("设置权限失败: %v", err)
-			}
-
-			ui.Success("mihomo 下载成功")
-			return nil
-		}
-
-		// Remove partially downloaded file
-		os.Remove(binPath)
-
-		if i == len(mirrors)-1 {
-			return fmt.Errorf("所有镜像都下载失败")
-		}
+	if err := mihomo.DownloadMihomoBinary("v1.19.8", mihomoArch, binPath); err != nil {
+		return err
 	}
-
-	return fmt.Errorf("mihomo 下载失败")
-}
-
-// Extract domain from URL for display
-func getDomain(url string) string {
-	if strings.Contains(url, "ghp.ci") {
-		return "ghp.ci"
-	} else if strings.Contains(url, "gitmirror.com") {
-		return "gitmirror"
-	} else if strings.Contains(url, "moeyy.xyz") {
-		return "moeyy.xyz"
-	} else if strings.Contains(url, "github.com") {
-		return "GitHub"
-	}
-	return "未知"
+	ui.Success("mihomo 下载成功")
+	return nil
 }
 
 func init() {
@@ -186,11 +130,9 @@ func runInstall(cmd *cobra.Command, args []string) {
 
 	reader := bufio.NewReader(os.Stdin)
 
-	// Step 1: System check
 	ui.Step(1, 6, "检查系统环境...")
 	fmt.Printf("  系统: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 
-	// Step 2: Check and install mihomo
 	ui.Step(2, 6, "检查 mihomo...")
 	p := platform.New()
 
@@ -200,7 +142,7 @@ func runInstall(cmd *cobra.Command, args []string) {
 		err = downloadMihomo()
 		if err != nil {
 			ui.Error("mihomo 下载失败: %v", err)
-			ui.Error("请手动安装 mihomo: https://github.com/MetaCubeX/mihomo/releases")
+			ui.Error("可尝试: GITHUB_MIRROR=https://mirror.ghproxy.com/ gateway install")
 			os.Exit(1)
 		}
 		binary, err = p.FindBinary()
@@ -211,7 +153,6 @@ func runInstall(cmd *cobra.Command, args []string) {
 	}
 	ui.Success("mihomo 已就绪: %s", binary)
 
-	// Step 3: Download GeoIP/GeoSite
 	ui.Step(3, 6, "下载 GeoIP/GeoSite 数据文件...")
 	dDir := ensureDataDir()
 
@@ -220,7 +161,7 @@ func runInstall(cmd *cobra.Command, args []string) {
 		name := filepath.Base(src.Dest)
 		downloaded, err := mihomo.DownloadFile(src.URL, src.Dest)
 		if err != nil {
-			ui.Warn("%s 下载失败，尝试镜像源...", name)
+			ui.Warn("%s 下载失败: %v", name, err)
 			downloaded, err = mihomo.DownloadFile(src.Mirror, src.Dest)
 			if err != nil {
 				ui.Warn("%s 下载失败，mihomo 启动时会自动下载", name)
@@ -234,14 +175,12 @@ func runInstall(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// Step 4: Configure proxy source
 	ui.Step(4, 6, "配置代理来源...")
 
 	cfgPath := resolveConfigPath()
 	cfg := loadConfigOrDefault()
 	needConfig := true
 
-	// Check existing config
 	if _, err := os.Stat(cfgPath); err == nil && cfgPath != ".secret" {
 		if cfg.ProxySource == "url" && cfg.SubscriptionURL != "" {
 			ui.Info("已有配置 [订阅链接模式]")
@@ -278,7 +217,6 @@ func runInstall(cmd *cobra.Command, args []string) {
 
 		switch choice {
 		case "2":
-			// File mode
 			fmt.Println()
 			color.New(color.Bold).Println("请输入配置文件的路径:")
 			fmt.Printf("  %s\n", color.New(color.Faint).Sprint("（支持包含 proxies 段落的 Clash/mihomo YAML 配置）"))
@@ -307,7 +245,6 @@ func runInstall(cmd *cobra.Command, args []string) {
 			}
 
 		default:
-			// URL mode
 			fmt.Println()
 			color.New(color.Bold).Println("请输入你的代理订阅链接:")
 			fmt.Printf("  %s\n", color.New(color.Faint).Sprint("（通常是机场提供的 Clash/mihomo 订阅 URL）"))
@@ -334,7 +271,6 @@ func runInstall(cmd *cobra.Command, args []string) {
 
 		promptRegionSelection(reader, cfg)
 
-		// Save config
 		yamlPath := "gateway.yaml"
 		if err := config.Save(cfg, yamlPath); err != nil {
 			ui.Error("保存配置失败: %s", err)
@@ -343,7 +279,6 @@ func runInstall(cmd *cobra.Command, args []string) {
 		ui.Success("代理配置已保存到 %s", yamlPath)
 	}
 
-	// Step 5: Detect network & generate config
 	ui.Step(5, 6, "检测网络并生成配置...")
 
 	iface, _ := p.DetectDefaultInterface()
@@ -368,7 +303,6 @@ func runInstall(cmd *cobra.Command, args []string) {
 	}
 	ui.Success("配置文件已生成: %s", configPath)
 
-	// Step 6: Verify
 	ui.Step(6, 6, "安装验证...")
 
 	allOK := true
@@ -390,8 +324,9 @@ func runInstall(cmd *cobra.Command, args []string) {
 		color.New(color.FgGreen, color.Bold).Println("  安装完成！")
 		ui.Separator()
 		fmt.Println()
+		fmt.Println("  校验版本:  gateway version")
+		fmt.Println("  安装向导:  gateway install")
 		fmt.Println("  启动网关:  sudo gateway start")
-		fmt.Println("  停止网关:  sudo gateway stop")
 		fmt.Println("  查看状态:  gateway status")
 		fmt.Println()
 		fmt.Printf("  %s\n", color.New(color.Faint).Sprint("启动后，将其他设备的网关和 DNS 设为本机 IP 即可"))

@@ -39,8 +39,22 @@ func init() {
 	rootCmd.AddCommand(updateCmd)
 }
 
+type releaseAsset struct {
+	Name string `json:"name"`
+}
+
 type releaseInfo struct {
-	TagName string `json:"tag_name"`
+	TagName string         `json:"tag_name"`
+	Assets  []releaseAsset `json:"assets"`
+}
+
+func (r releaseInfo) HasAsset(name string) bool {
+	for _, a := range r.Assets {
+		if a.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func runUpdate(cmd *cobra.Command, args []string) {
@@ -49,12 +63,13 @@ func runUpdate(cmd *cobra.Command, args []string) {
 	ui.ShowLogo()
 	ui.Step(1, 5, "检查最新版本...")
 
-	latest, err := fetchLatestTag()
+	rel, err := fetchLatestRelease()
 	if err != nil {
 		ui.Error("获取最新版本失败: %s", err)
 		os.Exit(1)
 	}
 
+	latest := rel.TagName
 	current := version
 	ui.Info("当前版本: %s", current)
 	ui.Info("最新版本: %s", latest)
@@ -67,6 +82,11 @@ func runUpdate(cmd *cobra.Command, args []string) {
 	ui.Step(2, 5, "下载新版本...")
 
 	asset := fmt.Sprintf("gateway-%s-%s", runtime.GOOS, runtime.GOARCH)
+	if !rel.HasAsset(asset) {
+		ui.Error("最新版本缺少当前平台资产: %s", asset)
+		ui.Error("请稍后重试，或手动到 Release 页面确认附件")
+		os.Exit(1)
+	}
 	downloadURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repo, latest, asset)
 
 	tmpFile, err := downloadWithFallback(downloadURL)
@@ -78,8 +98,12 @@ func runUpdate(cmd *cobra.Command, args []string) {
 
 	os.Chmod(tmpFile, 0755)
 
-	out, _ := exec.Command(tmpFile, "--version").Output()
+	out, _ := exec.Command(tmpFile, "version").Output()
 	newVer := strings.TrimSpace(string(out))
+	if newVer == "" {
+		out, _ = exec.Command(tmpFile, "--version").Output()
+		newVer = strings.TrimSpace(string(out))
+	}
 	if newVer != "" {
 		ui.Success("下载完成: %s", newVer)
 	} else {
@@ -120,7 +144,26 @@ func runUpdate(cmd *cobra.Command, args []string) {
 	ui.Step(5, 5, "重启网关...")
 	runStop(cmd, args)
 	runStart(cmd, args)
+	ui.Info("可通过 gateway version 确认版本")
 	ui.Info("可通过 gateway ui 打开本地个性化配置页面")
+}
+
+func fetchLatestRelease() (*releaseInfo, error) {
+	url := apiBase + "/releases/latest"
+	body, err := httpGetWithFallback(url)
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+
+	var info releaseInfo
+	if err := json.NewDecoder(body).Decode(&info); err != nil {
+		return nil, fmt.Errorf("解析版本信息失败: %w", err)
+	}
+	if info.TagName == "" {
+		return nil, fmt.Errorf("未找到版本号")
+	}
+	return &info, nil
 }
 
 func ensureUpdatedConfig() error {
@@ -144,24 +187,6 @@ func ensureUpdatedConfig() error {
 		return err
 	}
 	return config.Save(cfg, path)
-}
-
-func fetchLatestTag() (string, error) {
-	url := apiBase + "/releases/latest"
-	body, err := httpGetWithFallback(url)
-	if err != nil {
-		return "", err
-	}
-	defer body.Close()
-
-	var info releaseInfo
-	if err := json.NewDecoder(body).Decode(&info); err != nil {
-		return "", fmt.Errorf("解析版本信息失败: %w", err)
-	}
-	if info.TagName == "" {
-		return "", fmt.Errorf("未找到版本号")
-	}
-	return info.TagName, nil
 }
 
 func httpGetWithFallback(url string) (io.ReadCloser, error) {

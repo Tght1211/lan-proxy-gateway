@@ -22,6 +22,14 @@ var rootCmd = &cobra.Command{
 设备（Switch、Apple TV、PS5 等）只需将网关和 DNS 指向本机即可科学上网。`,
 }
 
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "显示当前版本",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Println(version)
+	},
+}
+
 func SetVersion(v string) {
 	version = v
 	rootCmd.Version = v
@@ -37,4 +45,5 @@ func Execute() {
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "配置文件路径 (默认: ./gateway.yaml)")
 	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", "", "数据目录路径 (默认: ./data)")
+	rootCmd.AddCommand(versionCmd)
 }

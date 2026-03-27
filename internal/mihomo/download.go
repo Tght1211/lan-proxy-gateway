@@ -10,13 +10,20 @@ import (
 	"time"
 )
 
-type DownloadSource struct {
-	URL     string
-	Mirror  string
-	Dest    string
+var DownloadMirrors = []string{
+	"",
+	"https://hub.gitmirror.com/",
+	"https://mirror.ghproxy.com/",
+	"https://github.moeyy.xyz/",
+	"https://gh.ddlc.top/",
 }
 
-// GeoDataSources returns the download sources for GeoIP/GeoSite data files.
+type DownloadSource struct {
+	URL    string
+	Mirror string
+	Dest   string
+}
+
 func GeoDataSources(dataDir string) []DownloadSource {
 	base := "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest"
 	mirror := func(url string) string {
@@ -36,36 +43,55 @@ func GeoDataSources(dataDir string) []DownloadSource {
 	return sources
 }
 
-// DownloadFile downloads a URL to a local path. Skips if the file already exists.
-// Returns true if actually downloaded, false if skipped.
 func DownloadFile(url, dest string) (bool, error) {
 	if _, err := os.Stat(dest); err == nil {
-		return false, nil // already exists
+		return false, nil
 	}
 
-	// Ensure parent directory
-	os.MkdirAll(filepath.Dir(dest), 0755)
+	os.MkdirAll(filepath.Dir(dest), 0o755)
 
-	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Get(url)
+	var lastErr error
+	for _, prefix := range DownloadMirrors {
+		targetURL := url
+		if prefix != "" {
+			targetURL = prefix + url
+		}
+		client := &http.Client{Timeout: 90 * time.Second}
+		resp, err := client.Get(targetURL)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("%s returned HTTP %d", targetURL, resp.StatusCode)
+			resp.Body.Close()
+			continue
+		}
+
+		f, err := os.Create(dest)
+		if err != nil {
+			resp.Body.Close()
+			return false, err
+		}
+		_, err = io.Copy(f, resp.Body)
+		resp.Body.Close()
+		f.Close()
+		if err != nil {
+			os.Remove(dest)
+			lastErr = err
+			continue
+		}
+		return true, nil
+	}
+
+	return false, fmt.Errorf("下载失败: %w", lastErr)
+}
+
+func DownloadMihomoBinary(version, arch, dest string) error {
+	url := fmt.Sprintf("https://github.com/MetaCubeX/mihomo/releases/download/%s/mihomo-%s", version, arch)
+	_, err := DownloadFile(url, dest)
 	if err != nil {
-		return false, err
+		return fmt.Errorf("mihomo 下载失败，请检查网络或设置镜像后重试: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	f, err := os.Create(dest)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		os.Remove(dest) // cleanup partial download
-		return false, err
-	}
-	return true, nil
+	return os.Chmod(dest, 0o755)
 }

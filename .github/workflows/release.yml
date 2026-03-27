@@ -18,8 +18,17 @@ jobs:
         with:
           go-version: '1.24'
 
+      - name: Run tests
+        run: go test ./...
+
       - name: Build all platforms
         run: make build-all
+
+      - name: Smoke test binary commands
+        run: |
+          ./dist/gateway-linux-amd64 version
+          ./dist/gateway-linux-amd64 update --help | grep -q "升级到最新版本"
+          ./dist/gateway-linux-amd64 switch --help | grep -q "--region"
 
       - name: Create release
         uses: softprops/action-gh-release@v2
