@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/fatih/color"
@@ -124,11 +125,11 @@ func runInstall(cmd *cobra.Command, args []string) {
 	reader := bufio.NewReader(os.Stdin)
 
 	// Step 1: System check
-	ui.Step(1, 6, "检查系统环境...")
+	ui.Step(1, 7, "检查系统环境...")
 	fmt.Printf("  系统: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 
 	// Step 2: Check and install mihomo
-	ui.Step(2, 6, "检查 mihomo...")
+	ui.Step(2, 7, "检查 mihomo...")
 	p := platform.New()
 
 	binary, err := p.FindBinary()
@@ -149,7 +150,7 @@ func runInstall(cmd *cobra.Command, args []string) {
 	ui.Success("mihomo 已就绪: %s", binary)
 
 	// Step 3: Download GeoIP/GeoSite
-	ui.Step(3, 6, "下载 GeoIP/GeoSite 数据文件...")
+	ui.Step(3, 7, "下载 GeoIP/GeoSite 数据文件...")
 	dDir := ensureDataDir()
 
 	sources := mihomo.GeoDataSources(dDir)
@@ -172,7 +173,7 @@ func runInstall(cmd *cobra.Command, args []string) {
 	}
 
 	// Step 4: Configure proxy source
-	ui.Step(4, 6, "配置代理来源...")
+	ui.Step(4, 7, "配置代理来源...")
 
 	cfgPath := resolveConfigPath()
 	cfg := loadConfigOrDefault()
@@ -278,8 +279,17 @@ func runInstall(cmd *cobra.Command, args []string) {
 		ui.Success("代理配置已保存到 %s", yamlPath)
 	}
 
-	// Step 5: Detect network & generate config
-	ui.Step(5, 6, "检测网络并生成配置...")
+	// Step 5: Configure chain proxy (optional)
+	ui.Step(5, 7, "配置链式代理（可选）...")
+	configureChainProxy(reader, cfg)
+	// Re-save config with chain proxy settings
+	if err := config.Save(cfg, "gateway.yaml"); err != nil {
+		ui.Error("保存配置失败: %s", err)
+		os.Exit(1)
+	}
+
+	// Step 6: Detect network & generate config
+	ui.Step(6, 7, "检测网络并生成配置...")
 
 	iface, _ := p.DetectDefaultInterface()
 	ip, _ := p.DetectInterfaceIP(iface)
@@ -300,8 +310,8 @@ func runInstall(cmd *cobra.Command, args []string) {
 	}
 	ui.Success("配置文件已生成: %s", configPath)
 
-	// Step 6: Verify
-	ui.Step(6, 6, "安装验证...")
+	// Step 7: Verify
+	ui.Step(7, 7, "安装验证...")
 
 	allOK := true
 	checkExists := func(path, label string) {
@@ -332,4 +342,72 @@ func runInstall(cmd *cobra.Command, args []string) {
 		ui.Error("安装未完成，请检查上方错误信息")
 		os.Exit(1)
 	}
+}
+
+func configureChainProxy(reader *bufio.Reader, cfg *config.Config) {
+	// Check existing chain proxy config
+	if cfg.ChainProxy != nil && cfg.ChainProxy.Enabled {
+		ui.Info("已配置链式代理: %s (%s:%d)", cfg.ChainProxy.Name, cfg.ChainProxy.Server, cfg.ChainProxy.Port)
+		fmt.Print("是否重新配置？[y/N] ")
+		answer, _ := reader.ReadString('\n')
+		if strings.TrimSpace(strings.ToLower(answer)) != "y" {
+			return
+		}
+	}
+
+	fmt.Println()
+	color.New(color.Bold).Println("是否启用链式代理（静态住宅 IP）？")
+	fmt.Printf("  %s\n", color.New(color.Faint).Sprint("启用后流量走: 机场节点 → 住宅 IP → 目标网站"))
+	fmt.Println()
+	fmt.Print("启用链式代理？[y/N] ")
+	answer, _ := reader.ReadString('\n')
+	if strings.TrimSpace(strings.ToLower(answer)) != "y" {
+		cfg.ChainProxy = nil
+		ui.Info("链式代理已跳过")
+		return
+	}
+
+	cp := &config.ChainProxyConfig{Enabled: true, UDP: false}
+
+	fmt.Println()
+	fmt.Print("代理类型 [socks5/http] (默认 socks5): ")
+	t, _ := reader.ReadString('\n')
+	t = strings.TrimSpace(t)
+	if t == "http" {
+		cp.Type = "http"
+	} else {
+		cp.Type = "socks5"
+	}
+
+	fmt.Print("服务器地址: ")
+	s, _ := reader.ReadString('\n')
+	cp.Server = strings.TrimSpace(s)
+
+	fmt.Print("端口: ")
+	portStr, _ := reader.ReadString('\n')
+	port, err := strconv.Atoi(strings.TrimSpace(portStr))
+	if err != nil || port <= 0 {
+		ui.Error("端口无效")
+		os.Exit(1)
+	}
+	cp.Port = port
+
+	fmt.Print("用户名（无则回车跳过）: ")
+	u, _ := reader.ReadString('\n')
+	cp.Username = strings.TrimSpace(u)
+
+	fmt.Print("密码（无则回车跳过）: ")
+	pw, _ := reader.ReadString('\n')
+	cp.Password = strings.TrimSpace(pw)
+
+	fmt.Print("节点名称 (默认 residential-ip): ")
+	name, _ := reader.ReadString('\n')
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "residential-ip"
+	}
+	cp.Name = name
+
+	cfg.ChainProxy = cp
+	ui.Success("链式代理已配置: %s → %s:%d", cp.Name, cp.Server, cp.Port)
 }

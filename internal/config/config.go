@@ -7,12 +7,13 @@ import (
 )
 
 type Config struct {
-	ProxySource      string      `yaml:"proxy_source"`
-	SubscriptionURL  string      `yaml:"subscription_url,omitempty"`
-	ProxyConfigFile  string      `yaml:"proxy_config_file,omitempty"`
-	SubscriptionName string      `yaml:"subscription_name"`
-	Ports            PortsConfig `yaml:"ports"`
-	APISecret        string      `yaml:"api_secret,omitempty"`
+	ProxySource      string            `yaml:"proxy_source"`
+	SubscriptionURL  string            `yaml:"subscription_url,omitempty"`
+	ProxyConfigFile  string            `yaml:"proxy_config_file,omitempty"`
+	SubscriptionName string            `yaml:"subscription_name"`
+	Ports            PortsConfig       `yaml:"ports"`
+	APISecret        string            `yaml:"api_secret,omitempty"`
+	ChainProxy       *ChainProxyConfig `yaml:"chain_proxy,omitempty"`
 }
 
 type PortsConfig struct {
@@ -20,6 +21,17 @@ type PortsConfig struct {
 	Redir int `yaml:"redir"`
 	API   int `yaml:"api"`
 	DNS   int `yaml:"dns"`
+}
+
+type ChainProxyConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	Name     string `yaml:"name"`
+	Type     string `yaml:"type"`
+	Server   string `yaml:"server"`
+	Port     int    `yaml:"port"`
+	Username string `yaml:"username,omitempty"`
+	Password string `yaml:"password,omitempty"`
+	UDP      bool   `yaml:"udp"`
 }
 
 func DefaultConfig() *Config {

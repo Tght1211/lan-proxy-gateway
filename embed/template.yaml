@@ -29,6 +29,7 @@ dns:
   ipv6: false
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
+  store-fake-ip: true
   fake-ip-filter:
     - '*.lan'
     - '*.local'
@@ -61,8 +62,14 @@ proxy-providers:
       interval: 120
       url: http://www.gstatic.com/generate_204
 
+# ============================================
+# 代理节点
+# ============================================
+{{CHAIN_PROXY_SECTION}}
+
 # 代理组 - 使用 proxy-providers 中的节点
 proxy-groups:
+{{CHAIN_PROXY_GROUP}}
   - name: Proxy
     type: select
     use:
@@ -96,6 +103,7 @@ proxy-groups:
 # 兜底 → Proxy
 # ============================================
 rules:
+{{CHAIN_PROXY_RULES}}
   # --- Nintendo ---
   - DOMAIN-SUFFIX,nintendo.net,Proxy
   - DOMAIN-SUFFIX,nintendo.com,Proxy

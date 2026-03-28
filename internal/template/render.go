@@ -1,6 +1,7 @@
 package template
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -26,6 +27,12 @@ func RenderTemplate(cfg *config.Config, iface, ip, outputPath string) error {
 		"{{LAN_IP}}":            ip,
 	}
 
+	// 处理链式代理配置
+	proxySection, groupSection, rulesSection := buildChainProxyConfig(cfg)
+	replacements["{{CHAIN_PROXY_SECTION}}"] = proxySection
+	replacements["{{CHAIN_PROXY_GROUP}}"] = groupSection
+	replacements["{{CHAIN_PROXY_RULES}}"] = rulesSection
+
 	for placeholder, value := range replacements {
 		result = strings.ReplaceAll(result, placeholder, value)
 	}
@@ -36,6 +43,55 @@ func RenderTemplate(cfg *config.Config, iface, ip, outputPath string) error {
 	}
 
 	return os.WriteFile(outputPath, []byte(result), 0644)
+}
+
+// buildChainProxyConfig 构建链式代理的配置片段
+func buildChainProxyConfig(cfg *config.Config) (proxySection, groupSection, rulesSection string) {
+	if cfg.ChainProxy == nil || !cfg.ChainProxy.Enabled {
+		proxySection = "proxies: []"
+		groupSection = ""
+		rulesSection = ""
+		return
+	}
+
+	cp := cfg.ChainProxy
+	proxySection = fmt.Sprintf(`proxies:
+  - name: %s
+    type: %s
+    server: %s
+    port: %d`, cp.Name, cp.Type, cp.Server, cp.Port)
+	if cp.Username != "" {
+		proxySection += fmt.Sprintf("\n    username: %s", cp.Username)
+	}
+	if cp.Password != "" {
+		proxySection += fmt.Sprintf("\n    password: %s", cp.Password)
+	}
+	proxySection += fmt.Sprintf("\n    udp: %t", cp.UDP)
+	proxySection += "\n    dialer-proxy: Proxy"
+
+	groupSection = fmt.Sprintf(`  - name: AI + Foreign
+    type: select
+    proxies:
+      - %s
+      - Proxy
+      - DIRECT
+
+`, cp.Name)
+
+	rulesSection = `  # --- AI + Foreign（链式代理 → 住宅 IP）---
+  - DOMAIN-SUFFIX,anthropic.com,AI + Foreign
+  - DOMAIN-SUFFIX,claude.ai,AI + Foreign
+  - DOMAIN-SUFFIX,claudeusercontent.com,AI + Foreign
+  - DOMAIN-SUFFIX,openai.com,AI + Foreign
+  - DOMAIN-SUFFIX,chatgpt.com,AI + Foreign
+  - DOMAIN-SUFFIX,oaiusercontent.com,AI + Foreign
+  - DOMAIN-SUFFIX,oaistatic.com,AI + Foreign
+  - DOMAIN,gemini.google.com,AI + Foreign
+  - DOMAIN,generativelanguage.googleapis.com,AI + Foreign
+  - DOMAIN,ping0.cc,AI + Foreign
+  - DOMAIN,ipinfo.io,AI + Foreign
+`
+	return
 }
 
 // patchForFileMode modifies the generated config to use local file
