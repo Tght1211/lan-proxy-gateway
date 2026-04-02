@@ -88,7 +88,11 @@ func runStart(cmd *cobra.Command, args []string) {
 	p.DisableFirewallInterference()
 
 	// Step 4: Start mihomo
-	ui.Step(4, 5, "启动 mihomo (TUN 模式)...")
+	if cfg.TunEnabled {
+		ui.Step(4, 5, "启动 mihomo (TUN 模式)...")
+	} else {
+		ui.Step(4, 5, "启动 mihomo...")
+	}
 
 	logFile := "/tmp/lan-proxy-gateway.log"
 	pid, err := p.StartProcess(binary, dDir, logFile)
@@ -109,13 +113,18 @@ func runStart(cmd *cobra.Command, args []string) {
 	}
 	ui.Success("mihomo 启动成功 (PID: %d)", pid)
 
-	// Step 5: Verify TUN
-	ui.Step(5, 5, "验证 TUN 接口...")
-	tunIf, err := p.DetectTUNInterface()
-	if err == nil && tunIf != "" {
-		ui.Success("TUN 接口已创建: %s", tunIf)
+	// Step 5: Verify TUN (only when TUN mode is enabled)
+	if cfg.TunEnabled {
+		ui.Step(5, 5, "验证 TUN 接口...")
+		tunIf, err := p.DetectTUNInterface()
+		if err == nil && tunIf != "" {
+			ui.Success("TUN 接口已创建: %s", tunIf)
+		} else {
+			ui.Warn("TUN 接口未检测到（可能还在创建中）")
+		}
 	} else {
-		ui.Warn("TUN 接口未检测到（可能还在创建中）")
+		ui.Step(5, 5, "验证服务...")
+		ui.Success("代理服务运行正常（规则模式，无 TUN）")
 	}
 
 	// Print connection info
