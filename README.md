@@ -177,6 +177,8 @@ sudo gateway health          # 健康检查，异常时自动修复
 gateway switch               # 查看当前代理来源
 gateway switch url           # 切换到订阅链接模式
 gateway switch file /path    # 切换到配置文件模式
+gateway tun on               # 开启 TUN 透明代理模式（需重启生效）
+gateway tun off              # 关闭 TUN 模式（默认）
 sudo gateway service install # 开机自启动 + 定时健康检查
 ```
 
@@ -259,6 +261,7 @@ ports:
   api: 9090
   dns: 53
 api_secret: ""
+tun_enabled: false                    # TUN 透明代理模式，用 gateway tun on/off 控制
 # script_path: /etc/gateway/script.js  # 扩展脚本（可选，见下方说明）
 ```
 

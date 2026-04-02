@@ -12,9 +12,8 @@ external-controller: 0.0.0.0:{{API_PORT}}
 external-ui: ui
 ipv6: false
 
-# TUN 模式 - 默认关闭，可在扩展脚本中通过 config.tun = { enable: true, ... } 开启
-tun:
-  enable: false
+# TUN 模式（gateway tun on/off 控制，默认关闭）
+{{TUN_CONFIG}}
 
 tcp-concurrent: true
 

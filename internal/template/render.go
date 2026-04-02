@@ -16,6 +16,11 @@ import (
 func RenderTemplate(cfg *config.Config, iface, ip, outputPath string) error {
 	result := embed.TemplateContent
 
+	tunConfig := "tun:\n  enable: false"
+	if cfg.TunEnabled {
+		tunConfig = "tun:\n  enable: true\n  stack: mixed\n  auto-route: true\n  auto-detect-interface: true\n  mtu: 1500"
+	}
+
 	replacements := map[string]string{
 		"{{MIXED_PORT}}":        strconv.Itoa(cfg.Ports.Mixed),
 		"{{REDIR_PORT}}":        strconv.Itoa(cfg.Ports.Redir),
@@ -26,6 +31,7 @@ func RenderTemplate(cfg *config.Config, iface, ip, outputPath string) error {
 		"{{SUBSCRIPTION_NAME}}": cfg.SubscriptionName,
 		"{{LAN_INTERFACE}}":     iface,
 		"{{LAN_IP}}":            ip,
+		"{{TUN_CONFIG}}":        tunConfig,
 	}
 
 	for placeholder, value := range replacements {

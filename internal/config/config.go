@@ -14,6 +14,7 @@ type Config struct {
 	Ports            PortsConfig `yaml:"ports"`
 	APISecret        string      `yaml:"api_secret,omitempty"`
 	ScriptPath       string      `yaml:"script_path,omitempty"`
+	TunEnabled       bool        `yaml:"tun_enabled,omitempty"`
 }
 
 type PortsConfig struct {
