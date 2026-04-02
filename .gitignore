@@ -2,6 +2,7 @@
 .secret
 .secret.bak
 gateway.yaml
+script.js
 
 # 运行时生成的配置（包含订阅信息）
 data/

@@ -13,6 +13,7 @@ type Config struct {
 	SubscriptionName string      `yaml:"subscription_name"`
 	Ports            PortsConfig `yaml:"ports"`
 	APISecret        string      `yaml:"api_secret,omitempty"`
+	ScriptPath       string      `yaml:"script_path,omitempty"`
 }
 
 type PortsConfig struct {

@@ -259,9 +259,87 @@ ports:
   api: 9090
   dns: 53
 api_secret: ""
+# script_path: /etc/gateway/script.js  # 扩展脚本（可选，见下方说明）
 ```
 
 > 从旧版 `.secret` 格式迁移？运行 `gateway install` 会自动检测并迁移。
+
+## 扩展脚本（进阶功能）
+
+如果你的机场订阅无法满足特殊需求，可以通过扩展脚本对生成的配置做二次加工。
+
+**典型场景举例：**
+- 订阅里没有住宅 IP / 静态 IP 节点，但你另外购买了住宅代理，想让 AI 网站（Claude、ChatGPT）走住宅 IP
+- 需要把某个公司内网域名强制直连，绕过代理
+- 订阅的分流规则不满意，想在最前面插入自定义规则
+
+### 脚本格式
+
+脚本格式与 **Clash Verge Rev 扩展脚本**完全兼容，是一个包含 `main` 函数的 JS 文件：
+
+```js
+// 脚本接收当前生成的 mihomo 配置（已解析为 JS 对象）
+// 修改后 return 回去，网关会用你修改后的配置启动
+function main(config) {
+  // 在所有规则最前面插入一条直连规则
+  config.rules = [
+    "DOMAIN-SUFFIX,example.com,DIRECT",
+    ...config.rules
+  ];
+  return config;
+}
+```
+
+### 如何启用
+
+**第一步：创建你的脚本文件**
+
+项目根目录有一个现成的示例脚本 `script.js`，可以直接修改使用。它的功能是：添加一个住宅代理节点，让 Claude、ChatGPT、Cursor 等 AI 服务走住宅 IP。
+
+把 `script.js` 复制到你想存放的位置（比如 `/etc/gateway/script.js`），然后用文本编辑器打开，修改顶部的用户配置区：
+
+```js
+const PROXY_SERVER   = "你的住宅代理IP";   // 修改为你的住宅代理 IP
+const PROXY_PORT     = 443;                 // 修改为你的端口
+const PROXY_USERNAME = "你的用户名";        // 修改为你的用户名
+const PROXY_PASSWORD = "你的密码";          // 修改为你的密码
+const PROXY_TYPE     = "socks5";            // 代理协议，通常是 socks5 或 http
+const AIRPORT_GROUP  = "你的机场分组名";    // 机场订阅中的代理组名称，如 "自动选择"
+```
+
+**第二步：在 `gateway.yaml` 中指定脚本路径**
+
+用文本编辑器打开 `gateway.yaml`，在文件末尾加一行：
+
+```yaml
+script_path: /etc/gateway/script.js
+```
+
+路径填你第一步保存脚本的位置。
+
+**第三步：重新生成配置并重启**
+
+```bash
+sudo gateway start
+```
+
+启动时会自动执行脚本，生效后在 Web 面板（`http://网关IP:9090/ui`）里能看到脚本注入的代理节点和规则。
+
+**第四步：验证脚本是否生效**
+
+```bash
+# 查看生成的配置文件，确认脚本的改动已经写入
+cat ~/.config/gateway/data/config.yaml | grep -A5 "AI Only"
+```
+
+如果看到脚本中定义的代理组，说明生效了。
+
+### 注意事项
+
+- 脚本每次执行 `gateway start` 或 `gateway switch` 时都会自动重新运行
+- 脚本有语法错误时，网关会停止启动并显示错误信息，检查脚本后重试
+- 不需要扩展脚本时，删除 `gateway.yaml` 中的 `script_path` 那一行即可
+- 脚本里不要写 `require()`，只支持纯 JavaScript 逻辑（ES6+ 语法均支持）
 
 ## 隐私安全
 
@@ -307,11 +385,13 @@ lan-proxy-gateway/
 │   ├── platform/                 # 跨平台抽象 (darwin/linux/windows)
 │   ├── config/                   # 配置管理 + .secret 迁移
 │   ├── mihomo/                   # API 客户端 + GeoIP 下载
-│   ├── template/                 # 模板渲染
+│   ├── template/                 # 模板渲染（含脚本应用）
+│   ├── script/                   # JS 扩展脚本执行引擎
 │   ├── proxy/                    # 代理节点提取
 │   └── ui/                       # 终端彩色输出
 ├── embed/template.yaml           # mihomo 配置模板 (go:embed)
 ├── gateway.example.yaml          # 配置文件示例
+├── script.js                     # 扩展脚本示例（住宅代理 + AI 分流）
 ├── Makefile                      # 构建脚本
 └── docs/                         # 设备设置指南
 ```
@@ -341,6 +421,15 @@ lan-proxy-gateway/
 
 **Q: 长时间运行会不稳定吗？**
 > 安装服务后（`sudo gateway service install`），系统会在崩溃时自动重启，并在每天 4:00 和 12:00 自动执行健康检查。也可以随时手动 `sudo gateway health` 检查。
+
+**Q: 扩展脚本是什么，我需要它吗？**
+> 不一定需要。如果你的机场订阅本身能满足需求，不配置脚本也能正常使用。脚本是为有特殊需求的用户准备的，比如：另购了住宅代理想让 AI 服务单独走住宅 IP、需要把公司内网域名强制直连等场景。
+
+**Q: 脚本写错了怎么办，网关起不来了？**
+> 删掉 `gateway.yaml` 里的 `script_path: ...` 那一行，然后重新运行 `sudo gateway start`，网关就能正常启动了。修好脚本后再把那行加回来。
+
+**Q: 扩展脚本安全吗？**
+> 脚本在本地执行，只能读取和修改 mihomo 配置数据，不能访问网络或文件系统。用别人提供的脚本前，建议自己看一下代码内容。
 
 **Q: 和软路由比有什么优缺点？**
 > | | LAN Proxy Gateway | 软路由 |

@@ -22,3 +22,12 @@ ports:
 
 # API 密钥 (留空则无需认证)
 api_secret: ""
+
+# 扩展脚本路径（可选）
+# 兼容 Clash Verge Rev 脚本格式，在每次生成配置后自动执行
+# 脚本须导出 function main(config) { ...; return config; }
+# 项目根目录的 script.js 是一个现成的示例（住宅代理 + AI 分流）
+# 使用步骤：
+#   1. 复制 script.js 到安全位置，修改其中的代理参数
+#   2. 将下面这行取消注释并填写你的脚本路径
+# script_path: /etc/gateway/script.js

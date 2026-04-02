@@ -1,12 +1,14 @@
 package template
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
 
 	embed "github.com/tght/lan-proxy-gateway/embed"
 	"github.com/tght/lan-proxy-gateway/internal/config"
+	"github.com/tght/lan-proxy-gateway/internal/script"
 )
 
 // RenderTemplate replaces {{VARIABLE}} placeholders with actual values
@@ -35,7 +37,18 @@ func RenderTemplate(cfg *config.Config, iface, ip, outputPath string) error {
 		result = patchForFileMode(result)
 	}
 
-	return os.WriteFile(outputPath, []byte(result), 0644)
+	output := []byte(result)
+
+	// Apply extension script if configured (Clash Verge Rev compatible format)
+	if cfg.ScriptPath != "" {
+		modified, err := script.Apply(cfg.ScriptPath, output)
+		if err != nil {
+			return fmt.Errorf("扩展脚本执行失败: %w", err)
+		}
+		output = modified
+	}
+
+	return os.WriteFile(outputPath, output, 0644)
 }
 
 // patchForFileMode modifies the generated config to use local file
