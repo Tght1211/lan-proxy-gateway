@@ -12,13 +12,9 @@ external-controller: 0.0.0.0:{{API_PORT}}
 external-ui: ui
 ipv6: false
 
-# TUN 模式 - 透明代理核心
+# TUN 模式 - 默认关闭，可在扩展脚本中通过 config.tun = { enable: true, ... } 开启
 tun:
-  enable: true
-  stack: mixed
-  auto-route: true
-  auto-detect-interface: true
-  mtu: 1500
+  enable: false
 
 tcp-concurrent: true
 
