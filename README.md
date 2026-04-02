@@ -68,11 +68,17 @@ graph TD
 
 ### 3. 运行中控制台
 
-`gateway start` 成功后直接进入 TUI 控制台，支持：
+默认执行 `gateway start` 会进入运行中工作台，支持：
 
-- `/status` `/config` `/chains` `/groups` `/logs`
+- tab 分区、方向键选择、回车执行
+- 底部输入框直接执行命令
 - `Ctrl+P` 打开策略组和节点选择器
-- 确认流、日志查看、状态摘要
+
+如果你只想“启动就结束”，可以使用：
+
+```bash
+sudo gateway start --simple
+```
 
 ### 4. 规则系统
 
@@ -148,7 +154,7 @@ gateway install
 sudo gateway start
 ```
 
-启动成功后终端会直接显示：
+默认模式下，启动成功后会进入运行中工作台，终端会显示：
 
 - 当前读取的配置文件路径
 - 局域网共享入口 IP
@@ -157,6 +163,14 @@ sudo gateway start
 - 运行中 TUI 控制台
 
 这一步里最重要的是记住你的局域网 IP。
+
+如果你更喜欢传统的简洁输出：
+
+```bash
+sudo gateway start --simple
+```
+
+它会打印启动摘要后直接返回终端，不进入 TUI。
 
 ### 第 4 步：让其他设备接入
 
@@ -193,6 +207,7 @@ gateway status
 | `gateway install` | 初始化向导 |
 | `gateway config` | 交互式配置中心 |
 | `sudo gateway start` | 启动网关并进入运行中控制台 |
+| `sudo gateway start --simple` | 用简洁模式启动：打印摘要后直接返回 |
 | `gateway status` | 查看运行状态和出口网络 |
 | `gateway chains` | 链式代理向导 |
 | `gateway switch` | 切换代理来源和扩展模式 |

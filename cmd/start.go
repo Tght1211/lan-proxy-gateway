@@ -25,8 +25,11 @@ var startCmd = &cobra.Command{
 	Run:   runStart,
 }
 
+var startSimple bool
+
 func init() {
 	rootCmd.AddCommand(startCmd)
+	startCmd.Flags().BoolVar(&startSimple, "simple", false, "使用简洁启动模式：打印摘要后直接返回，不进入 TUI")
 }
 
 func runStart(cmd *cobra.Command, args []string) {
@@ -132,7 +135,7 @@ func runStart(cmd *cobra.Command, args []string) {
 		ui.Success("代理服务运行正常（规则模式，无 TUN）")
 	}
 
-	if isInteractiveTerminal() {
+	if isInteractiveTerminal() && !startSimple {
 		for {
 			action := runRuntimeConsole(logFile, ip, iface, dDir)
 			switch action {
@@ -153,6 +156,10 @@ func runStart(cmd *cobra.Command, args []string) {
 		}
 	} else {
 		printCompactStartSummary(cfg, dDir, ip, iface)
+		if startSimple && isInteractiveTerminal() {
+			fmt.Println("  已使用简洁启动模式；如需运行中工作台，请去掉 --simple")
+			fmt.Println()
+		}
 	}
 }
 

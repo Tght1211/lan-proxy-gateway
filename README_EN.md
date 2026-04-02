@@ -68,11 +68,17 @@ Useful for:
 
 ### 3. Runtime console
 
-After `gateway start`, the app enters a TUI console with:
+By default, `gateway start` opens the runtime workspace:
 
-- `/status` `/config` `/chains` `/groups` `/logs`
+- tabs, arrow-key navigation, and Enter-to-run actions
+- a command bar at the bottom for direct commands
 - `Ctrl+P` for proxy group and node switching
-- confirmation flow, logs, and runtime summaries
+
+If you want the old lightweight flow, use:
+
+```bash
+sudo gateway start --simple
+```
 
 ### 4. Rule system
 
@@ -148,7 +154,7 @@ If you just want the fastest path, only fill these:
 sudo gateway start
 ```
 
-After startup, the terminal will show:
+By default, startup enters the runtime workspace and shows:
 
 - the config file path in use
 - your LAN gateway IP
@@ -157,6 +163,14 @@ After startup, the terminal will show:
 - the runtime TUI console
 
 The most important thing here is your LAN IP.
+
+If you prefer a simple one-shot startup:
+
+```bash
+sudo gateway start --simple
+```
+
+It prints the startup summary and returns to the shell without entering the TUI.
 
 ### Step 4: Connect another device
 
@@ -193,6 +207,7 @@ You will see:
 | `gateway install` | Initial setup wizard |
 | `gateway config` | Interactive config center |
 | `sudo gateway start` | Start gateway and open runtime TUI |
+| `sudo gateway start --simple` | Start in simple mode and return after printing the summary |
 | `gateway status` | Show runtime and egress status |
 | `gateway chains` | Chains / residential proxy wizard |
 | `gateway switch` | Switch proxy source and extension mode |
