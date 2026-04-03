@@ -26,13 +26,25 @@ var startCmd = &cobra.Command{
 }
 
 var startSimple bool
+var startTUI bool
 
 func init() {
 	rootCmd.AddCommand(startCmd)
-	startCmd.Flags().BoolVar(&startSimple, "simple", false, "使用纯命令模式：不进入 TUI，使用兼容性更好的命令交互")
+	startCmd.Flags().BoolVar(&startSimple, "simple", false, "使用纯命令模式：默认模式，兼容性更好的命令交互")
+	startCmd.Flags().BoolVar(&startTUI, "tui", false, "使用运行中 TUI 工作台")
 }
 
 func runStart(cmd *cobra.Command, args []string) {
+	simpleMode, err := resolveConsoleSimpleMode(cmd, true, startSimple, startTUI)
+	if err != nil {
+		ui.Error("%s", err)
+		os.Exit(1)
+	}
+
+	runStartWithMode(simpleMode, cmd, args)
+}
+
+func runStartWithMode(simpleMode bool, cmd *cobra.Command, args []string) {
 	checkRoot()
 
 	ui.ShowLogo()
@@ -136,8 +148,8 @@ func runStart(cmd *cobra.Command, args []string) {
 	}
 
 	if isInteractiveTerminal() {
-		runInteractiveConsoleLoop(startSimple, logFile, ip, iface, dDir, func() {
-			runStart(cmd, args)
+		runInteractiveConsoleLoop(simpleMode, logFile, ip, iface, dDir, func() {
+			runStartWithMode(simpleMode, cmd, args)
 		})
 		return
 	} else {
@@ -246,7 +258,7 @@ func runSimpleRuntimeConsole(logFile, ip, iface, dDir string) consoleAction {
 			fmt.Println("  logs          查看最近日志")
 			fmt.Println("  guide         查看功能导航")
 			fmt.Println("  update        查看升级提示")
-			fmt.Println("  tui           切换进入默认 TUI")
+			fmt.Println("  tui           切换进入 TUI 工作台")
 			fmt.Println("  restart       重启网关")
 			fmt.Println("  stop          停止网关")
 			fmt.Println("  exit          退出纯命令模式")
@@ -289,7 +301,7 @@ func runSimpleRuntimeConsole(logFile, ip, iface, dDir string) consoleAction {
 			}
 			fmt.Println()
 		case "tui", "console":
-			fmt.Println("  正在切换到默认 TUI...")
+			fmt.Println("  正在切换到 TUI 工作台...")
 			fmt.Println()
 			return consoleActionOpenTUI
 		case "restart":

@@ -68,7 +68,24 @@ Useful for:
 
 ### 3. Runtime console
 
-By default, `gateway start` opens the runtime workspace:
+By default, `gateway start` opens the plain command console. It is the more compatible mode, and it is the safer default while the runtime TUI is still being refined.
+
+Common plain-command actions include:
+
+- `proxy source url`
+- `tun on`
+- `bypass off`
+- `rule ads off`
+- `extension chains`
+- `chain mode global`
+
+If you want the full runtime TUI workbench, use:
+
+```bash
+sudo gateway start --tui
+```
+
+The TUI workspace gives you:
 
 - tabs, arrow-key navigation, and Enter-to-run actions
 - the right side clearly labels each page as `info / action / confirm`
@@ -77,13 +94,7 @@ By default, `gateway start` opens the runtime workspace:
 - `Esc` back to the top tabs, `←/→` to switch sections, and `↓` back into the action list
 - `R` refreshes the current page and gives a short visual refresh cue
 
-If you prefer a more compatible low-overhead mode, use:
-
-```bash
-sudo gateway start --simple
-```
-
-This opens a plain command console instead of the TUI.
+If you are already in simple mode, you can also type `tui` to switch into it later.
 
 ### 4. Rule system
 
@@ -172,27 +183,16 @@ Extra notes:
 - `gateway update` now uses a background replacement flow on Windows, so the current `.exe` can be swapped after exit and the gateway is restarted automatically
 - `gateway service install` uses Task Scheduler on Windows instead of pretending the CLI itself is a native `sc.exe` service
 
-By default, startup enters the runtime workspace and shows:
+By default, startup enters the plain command console and shows:
 
 - the config file path in use
 - your LAN gateway IP
 - runtime mode
 - egress summary
-- the runtime TUI console
-- direct workbench entries for common settings
+- the simple-mode command prompt
+- direct commands for common settings
 
-Common controls:
-
-- `Esc` back to the top tabs
-- `←/→` switch sections
-- `↑/↓` choose actions
-- `Enter` opens the current action and moves focus into the right-side content area
-- `/` enter command input
-- `Ctrl+P` open the node workbench
-- `T` test the current node latency inside the node workbench
-- `R` refresh the current page
-
-The workspace now handles these common tasks directly:
+The default workspace now handles these common tasks directly:
 
 - proxy source and subscription info
 - TUN and local bypass
@@ -203,37 +203,28 @@ The workspace now handles these common tasks directly:
 
 The most important thing here is your LAN IP.
 
-If you prefer the plain command mode:
+If you want the runtime TUI workbench:
 
 ```bash
 # macOS / Linux
-sudo gateway start --simple
+sudo gateway start --tui
 
 # Windows (Administrator terminal)
-gateway start --simple
+gateway start --tui
 ```
 
-It skips the TUI and enters a compatibility-friendly command console.
-
-The plain command mode now exposes the same core controls, for example:
-
-- `proxy source url`
-- `tun on`
-- `bypass off`
-- `rule ads off`
-- `extension chains`
-- `chain mode global`
+The TUI provides the `Home / Proxy / Subscription` tabs, node switching, config workbenches, and the Dashboard view. If you still want to spell out the default, `gateway start --simple` is still accepted.
 
 If you leave the console, you can re-enter it at any time:
 
 ```bash
 # macOS / Linux
 sudo gateway console
-sudo gateway console --simple
+sudo gateway console --tui
 
 # Windows (Administrator terminal)
 gateway console
-gateway console --simple
+gateway console --tui
 ```
 
 ### Step 4: Connect another device
@@ -272,10 +263,10 @@ You will see:
 |---|---|
 | `gateway install` | Initial setup wizard |
 | `gateway config` | Interactive config center |
-| `sudo gateway start` | Start gateway and open the default workspace (TUI + command input) |
-| `sudo gateway start --simple` | Start gateway in plain command mode for better compatibility |
-| `sudo gateway console` | Re-enter the default workspace without restarting the gateway |
-| `sudo gateway console --simple` | Re-enter the plain command console without restarting the gateway |
+| `sudo gateway start` | Start gateway and open the default plain command console |
+| `sudo gateway start --tui` | Start gateway and open the runtime TUI workbench |
+| `sudo gateway console` | Re-enter the plain command console without restarting the gateway |
+| `sudo gateway console --tui` | Re-enter the runtime TUI workbench without restarting the gateway |
 | `gateway tun on` | Enable TUN transparent proxy mode |
 | `gateway tun off` | Disable TUN transparent proxy mode |
 | `gateway status` | Show runtime and egress status |

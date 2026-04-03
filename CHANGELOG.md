@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented here.
 
+## v2.2.9 - 2026-04-04
+
+### Changed
+
+- Switched the default interactive startup for `gateway start`, `gateway console`, and `gateway restart` back to the plain command console so day-to-day use no longer drops users into the still-maturing TUI first
+- Added an explicit `--tui` flag on the same commands, while keeping `--simple` as an accepted explicit alias for the new default mode
+- Updated the simple-console help text so switching into the TUI is described as entering the TUI workbench instead of the old "default TUI" wording
+
+### Added
+
+- Added shared console-mode resolution logic plus tests to keep the default-mode behavior, restart flow, and conflicting `--simple` / `--tui` flag handling consistent
+
+### Documentation
+
+- Updated the Chinese and English README files, command references, advanced guides, and install-complete hints to explain that simple mode is now the default and TUI is opt-in
+
 ## v2.2.8 - 2026-04-04
 
 ### Changed

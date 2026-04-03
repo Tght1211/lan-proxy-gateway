@@ -7,20 +7,24 @@
 | `gateway install` | 初始化向导: 下载 mihomo、录入订阅、生成配置文件 | 否 |
 | `gateway config` | 交互式配置中心: 代理来源 / 局域网共享 / 规则 / 扩展 | 否 |
 | `gateway config show` | 查看当前配置摘要 | 否 |
-| `sudo gateway start` | 启动网关，并在交互终端里进入运行中控制台 | 是 |
-| `sudo gateway start --simple` | 启动网关，并进入纯命令控制台 | 是 |
-| `sudo gateway console` | 不重启网关，重新进入运行中控制台 | 是 |
-| `sudo gateway console --simple` | 不重启网关，重新进入纯命令控制台 | 是 |
+| `sudo gateway start` | 启动网关，并默认进入纯命令控制台 | 是 |
+| `sudo gateway start --tui` | 启动网关，并进入运行中 TUI 控制台 | 是 |
+| `sudo gateway console` | 不重启网关，重新进入纯命令控制台 | 是 |
+| `sudo gateway console --tui` | 不重启网关，重新进入运行中 TUI 控制台 | 是 |
 | `sudo gateway stop` | 停止网关 | 是 |
-| `sudo gateway restart` | 重启网关 | 是 |
+| `sudo gateway restart` | 重启网关，并默认回到纯命令控制台 | 是 |
+| `sudo gateway restart --tui` | 重启网关，并进入运行中 TUI 控制台 | 是 |
 | `gateway status` | 查看运行状态、入口节点、普通出口、住宅出口 | 否 |
 
 ## 运行中控制台
 
-`gateway start` 在交互终端中成功启动后，会进入一个运行中 TUI 控制台。退出后，也可以用 `gateway console` 再次进入。
+`gateway start` 在交互终端中成功启动后，默认会进入纯命令控制台。这样兼容性更好，也更适合当前版本的日常使用。
 
 支持:
 
+- 纯命令模式: `sudo gateway start` 或 `sudo gateway console`，支持代理来源、TUN、本机绕过、规则开关、扩展模式和 chains 配置
+- 显式简单模式: 默认就是 simple，因此 `sudo gateway start --simple` 和 `sudo gateway console --simple` 仍然可用
+- 运行中 TUI: `sudo gateway start --tui` 或 `sudo gateway console --tui`
 - slash 命令: `/status` `/summary` `/config` `/config open` `/proxy` `/tun` `/bypass` `/rules` `/rule` `/extension` `/chain` `/chains` `/nodes` `/speed` `/logs` `/help`
 - 顶部 tab: `Esc` 回顶部，`←/→` 切分区，`↓ / Enter` 回到功能列表
 - 右侧内容区: 会标明当前是 `信息页 / 可操作页 / 确认页`
@@ -28,7 +32,6 @@
 - 配置工作台: 可以直接在 TUI 内切 `代理来源 / TUN / 本机绕过 / 规则开关 / chains 模式 / 住宅代理`
 - 刷新反馈: `R` 会刷新当前页面，并给一个很短的脉冲反馈
 - 确认交互: `/stop` `/restart` 后输入 `y / n`
-- 纯命令模式: `sudo gateway start --simple` 或 `sudo gateway console --simple`，支持同一批核心配置动作
 
 这让它更像一个持续运行的 CLI 系统，而不是“一次性打印信息就退出”的命令。
 

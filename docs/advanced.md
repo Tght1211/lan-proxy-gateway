@@ -180,7 +180,7 @@ gateway permission status
 
 ## 运行中 TUI 控制台
 
-`gateway start` 成功后，会进入运行中控制台。
+执行 `gateway start --tui`，或者网关已经运行后执行 `gateway console --tui`，会进入运行中控制台。默认的 `gateway start` 现在会先进入兼容性更好的简单模式。
 
 你可以在里面:
 

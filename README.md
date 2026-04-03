@@ -68,7 +68,24 @@ graph TD
 
 ### 3. 运行中控制台
 
-默认执行 `gateway start` 会进入运行中控制台，顶部分为三个 Tab：
+默认执行 `gateway start` 会进入纯命令控制台。这个模式兼容性更好，也更适合当前阶段日常使用和持续修 TUI bug。
+
+纯命令模式里可以直接做常用操作，例如：
+
+- `proxy source url`
+- `tun on`
+- `bypass off`
+- `rule ads off`
+- `extension chains`
+- `chain mode global`
+
+如果你想进入完整的运行中 TUI 工作台，可以使用：
+
+```bash
+sudo gateway start --tui
+```
+
+TUI 顶部分为三个 Tab：
 
 - **首页**：Clash 风格 Dashboard，一屏展示订阅流量、当前节点、TUN 状态、上下行速度、IP 链路和站点延迟
 - **代理**：节点切换、TUN / 规则 / 出口网络工作台
@@ -82,13 +99,7 @@ graph TD
 - `R` 刷新当前页面，`Esc` 回到上一个焦点区
 - 确认操作和参数输入通过居中弹窗完成，不占用底部空间
 
-如果你更在意兼容性，或者想在低配环境里使用纯命令交互，可以使用：
-
-```bash
-sudo gateway start --simple
-```
-
-这个模式不会进入 TUI，而是进入一个纯命令控制台。
+如果你已经在简单模式里，也可以输入 `tui` 随时切进去。
 
 ### 4. 规则系统
 
@@ -177,27 +188,16 @@ gateway start
 - `gateway update` 在 Windows 下会走后台替换流程，当前 `.exe` 退出后自动完成更新并重新启动网关
 - `gateway service install` 在 Windows 下会安装开机自启任务，不需要把 CLI 伪装成 `sc.exe` 服务
 
-默认模式下，启动成功后会进入运行中工作台，终端会显示：
+默认模式下，启动成功后会进入纯命令控制台，终端会显示：
 
 - 当前读取的配置文件路径
 - 局域网共享入口 IP
 - 运行模式
 - 出口摘要
-- 运行中 TUI 控制台
-- 可直接修改的工作台入口
+- 简单模式命令提示符
+- 可直接修改的常用配置命令
 
-常用操作：
-
-- `Esc` 回顶部 tab
-- `←/→` 切换分区
-- `↑/↓` 选择功能
-- `Enter` 打开当前功能，焦点进入右侧内容区
-- `/` 进入命令输入
-- `Ctrl+P` 打开节点工作台
-- `T` 在节点工作台里测当前节点延迟
-- `R` 刷新当前页
-
-工作台里现在可以直接处理这些常用配置：
+简单模式里现在可以直接处理这些常用配置：
 
 - 代理来源和订阅信息
 - TUN 和本机绕过代理
@@ -208,37 +208,28 @@ gateway start
 
 这一步里最重要的是记住你的局域网 IP。
 
-如果你更喜欢兼容性更强的纯命令模式：
+如果你想进入运行中 TUI 工作台：
 
 ```bash
 # macOS / Linux
-sudo gateway start --simple
+sudo gateway start --tui
 
 # Windows（管理员终端）
-gateway start --simple
+gateway start --tui
 ```
 
-它不会进入 TUI，而是进入一个纯命令控制台。
-
-纯命令模式和 TUI 现在共享同一批核心能力，例如：
-
-- `proxy source url`
-- `tun on`
-- `bypass off`
-- `rule ads off`
-- `extension chains`
-- `chain mode global`
+TUI 工作台顶部分为 `首页 / 代理 / 订阅` 三个 Tab，支持节点选择、配置工作台和 Dashboard 视图。如果只想显式声明简单模式，`gateway start --simple` 也仍然可用。
 
 如果你退出了控制台，之后可以随时重新进入：
 
 ```bash
 # macOS / Linux
 sudo gateway console
-sudo gateway console --simple
+sudo gateway console --tui
 
 # Windows（管理员终端）
 gateway console
-gateway console --simple
+gateway console --tui
 ```
 
 ### 第 4 步：让其他设备接入
@@ -277,10 +268,10 @@ gateway status
 |---|---|
 | `gateway install` | 初始化向导 |
 | `gateway config` | 交互式配置中心 |
-| `sudo gateway start` | 启动网关并进入默认工作台（TUI + 命令输入） |
-| `sudo gateway start --simple` | 启动网关并进入纯命令模式（兼容性更好） |
-| `sudo gateway console` | 重新进入默认工作台，不重启网关 |
-| `sudo gateway console --simple` | 重新进入纯命令控制台，不重启网关 |
+| `sudo gateway start` | 启动网关并进入默认简单模式（兼容性更好） |
+| `sudo gateway start --tui` | 启动网关并进入运行中 TUI 工作台 |
+| `sudo gateway console` | 不重启网关，重新进入纯命令控制台 |
+| `sudo gateway console --tui` | 不重启网关，重新进入运行中 TUI 工作台 |
 | `gateway tun on` | 开启 TUN 透明代理 |
 | `gateway tun off` | 关闭 TUN 透明代理 |
 | `gateway status` | 查看运行状态和出口网络 |

@@ -9,20 +9,24 @@
 | `gateway install` | Initial setup wizard: download `mihomo`, enter subscription info, generate config | No |
 | `gateway config` | Interactive config center: proxy source, LAN sharing, rules, extensions | No |
 | `gateway config show` | Show the current config summary | No |
-| `sudo gateway start` | Start the gateway and enter the runtime TUI | Yes |
-| `sudo gateway start --simple` | Start the gateway and enter the plain command console | Yes |
-| `sudo gateway console` | Re-enter the runtime TUI without restarting the gateway | Yes |
-| `sudo gateway console --simple` | Re-enter the plain command console without restarting the gateway | Yes |
+| `sudo gateway start` | Start the gateway and enter the default plain command console | Yes |
+| `sudo gateway start --tui` | Start the gateway and enter the runtime TUI | Yes |
+| `sudo gateway console` | Re-enter the plain command console without restarting the gateway | Yes |
+| `sudo gateway console --tui` | Re-enter the runtime TUI without restarting the gateway | Yes |
 | `sudo gateway stop` | Stop the gateway | Yes |
-| `sudo gateway restart` | Restart the gateway | Yes |
+| `sudo gateway restart` | Restart the gateway and return to the plain command console by default | Yes |
+| `sudo gateway restart --tui` | Restart the gateway and enter the runtime TUI | Yes |
 | `gateway status` | Show runtime status, entry node, regular exit, and residential exit | No |
 
 ## Runtime Console
 
-After `gateway start` succeeds in an interactive terminal, it enters a runtime TUI console. After leaving it, you can return with `gateway console`.
+After `gateway start` succeeds in an interactive terminal, it enters the plain command console by default. That keeps startup more compatible while the runtime TUI is still being polished.
 
 Supported actions:
 
+- plain command mode: `sudo gateway start` or `sudo gateway console`, with the same core config actions
+- explicit simple mode: because simple mode is now the default, `sudo gateway start --simple` and `sudo gateway console --simple` are still accepted
+- runtime TUI: `sudo gateway start --tui` or `sudo gateway console --tui`
 - slash commands: `/status` `/summary` `/config` `/config open` `/proxy` `/tun` `/bypass` `/rules` `/rule` `/extension` `/chain` `/chains` `/nodes` `/speed` `/logs` `/help`
 - top tabs: `Esc` back to the header, `←/→` switch sections, `↓ / Enter` return to the action list
 - the right content area clearly marks each page as `info / action / confirm`
@@ -30,7 +34,6 @@ Supported actions:
 - config workbenches: you can now change proxy source, TUN, local bypass, rule switches, chains mode, and residential-proxy settings directly inside the TUI
 - refresh cue: `R` refreshes the current page and shows a short pulse
 - confirmation flow: after `/stop` or `/restart`, type `y` or `n`
-- plain command mode: `sudo gateway start --simple` or `sudo gateway console --simple`, with the same core config actions
 
 This makes it feel more like a persistent CLI workspace, not a one-shot command that prints and exits.
 

@@ -182,7 +182,7 @@ After setup, the CLI can try `sudo -n` automatically instead of requiring users 
 
 ## Runtime TUI Console
 
-After `gateway start` succeeds, it enters the runtime console.
+Run `gateway start --tui`, or use `gateway console --tui` after the gateway is already running, to enter the runtime console. The default `gateway start` now goes to the more compatible plain command mode first.
 
 From there you can:
 
