@@ -2,79 +2,147 @@ $ErrorActionPreference = "Stop"
 
 $Repo = "Tght1211/lan-proxy-gateway"
 $Binary = "gateway.exe"
-$InstallDir = "$env:LOCALAPPDATA\Programs\gateway"
-$GHMirror = if ($env:GITHUB_MIRROR) { $env:GITHUB_MIRROR } else { "" }
+$InstallDir = Join-Path $env:LOCALAPPDATA "Programs\gateway"
+$GHMirror = if ($env:GITHUB_MIRROR) { $env:GITHUB_MIRROR.Trim() } else { "" }
+$RequestHeaders = @{ "User-Agent" = "lan-proxy-gateway-install" }
+$ProbeTimeoutSec = 10
+
+function Write-Info {
+    param([string]$Message)
+    Write-Host $Message -ForegroundColor Green
+}
+
+function Write-Warn {
+    param([string]$Message)
+    Write-Host $Message -ForegroundColor Yellow
+}
+
+function Path-Contains {
+    param(
+        [string]$PathValue,
+        [string]$Entry
+    )
+
+    if (-not $PathValue) {
+        return $false
+    }
+
+    foreach ($item in ($PathValue -split ";")) {
+        if ($item.Trim() -ieq $Entry) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Add-CurrentSessionPath {
+    if (-not (Path-Contains -PathValue $env:Path -Entry $InstallDir)) {
+        $env:Path = "$InstallDir;$env:Path"
+    }
+}
+
+function Download-WithFallback {
+    param(
+        [string[]]$Urls,
+        [string]$OutFile
+    )
+
+    $lastErrorMessage = ""
+    foreach ($candidate in $Urls) {
+        try {
+            Invoke-WebRequest -Uri $candidate -Headers $RequestHeaders -OutFile $OutFile -UseBasicParsing
+            return
+        } catch {
+            $lastErrorMessage = $_.Exception.Message
+            if (Test-Path $OutFile) {
+                Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    throw "Failed to download release asset. Last error: $lastErrorMessage"
+}
 
 function Detect-Mirror {
     if ($GHMirror) {
-        Write-Host "使用指定镜像: $GHMirror" -ForegroundColor Green
+        Write-Info "Using custom mirror: $GHMirror"
         return
     }
+
     try {
-        $null = Invoke-WebRequest -Uri "https://api.github.com" -TimeoutSec 5 -UseBasicParsing
+        $null = Invoke-WebRequest -Uri "https://api.github.com" -Headers $RequestHeaders -TimeoutSec $ProbeTimeoutSec -UseBasicParsing
         $script:GHMirror = ""
         return
     } catch {}
 
-    Write-Host "直连 GitHub 超时，尝试镜像加速..." -ForegroundColor Yellow
+    Write-Warn "GitHub direct access timed out. Trying mirrors..."
     $mirrors = @(
         "https://hub.gitmirror.com/",
         "https://mirror.ghproxy.com/",
         "https://github.moeyy.xyz/",
         "https://gh.ddlc.top/"
     )
+
     foreach ($m in $mirrors) {
         try {
-            $null = Invoke-WebRequest -Uri "${m}https://api.github.com" -TimeoutSec 5 -UseBasicParsing
+            $null = Invoke-WebRequest -Uri "${m}https://api.github.com" -Headers $RequestHeaders -TimeoutSec $ProbeTimeoutSec -UseBasicParsing
             $script:GHMirror = $m
-            Write-Host "使用镜像: $m" -ForegroundColor Green
+            Write-Info "Using mirror: $m"
             return
         } catch {}
     }
-    throw "无法连接 GitHub 或任何镜像站。请设置: `$env:GITHUB_MIRROR = 'https://你的镜像/'"
+
+    throw "Could not reach GitHub or any known mirror. Set `$env:GITHUB_MIRROR to your preferred mirror and retry."
 }
 
 Detect-Mirror
 
-Write-Host "正在获取最新版本..." -ForegroundColor Green
-
+Write-Info "Fetching latest release..."
 $ApiUrl = "${GHMirror}https://api.github.com/repos/$Repo/releases/latest"
-$Release = Invoke-RestMethod $ApiUrl
+$Release = Invoke-RestMethod -Uri $ApiUrl -Headers $RequestHeaders
 $Tag = $Release.tag_name
-Write-Host "最新版本: $Tag" -ForegroundColor Green
+Write-Info "Latest release: $Tag"
 
 $Asset = "gateway-windows-amd64.exe"
 $Url = "${GHMirror}https://github.com/$Repo/releases/download/$Tag/$Asset"
+$AssetUrls = @($Url)
+if (-not $GHMirror) {
+    $AssetUrls += @(
+        "https://hub.gitmirror.com/https://github.com/$Repo/releases/download/$Tag/$Asset",
+        "https://mirror.ghproxy.com/https://github.com/$Repo/releases/download/$Tag/$Asset",
+        "https://github.moeyy.xyz/https://github.com/$Repo/releases/download/$Tag/$Asset",
+        "https://gh.ddlc.top/https://github.com/$Repo/releases/download/$Tag/$Asset"
+    )
+}
 
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
 
 $Target = Join-Path $InstallDir $Binary
-Write-Host "下载 $Asset..." -ForegroundColor Green
-Invoke-WebRequest -Uri $Url -OutFile $Target -UseBasicParsing
+Write-Info "Downloading $Asset..."
+Download-WithFallback -Urls $AssetUrls -OutFile $Target
 
-# Add to persistent user PATH
 $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($UserPath -notlike "*$InstallDir*") {
-    [Environment]::SetEnvironmentVariable("Path", "$UserPath;$InstallDir", "User")
-    Write-Host "已将 $InstallDir 添加到用户 PATH" -ForegroundColor Green
+if (-not $UserPath) {
+    $UserPath = ""
 }
 
-# Also refresh the current session so gateway is usable immediately without reopening terminal
-if ($env:Path -notlike "*$InstallDir*") {
-    $env:Path = "$env:Path;$InstallDir"
-    Write-Host "当前会话 PATH 已更新，无需重启终端即可使用 gateway 命令" -ForegroundColor Green
+if (-not (Path-Contains -PathValue $UserPath -Entry $InstallDir)) {
+    $NewUserPath = if ($UserPath) { "$UserPath;$InstallDir" } else { $InstallDir }
+    [Environment]::SetEnvironmentVariable("Path", $NewUserPath, "User")
+    Write-Warn "Added $InstallDir to user PATH for future terminals."
 }
 
+Add-CurrentSessionPath
+
 Write-Host ""
-Write-Host "安装成功!" -ForegroundColor Green
-Write-Host "安装位置: $Target" -ForegroundColor Green
+Write-Info "Install complete."
+Write-Info "Installed to: $Target"
 Write-Host ""
-Write-Host "快速开始 (以管理员身份运行 PowerShell/终端):" -ForegroundColor Green
-Write-Host "  gateway install    # 运行安装向导（下载 mihomo、配置代理）"
-Write-Host "  gateway config     # 打开配置中心"
-Write-Host "  gateway start      # 启动网关 (需要管理员权限)"
-Write-Host "  gateway status     # 查看状态和出口网络"
-Write-Host ""
-Write-Host "提示: gateway start / stop / restart 需要在管理员终端中运行" -ForegroundColor Yellow
+Write-Info "You can run these commands in this same PowerShell window:"
+Write-Host "  gateway install    # run the setup wizard"
+Write-Host "  gateway config     # open the config center"
+Write-Host "  gateway start      # start the gateway (run PowerShell as Administrator)"
+Write-Host "  gateway status     # inspect status and egress network"

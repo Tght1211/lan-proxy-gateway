@@ -68,7 +68,7 @@ func runUpdate(cmd *cobra.Command, args []string) {
 	asset := releaseAssetName(runtime.GOOS, runtime.GOARCH)
 	downloadURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repo, latest, asset)
 
-	tmpFile, err := downloadWithFallback(downloadURL)
+	tmpFile, err := downloadWithFallbackRobust(downloadURL)
 	if err != nil {
 		ui.Error("下载失败: %s", err)
 		os.Exit(1)
@@ -172,9 +172,9 @@ func httpGetWithFallback(url string) (io.ReadCloser, error) {
 }
 
 func httpGetWithFallbackTimeout(url string, timeout time.Duration) (io.ReadCloser, error) {
-	client := &http.Client{Timeout: timeout}
+	client := newGatewayHTTPClient(timeout)
 
-	resp, err := client.Get(url)
+	resp, err := openGatewayURL(client, url)
 	if err == nil && resp.StatusCode == http.StatusOK {
 		return resp.Body, nil
 	}
@@ -183,7 +183,7 @@ func httpGetWithFallbackTimeout(url string, timeout time.Duration) (io.ReadClose
 	}
 
 	for _, m := range mirrors {
-		resp, err = client.Get(m + url)
+		resp, err = openGatewayURL(client, m+url)
 		if err == nil && resp.StatusCode == http.StatusOK {
 			return resp.Body, nil
 		}
@@ -201,8 +201,7 @@ func downloadWithFallback(url string) (string, error) {
 		return "", err
 	}
 	tmpPath := tmpFile.Name()
-
-	client := &http.Client{Timeout: 120 * time.Second}
+	tmpFile.Close()
 
 	urls := []string{url}
 	for _, m := range mirrors {
@@ -213,30 +212,46 @@ func downloadWithFallback(url string) (string, error) {
 		if i > 0 {
 			ui.Warn("直连失败，尝试镜像...")
 		}
-		resp, err := client.Get(u)
-		if err != nil || resp.StatusCode != http.StatusOK {
-			if resp != nil {
-				resp.Body.Close()
-			}
+		if err := downloadGatewayURLToFileWithWindowsFallback(u, tmpPath, 120*time.Second); err != nil {
 			continue
 		}
-
-		tmpFile.Seek(0, 0)
-		tmpFile.Truncate(0)
-
-		_, err = io.Copy(tmpFile, resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			continue
-		}
-
-		tmpFile.Close()
 		return tmpPath, nil
 	}
 
-	tmpFile.Close()
 	os.Remove(tmpPath)
 	return "", fmt.Errorf("所有下载源均失败")
+}
+
+func downloadWithFallbackRobust(url string) (string, error) {
+	tmpFile, err := os.CreateTemp("", updateTempPattern(runtime.GOOS))
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+
+	urls := []string{url}
+	for _, m := range mirrors {
+		urls = append(urls, m+url)
+	}
+
+	var lastErr error
+	for i, u := range urls {
+		if i > 0 {
+			ui.Warn("Direct download failed, trying mirrors...")
+		}
+		if err := downloadGatewayURLToFileWithWindowsFallback(u, tmpPath, 120*time.Second); err != nil {
+			lastErr = err
+			continue
+		}
+		return tmpPath, nil
+	}
+
+	os.Remove(tmpPath)
+	if lastErr != nil {
+		return "", fmt.Errorf("all download sources failed: %w", lastErr)
+	}
+	return "", fmt.Errorf("all download sources failed")
 }
 
 func updateTempPattern(goos string) string {

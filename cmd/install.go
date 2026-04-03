@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -63,6 +62,7 @@ func downloadMihomo() error {
 	archivePath := filepath.Join(tmpDir, spec.AssetName)
 
 	// Try downloading from each URL
+	var lastErr error
 	for i, mirrorURL := range mirrors {
 		ui.Info("尝试从 %s 下载...", getDomain(mirrorURL))
 		if err := downloadFile(mirrorURL, archivePath); err == nil {
@@ -77,12 +77,17 @@ func downloadMihomo() error {
 			}
 			ui.Success("mihomo 下载成功")
 			return nil
+		} else {
+			lastErr = err
 		}
 
 		// Remove partially downloaded file
 		os.Remove(archivePath)
 		os.Remove(binPath)
 
+		if i == len(mirrors)-1 && lastErr != nil {
+			return fmt.Errorf("all mihomo mirrors failed: %w", lastErr)
+		}
 		if i == len(mirrors)-1 {
 			return fmt.Errorf("所有镜像都下载失败")
 		}
@@ -127,28 +132,7 @@ func resolveMihomoAsset(goos, goarch string) (mihomoAssetSpec, error) {
 }
 
 func downloadFile(url, dest string) error {
-	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	f, err := os.Create(dest)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		os.Remove(dest)
-		return err
-	}
-	return nil
+	return downloadGatewayURLToFileWithWindowsFallback(url, dest, 120*time.Second)
 }
 
 func extractMihomoArchive(archivePath, binPath string, spec mihomoAssetSpec) error {
