@@ -26,6 +26,7 @@ Supported actions:
 - slash commands: `/status` `/summary` `/config` `/config open` `/chains` `/nodes` `/logs` `/help`
 - top tabs: `Esc` back to the header, `←/→` switch sections, `↓ / Enter` return to the action list
 - node picker: `Ctrl+P`
+- refresh cue: `R` refreshes the current page and shows a short pulse
 - confirmation flow: after `/stop` or `/restart`, type `y` or `n`
 - plain command mode: `sudo gateway start --simple` or `sudo gateway console --simple`
 

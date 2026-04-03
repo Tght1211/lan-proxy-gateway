@@ -75,6 +75,11 @@ Focus: fix TUI sluggishness, clean up status and config-summary rendering, add a
 Positioning: TUI focus and navigation polish.  
 Focus: fix the `guide` page layout, add proper header-focus handoff, and make the top tabs and left action list work together more cleanly.
 
+### v2.2.3
+
+Positioning: TUI refresh feedback polish.  
+Focus: make `R` refresh the current page and add a visible but restrained refresh cue.
+
 ## Rules for Future Versions
 
 ### Patch

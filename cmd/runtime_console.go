@@ -71,6 +71,10 @@ const (
 	consoleFocusInput
 )
 
+type refreshPulseMsg struct{}
+
+const refreshPulseFrames = 4
+
 type snapshot struct {
 	modeSummary   string
 	egressSummary string
@@ -106,13 +110,14 @@ type runtimeConsoleModel struct {
 
 	pending *pendingConfirm
 
-	picker      pickerMode
-	groups      []mihomo.ProxyGroup
-	groupCursor int
-	nodeCursor  int
-	tab         consoleTab
-	cursor      int
-	detailTitle string
+	picker       pickerMode
+	groups       []mihomo.ProxyGroup
+	groupCursor  int
+	nodeCursor   int
+	tab          consoleTab
+	cursor       int
+	detailTitle  string
+	refreshPulse int
 }
 
 var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
@@ -168,6 +173,15 @@ func (m runtimeConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resize()
 		return m, nil
 
+	case refreshPulseMsg:
+		if m.refreshPulse > 0 {
+			m.refreshPulse--
+			if m.refreshPulse > 0 {
+				return m, refreshPulseTickCmd()
+			}
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		if m.picker != pickerModeNone {
 			return m.handlePickerKey(msg)
@@ -215,14 +229,9 @@ func (m runtimeConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "r":
 			m.refreshSnapshot()
-			m.refreshSelectionPreview()
-			m.setDetail("已刷新", []string{
-				successLine("运行摘要已刷新"),
-				noteLine("刷新时间: " + m.snapshot.refreshedAt),
-				"",
-				noteLine("继续用方向键浏览，或按 Enter 打开当前功能。"),
-			})
-			return m, nil
+			m.refreshCurrentDetail()
+			m.refreshPulse = refreshPulseFrames
+			return m, refreshPulseTickCmd()
 		case "q":
 			m.pending = &pendingConfirm{prompt: "确认退出控制台？", action: consoleActionExit}
 			m.focus = consoleFocusInput
@@ -449,6 +458,26 @@ func (m *runtimeConsoleModel) focusHint() string {
 		return "顶部聚焦：←/→ 切换分区，↓ / Enter 进入功能列表，/ 开始输入命令"
 	}
 	return "导航模式：←/→ 分区，↑/↓ 功能，/ 开始输入命令"
+}
+
+func refreshPulseTickCmd() tea.Cmd {
+	return tea.Tick(45*time.Millisecond, func(time.Time) tea.Msg {
+		return refreshPulseMsg{}
+	})
+}
+
+func (m runtimeConsoleModel) refreshPulseActive() bool {
+	return m.refreshPulse > 0
+}
+
+func (m runtimeConsoleModel) refreshPulseOffset() int {
+	if !m.refreshPulseActive() {
+		return 0
+	}
+	if m.refreshPulse%2 == 0 {
+		return 1
+	}
+	return 0
 }
 
 func (m *runtimeConsoleModel) setInputValue(value string) {
@@ -694,7 +723,11 @@ func (m runtimeConsoleModel) renderHeader() string {
 		Foreground(lipgloss.Color("#f8fafc"))
 	subStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#94a3b8"))
 
-	line1 := titleStyle.Render("Gateway Console")
+	title := "Gateway Console"
+	if m.refreshPulseActive() {
+		title += "  ↻"
+	}
+	line1 := titleStyle.Render(title)
 	line2 := m.renderTabs()
 	line3 := subStyle.Render(m.renderHeaderSummary())
 	line4 := subStyle.Render(activeTabDescription(m.tab) + "  ·  " + m.focusHint())
@@ -702,6 +735,9 @@ func (m runtimeConsoleModel) renderHeader() string {
 	border := lipgloss.Color("#334155")
 	if m.focus == consoleFocusHeader && m.picker == pickerModeNone {
 		border = lipgloss.Color("#38bdf8")
+	}
+	if m.refreshPulseActive() {
+		border = lipgloss.Color("#22d3ee")
 	}
 
 	return lipgloss.NewStyle().
@@ -738,6 +774,9 @@ func (m runtimeConsoleModel) renderDetailPane(width int) string {
 		content = m.renderPicker(width-4, max(3, m.mainHeight-4))
 		border = "#f59e0b"
 	}
+	if m.refreshPulseActive() && m.picker == pickerModeNone {
+		border = "#22d3ee"
+	}
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(border)).
@@ -751,6 +790,11 @@ func (m runtimeConsoleModel) renderDetailPane(width int) string {
 		Height(bodyHeight).
 		MaxHeight(bodyHeight).
 		Render(content)
+	if m.refreshPulseActive() && m.picker == pickerModeNone {
+		body = lipgloss.NewStyle().
+			PaddingLeft(m.refreshPulseOffset()).
+			Render(body)
+	}
 
 	return box.Render(lipgloss.JoinVertical(lipgloss.Left, header, "", body))
 }
@@ -1021,6 +1065,42 @@ func (m *runtimeConsoleModel) refreshSelectionPreview() {
 	}
 	lines = append(lines, previewLinesForItem(item, m.snapshot, m.cfg, m.logFile)...)
 	m.setDetail(item.title, lines)
+}
+
+func (m *runtimeConsoleModel) refreshCurrentDetail() {
+	cfg := loadConfigOrDefault()
+	m.cfg = cfg
+
+	switch m.detailTitle {
+	case "运行状态":
+		m.setDetail("运行状态", m.renderStatusDetailLines())
+	case "配置摘要":
+		m.setDetail("配置摘要", renderConfigSummaryDetailLines(cfg))
+	case "配置中心":
+		m.setDetail("配置中心", renderConfigCenterLines(cfg))
+	case "功能导航":
+		m.setDetail("功能导航", renderGuideDetailLines(cfg, m.logFile))
+	case "最近日志":
+		m.setDetail("最近日志", m.captureLogLines(30))
+	case "设备接入":
+		m.showCapturedDetail("设备接入", func() { printDeviceSetupPanel(m.ip, cfg.Runtime.Ports.API) })
+	case "链式代理状态":
+		m.showCapturedDetail("链式代理状态", func() { runChainsStatus(nil, nil) })
+	case "扩展状态":
+		m.showCapturedDetail("扩展状态", func() { printExtensionStatus(cfg) })
+	case "升级提示":
+		if m.update == nil {
+			m.setDetail("升级提示", []string{noteLine("当前已经是最新版本，或本次未检测到更新。")})
+		} else {
+			lines := make([]string, 0, len(renderUpdateNoticeLines(m.update)))
+			for _, line := range renderUpdateNoticeLines(m.update) {
+				lines = append(lines, noteLine(line))
+			}
+			m.setDetail("升级提示", lines)
+		}
+	default:
+		m.refreshSelectionPreview()
+	}
 }
 
 func (m *runtimeConsoleModel) setDetail(title string, lines []string) {

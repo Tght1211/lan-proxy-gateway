@@ -153,3 +153,26 @@ func TestRenderGuideDetailLinesUsesNativeSections(t *testing.T) {
 		t.Fatalf("expected native guide layout without separator lines, got %q", got)
 	}
 }
+
+func TestRefreshKeyStartsPulse(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+
+	next, _ := m.Update(tea.KeyPressMsg{Text: "r"})
+	updated := next.(runtimeConsoleModel)
+
+	if updated.refreshPulse <= 0 {
+		t.Fatalf("expected refresh key to start pulse, got %d", updated.refreshPulse)
+	}
+}
+
+func TestRefreshKeyKeepsGuidePage(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+	m.setDetail("功能导航", renderGuideDetailLines(config.DefaultConfig(), "/tmp/lan-proxy-gateway.log"))
+
+	next, _ := m.Update(tea.KeyPressMsg{Text: "r"})
+	updated := next.(runtimeConsoleModel)
+
+	if updated.detailTitle != "功能导航" {
+		t.Fatalf("expected refresh to preserve current guide page, got %q", updated.detailTitle)
+	}
+}

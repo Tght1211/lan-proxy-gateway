@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented here.
 
+## v2.2.3 - 2026-04-03
+
+### Fixed
+
+- `R` in the runtime TUI now refreshes the current page instead of replacing it with a generic refresh message
+- Added a short visual refresh pulse so refresh actions feel visible in the terminal
+
+### Documentation
+
+- Updated the Chinese and English READMEs plus command docs to describe the refresh behavior
+
 ## v2.2.2 - 2026-04-03
 
 ### Fixed
