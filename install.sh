@@ -5,6 +5,10 @@ REPO="Tght1211/lan-proxy-gateway"
 BINARY="gateway"
 # 可通过环境变量指定镜像前缀，如 GITHUB_MIRROR=https://hub.gitmirror.com/
 GITHUB_MIRROR="${GITHUB_MIRROR:-}"
+GITHUB_API_MAX_TIME="${GITHUB_API_MAX_TIME:-30}"
+GITHUB_ASSET_MAX_TIME="${GITHUB_ASSET_MAX_TIME:-600}"
+GITHUB_CONNECT_TIMEOUT="${GITHUB_CONNECT_TIMEOUT:-10}"
+GITHUB_DOWNLOAD_RETRIES="${GITHUB_DOWNLOAD_RETRIES:-3}"
 
 MIRRORS=(
   "https://hub.gitmirror.com/"
@@ -18,10 +22,10 @@ warn()  { printf "\033[1;33m%s\033[0m\n" "$*"; }
 error() { printf "\033[1;31m%s\033[0m\n" "$*" >&2; exit 1; }
 
 # download with automatic mirror fallback
-# usage: gh_download URL OUTPUT_FILE [--progress]
+# usage: gh_download URL OUTPUT_FILE [--progress] [MAX_TIME]
 gh_download() {
-  local url="$1" output="$2" show_progress="${3:-}"
-  local curl_opts="-fSL --connect-timeout 10 --max-time 60"
+  local url="$1" output="$2" show_progress="${3:-}" max_time="${4:-$GITHUB_ASSET_MAX_TIME}"
+  local curl_opts="-fSL --connect-timeout ${GITHUB_CONNECT_TIMEOUT} --max-time ${max_time} --retry ${GITHUB_DOWNLOAD_RETRIES} --retry-delay 2 --retry-all-errors"
   [ "$show_progress" = "--progress" ] && curl_opts="$curl_opts --progress-bar" || curl_opts="$curl_opts -s"
 
   # if user specified a mirror, use it directly
@@ -85,7 +89,7 @@ info "正在获取最新版本..."
 
 # --- get latest release tag ---
 API_TMPFILE=$(mktemp)
-gh_download "https://api.github.com/repos/${REPO}/releases/latest" "$API_TMPFILE"
+gh_download "https://api.github.com/repos/${REPO}/releases/latest" "$API_TMPFILE" "" "$GITHUB_API_MAX_TIME"
 TAG=$(grep '"tag_name"' "$API_TMPFILE" | head -1 | cut -d'"' -f4)
 rm -f "$API_TMPFILE"
 
