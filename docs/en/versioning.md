@@ -65,6 +65,11 @@ Focus: improve TUN startup output and behavior.
 Positioning: unified console and config architecture.  
 Focus: runtime TUI, proxy group switching, unified config areas, fuller release assets, and a clearer release-note system.
 
+### v2.2.1
+
+Positioning: console experience fixes.  
+Focus: fix TUI sluggishness, clean up status and config-summary rendering, add a `console` re-entry flow, and tighten the handoff between plain-command mode and TUI mode.
+
 ## Rules for Future Versions
 
 ### Patch

@@ -5,19 +5,20 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
-	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/tght/lan-proxy-gateway/internal/config"
 	"github.com/tght/lan-proxy-gateway/internal/egress"
 	"github.com/tght/lan-proxy-gateway/internal/mihomo"
+	"github.com/tght/lan-proxy-gateway/internal/platform"
+	"github.com/tght/lan-proxy-gateway/internal/ui"
 )
 
 type consoleAction int
@@ -29,6 +30,7 @@ const (
 	consoleActionStop
 	consoleActionOpenConfig
 	consoleActionOpenChainsSetup
+	consoleActionOpenTUI
 )
 
 type pendingConfirm struct {
@@ -61,6 +63,13 @@ const (
 	pickerModeNodes
 )
 
+type consoleFocus int
+
+const (
+	consoleFocusNav consoleFocus = iota
+	consoleFocusInput
+)
+
 type snapshot struct {
 	modeSummary   string
 	egressSummary string
@@ -69,29 +78,30 @@ type snapshot struct {
 	iface         string
 	currentNode   string
 	shareEntry    string
+	refreshedAt   string
 }
 
-type petTickMsg time.Time
-
 type runtimeConsoleModel struct {
-	width    int
-	height   int
+	width      int
+	height     int
 	mainHeight int
-	logFile  string
-	ip       string
-	iface    string
-	dataDir  string
-	cfg      *config.Config
-	client   *mihomo.Client
-	snapshot snapshot
-	update   *updateNotice
+	logFile    string
+	ip         string
+	iface      string
+	dataDir    string
+	cfg        *config.Config
+	client     *mihomo.Client
+	snapshot   snapshot
+	update     *updateNotice
 
-	input    textinput.Model
-	viewport viewport.Model
-	spin     spinner.Model
+	viewport    viewport.Model
+	focus       consoleFocus
+	inputValue  string
+	inputCursor int
+	history     []string
+	historyPos  int
 
-	history []string
-	action  consoleAction
+	action consoleAction
 
 	pending *pendingConfirm
 
@@ -102,9 +112,9 @@ type runtimeConsoleModel struct {
 	tab         consoleTab
 	cursor      int
 	detailTitle string
-
-	petFrame int
 }
+
+var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
 func runRuntimeConsole(logFile, ip, iface, dataDir string) consoleAction {
 	model := newRuntimeConsoleModel(logFile, ip, iface, dataDir)
@@ -124,47 +134,29 @@ func runRuntimeConsole(logFile, ip, iface, dataDir string) consoleAction {
 func newRuntimeConsoleModel(logFile, ip, iface, dataDir string) runtimeConsoleModel {
 	cfg := loadConfigOrDefault()
 	update := loadUpdateNotice()
-	ti := textinput.New()
-	ti.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#7dd3fc")).Render("› ")
-	ti.Placeholder = "/status, /groups, /chains setup"
-	focusCmd := ti.Focus()
-	ti.CharLimit = 512
-	ti.SetWidth(48)
-	ti.ShowSuggestions = true
-	ti.SetSuggestions(consoleCommandSuggestions())
-	ti.KeyMap.AcceptSuggestion = key.NewBinding(key.WithKeys("tab"))
-	ti.KeyMap.NextSuggestion = key.NewBinding(key.WithKeys("down"))
-	ti.KeyMap.PrevSuggestion = key.NewBinding(key.WithKeys("up"))
-
-	sp := spinner.New()
-	sp.Spinner = spinner.Points
-	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#f59e0b"))
 
 	vp := viewport.New()
 
 	m := runtimeConsoleModel{
-		logFile:  logFile,
-		ip:       ip,
-		iface:    iface,
-		dataDir:  dataDir,
-		cfg:      cfg,
-		client:   newConsoleClient(cfg),
-		update:   update,
-		input:    ti,
-		viewport: vp,
-		spin:     sp,
-		tab:      consoleTabOverview,
+		logFile:    logFile,
+		ip:         ip,
+		iface:      iface,
+		dataDir:    dataDir,
+		cfg:        cfg,
+		client:     newConsoleClient(cfg),
+		update:     update,
+		viewport:   vp,
+		tab:        consoleTabOverview,
+		focus:      consoleFocusNav,
+		historyPos: -1,
 	}
 	m.refreshSnapshot()
 	m.refreshSelectionPreview()
-	if focusCmd != nil {
-		_, _ = m.Update(focusCmd())
-	}
 	return m
 }
 
 func (m runtimeConsoleModel) Init() tea.Cmd {
-	return tea.Batch(m.spin.Tick, petTickCmd(), m.input.Focus())
+	return nil
 }
 
 func (m runtimeConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -174,15 +166,6 @@ func (m runtimeConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.resize()
 		return m, nil
-
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		m.spin, cmd = m.spin.Update(msg)
-		return m, cmd
-
-	case petTickMsg:
-		m.petFrame = (m.petFrame + 1) % len(petFrames())
-		return m, petTickCmd()
 
 	case tea.KeyMsg:
 		if m.picker != pickerModeNone {
@@ -194,54 +177,60 @@ func (m runtimeConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "ctrl+p":
 			return m.openGroupPicker()
+		}
+
+		if m.focus == consoleFocusInput {
+			return m.handleInputKey(msg)
+		}
+
+		switch msg.String() {
 		case "left":
-			if strings.TrimSpace(m.input.Value()) == "" {
-				m.prevTab()
-				m.refreshSelectionPreview()
-				return m, nil
-			}
+			m.prevTab()
+			m.refreshSelectionPreview()
+			return m, nil
 		case "right":
-			if strings.TrimSpace(m.input.Value()) == "" {
-				m.nextTab()
-				m.refreshSelectionPreview()
-				return m, nil
-			}
+			m.nextTab()
+			m.refreshSelectionPreview()
+			return m, nil
 		case "up":
-			if strings.TrimSpace(m.input.Value()) == "" {
-				m.moveCursor(-1)
-				m.refreshSelectionPreview()
-				return m, nil
-			}
+			m.moveCursor(-1)
+			m.refreshSelectionPreview()
+			return m, nil
 		case "down":
-			if strings.TrimSpace(m.input.Value()) == "" {
-				m.moveCursor(1)
-				m.refreshSelectionPreview()
-				return m, nil
-			}
+			m.moveCursor(1)
+			m.refreshSelectionPreview()
+			return m, nil
 		case "r":
-			if strings.TrimSpace(m.input.Value()) == "" {
-				m.refreshSnapshot()
-				m.refreshSelectionPreview()
-				return m, nil
-			}
+			m.refreshSnapshot()
+			m.refreshSelectionPreview()
+			m.setDetail("已刷新", []string{
+				successLine("运行摘要已刷新"),
+				noteLine("刷新时间: " + m.snapshot.refreshedAt),
+				"",
+				noteLine("继续用方向键浏览，或按 Enter 打开当前功能。"),
+			})
+			return m, nil
 		case "q":
-			if strings.TrimSpace(m.input.Value()) == "" {
-				m.action = consoleActionExit
-				return m, tea.Quit
-			}
+			m.pending = &pendingConfirm{prompt: "确认退出控制台？", action: consoleActionExit}
+			m.focus = consoleFocusInput
+			m.setInputValue("")
+			m.setDetail("确认退出", []string{
+				noteLine("输入 y / n 进行确认。"),
+				noteLine("退出控制台不会停止网关。"),
+			})
+			return m, nil
 		case "enter":
-			value := strings.TrimSpace(m.input.Value())
-			m.input.SetValue("")
-			if value == "" {
-				return m.executeSelectedAction()
-			}
-			return m.handleCommand(value)
+			return m.executeSelectedAction()
+		}
+
+		if text := msg.Key().Text; text != "" {
+			m.focus = consoleFocusInput
+			m.insertInput(text)
+			return m, nil
 		}
 	}
 
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-	return m, cmd
+	return m, nil
 }
 
 func (m runtimeConsoleModel) View() tea.View {
@@ -287,10 +276,11 @@ func (m *runtimeConsoleModel) handleCommand(value string) (tea.Model, tea.Cmd) {
 		m.setDetail("命令帮助", []string{
 			noteLine("/status        查看完整运行状态"),
 			noteLine("/summary       查看配置摘要"),
-			noteLine("/config        打开配置中心"),
+			noteLine("/config        查看 TUI 配置中心"),
+			noteLine("/config open   打开完整交互式配置中心"),
 			noteLine("/chains        查看链式代理 / 扩展状态"),
 			noteLine("/chains setup  打开链式代理向导"),
-			noteLine("/groups        打开策略组选择器"),
+			noteLine("/nodes         切换节点（兼容 /groups）"),
 			noteLine("/device        查看设备接入说明"),
 			noteLine("/logs          查看最近日志"),
 			noteLine("/guide         查看功能导航"),
@@ -301,12 +291,15 @@ func (m *runtimeConsoleModel) handleCommand(value string) (tea.Model, tea.Cmd) {
 			noteLine("/exit          退出控制台"),
 		})
 	case "status":
-		m.showCapturedDetail("运行状态", func() { runStatus(nil, nil) })
+		m.setDetail("运行状态", m.renderStatusDetailLines())
 	case "summary":
-		m.showCapturedDetail("配置摘要", func() { printConfigSummary(loadConfigOrDefault()) })
+		m.setDetail("配置摘要", renderConfigSummaryDetailLines(loadConfigOrDefault()))
 	case "config":
-		m.action = consoleActionOpenConfig
-		return *m, tea.Quit
+		if len(args) > 0 && (args[0] == "open" || args[0] == "cli") {
+			m.action = consoleActionOpenConfig
+			return *m, tea.Quit
+		}
+		m.setDetail("配置中心", renderConfigCenterLines(loadConfigOrDefault()))
 	case "chains":
 		if len(args) > 0 && args[0] == "setup" {
 			m.action = consoleActionOpenChainsSetup
@@ -319,6 +312,8 @@ func (m *runtimeConsoleModel) handleCommand(value string) (tea.Model, tea.Cmd) {
 			m.showCapturedDetail("扩展状态", func() { printExtensionStatus(cfg) })
 		}
 	case "groups":
+		fallthrough
+	case "nodes", "node":
 		return m.openGroupPicker()
 	case "device":
 		cfg := loadConfigOrDefault()
@@ -346,8 +341,13 @@ func (m *runtimeConsoleModel) handleCommand(value string) (tea.Model, tea.Cmd) {
 		m.pending = &pendingConfirm{prompt: "确认停止网关？", action: consoleActionStop}
 		m.setDetail("确认停止", []string{noteLine("等待确认: 输入 y / n")})
 	case "exit", "quit":
-		m.action = consoleActionExit
-		return *m, tea.Quit
+		m.pending = &pendingConfirm{prompt: "确认退出控制台？", action: consoleActionExit}
+		m.focus = consoleFocusInput
+		m.setInputValue("")
+		m.setDetail("确认退出", []string{
+			noteLine("输入 y / n 进行确认。"),
+			noteLine("退出控制台不会停止网关。"),
+		})
 	default:
 		m.setDetail("命令错误", []string{errorLine("未识别的命令。输入 /help 查看可用命令。")})
 	}
@@ -356,11 +356,187 @@ func (m *runtimeConsoleModel) handleCommand(value string) (tea.Model, tea.Cmd) {
 	return *m, nil
 }
 
+func (m *runtimeConsoleModel) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.focus = consoleFocusNav
+		return *m, nil
+	case "enter":
+		value := strings.TrimSpace(m.inputValue)
+		m.pushHistory(value)
+		m.setInputValue("")
+		m.historyPos = -1
+		if value == "" {
+			return *m, nil
+		}
+		return m.handleCommand(value)
+	case "left":
+		if m.inputCursor > 0 {
+			m.inputCursor--
+		}
+		return *m, nil
+	case "right":
+		if m.inputCursor < len([]rune(m.inputValue)) {
+			m.inputCursor++
+		}
+		return *m, nil
+	case "home", "ctrl+a":
+		m.inputCursor = 0
+		return *m, nil
+	case "end", "ctrl+e":
+		m.inputCursor = len([]rune(m.inputValue))
+		return *m, nil
+	case "backspace":
+		m.deleteBeforeCursor()
+		return *m, nil
+	case "delete":
+		m.deleteAtCursor()
+		return *m, nil
+	case "ctrl+u":
+		m.setInputValue("")
+		m.historyPos = -1
+		return *m, nil
+	case "up":
+		m.recallHistory(-1)
+		return *m, nil
+	case "down":
+		m.recallHistory(1)
+		return *m, nil
+	case "tab":
+		matches := m.matchingSuggestions(m.inputValue)
+		if len(matches) > 0 {
+			m.setInputValue(matches[0])
+		}
+		return *m, nil
+	}
+
+	if text := msg.Key().Text; text != "" {
+		m.insertInput(text)
+		return *m, nil
+	}
+
+	return *m, nil
+}
+
+func (m *runtimeConsoleModel) focusHint() string {
+	if m.pending != nil {
+		return "确认操作中，输入 y / n"
+	}
+	if m.picker != pickerModeNone {
+		return "节点选择中，↑/↓ 选择，Enter 确认，Esc 返回"
+	}
+	if m.focus == consoleFocusInput {
+		return "输入模式：Enter 执行，Tab 补全，Esc 返回导航"
+	}
+	return "导航模式：←/→ 分区，↑/↓ 功能，/ 开始输入命令"
+}
+
+func (m *runtimeConsoleModel) setInputValue(value string) {
+	m.inputValue = value
+	m.inputCursor = len([]rune(value))
+}
+
+func (m *runtimeConsoleModel) insertInput(text string) {
+	if text == "" {
+		return
+	}
+	runes := []rune(m.inputValue)
+	if m.inputCursor < 0 {
+		m.inputCursor = 0
+	}
+	if m.inputCursor > len(runes) {
+		m.inputCursor = len(runes)
+	}
+	insert := []rune(text)
+	runes = append(runes[:m.inputCursor], append(insert, runes[m.inputCursor:]...)...)
+	m.inputValue = string(runes)
+	m.inputCursor += len(insert)
+}
+
+func (m *runtimeConsoleModel) deleteBeforeCursor() {
+	runes := []rune(m.inputValue)
+	if m.inputCursor <= 0 || len(runes) == 0 {
+		return
+	}
+	runes = append(runes[:m.inputCursor-1], runes[m.inputCursor:]...)
+	m.inputValue = string(runes)
+	m.inputCursor--
+}
+
+func (m *runtimeConsoleModel) deleteAtCursor() {
+	runes := []rune(m.inputValue)
+	if m.inputCursor < 0 || m.inputCursor >= len(runes) {
+		return
+	}
+	runes = append(runes[:m.inputCursor], runes[m.inputCursor+1:]...)
+	m.inputValue = string(runes)
+}
+
+func (m *runtimeConsoleModel) pushHistory(value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	if len(m.history) > 0 && m.history[len(m.history)-1] == value {
+		return
+	}
+	m.history = append(m.history, value)
+	if len(m.history) > 50 {
+		m.history = m.history[len(m.history)-50:]
+	}
+}
+
+func (m *runtimeConsoleModel) recallHistory(delta int) {
+	if len(m.history) == 0 {
+		return
+	}
+	if m.historyPos == -1 {
+		if delta < 0 {
+			m.historyPos = len(m.history) - 1
+		} else {
+			return
+		}
+	} else {
+		m.historyPos += delta
+		if m.historyPos < 0 {
+			m.historyPos = 0
+		}
+		if m.historyPos >= len(m.history) {
+			m.historyPos = -1
+			m.setInputValue("")
+			return
+		}
+	}
+	m.setInputValue(m.history[m.historyPos])
+}
+
+func (m runtimeConsoleModel) matchingSuggestions(value string) []string {
+	query := strings.ToLower(strings.TrimSpace(value))
+	if query == "" {
+		return defaultSuggestionsForTab(m.tab)
+	}
+	if !strings.HasPrefix(query, "/") {
+		query = "/" + query
+	}
+
+	matches := make([]string, 0, 4)
+	for _, item := range dedupeSuggestions(consoleCommandSuggestions()) {
+		if strings.HasPrefix(strings.ToLower(item), query) {
+			matches = append(matches, item)
+		}
+		if len(matches) >= 4 {
+			break
+		}
+	}
+	return matches
+}
+
 func (m *runtimeConsoleModel) handleConfirm(value string) (tea.Model, tea.Cmd) {
 	answer := strings.ToLower(strings.TrimSpace(value))
 
 	if answer != "y" && answer != "yes" {
 		m.pending = nil
+		m.focus = consoleFocusNav
 		m.setDetail("已取消", []string{noteLine("已取消。")})
 		return *m, nil
 	}
@@ -371,6 +547,9 @@ func (m *runtimeConsoleModel) handleConfirm(value string) (tea.Model, tea.Cmd) {
 	case consoleActionRestart:
 		m.setDetail("重启网关", []string{successLine("准备重启网关...")})
 		m.action = consoleActionRestart
+	case consoleActionExit:
+		m.setDetail("退出控制台", []string{successLine("准备退出控制台...")})
+		m.action = consoleActionExit
 	case consoleActionStop:
 		m.setDetail("停止网关", []string{successLine("准备停止网关...")})
 		m.action = consoleActionStop
@@ -425,7 +604,7 @@ func (m runtimeConsoleModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd
 			if err := m.client.SelectProxy(group.Name, target); err != nil {
 				m.setDetail("节点切换失败", []string{errorLine("切换失败: " + err.Error())})
 			} else {
-				m.setDetail("节点已切换", []string{successLine(fmt.Sprintf("已切换策略组 %s -> %s", group.Name, target))})
+				m.setDetail("节点已切换", []string{successLine(fmt.Sprintf("已切换节点: %s -> %s", group.Name, target))})
 			}
 			m.picker = pickerModeNone
 			m.refreshSnapshot()
@@ -440,11 +619,11 @@ func (m runtimeConsoleModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd
 func (m *runtimeConsoleModel) openGroupPicker() (tea.Model, tea.Cmd) {
 	groups, err := m.client.ListProxyGroups()
 	if err != nil {
-		m.setDetail("策略组读取失败", []string{errorLine("无法读取策略组: " + err.Error())})
+		m.setDetail("节点分组读取失败", []string{errorLine("无法读取节点分组: " + err.Error())})
 		return *m, nil
 	}
 	if len(groups) == 0 {
-		m.setDetail("策略组选择器", []string{noteLine("当前没有可切换的策略组。")})
+		m.setDetail("节点切换器", []string{noteLine("当前没有可切换的节点分组。")})
 		return *m, nil
 	}
 
@@ -468,15 +647,11 @@ func (m *runtimeConsoleModel) refreshSnapshot() {
 		iface:         m.iface,
 		shareEntry:    m.ip,
 		currentNode:   "未知",
+		refreshedAt:   time.Now().Format("15:04:05"),
 	}
 	if pg, err := m.client.GetProxyGroup("Proxy"); err == nil && strings.TrimSpace(pg.Now) != "" {
 		m.snapshot.currentNode = pg.Now
 	}
-}
-
-func (m *runtimeConsoleModel) refreshViewport() {
-	m.viewport.SetContent(strings.Join(m.history, "\n"))
-	m.viewport.GotoBottom()
 }
 
 func (m *runtimeConsoleModel) resize() {
@@ -489,7 +664,6 @@ func (m *runtimeConsoleModel) resize() {
 	m.mainHeight = mainHeight
 
 	detailWidth := m.detailPaneWidth()
-	m.input.SetWidth(max(20, m.width-10))
 	m.viewport.SetWidth(max(24, detailWidth-4))
 	m.viewport.SetHeight(max(5, mainHeight-4))
 }
@@ -499,41 +673,49 @@ func (m runtimeConsoleModel) renderHeader() string {
 		Bold(true).
 		Foreground(lipgloss.Color("#f8fafc"))
 	subStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#94a3b8"))
-	ruleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#334155"))
 
 	line1 := titleStyle.Render("Gateway Console")
 	line2 := m.renderTabs()
-	line3 := subStyle.Render(activeTabDescription(m.tab))
-	line4 := subStyle.Render("←/→ 切换分区  ·  ↑/↓ 选择功能  ·  Enter 执行  ·  Ctrl+P 节点选择  ·  Tab 补全")
-	rule := ruleStyle.Render(strings.Repeat("─", max(12, m.width-2)))
+	line3 := subStyle.Render(m.renderHeaderSummary())
+	line4 := subStyle.Render(activeTabDescription(m.tab) + "  ·  " + m.focusHint())
 
 	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#38bdf8")).
 		Padding(0, 1).
 		Width(max(36, m.width-2)).
-		Render(lipgloss.JoinVertical(lipgloss.Left, line1, line2, line3, line4, rule))
+		Render(lipgloss.JoinVertical(lipgloss.Left, line1, line2, line3, line4))
 }
 
 func (m runtimeConsoleModel) renderMain() string {
-	detailWidth := m.detailPaneWidth()
-	sideWidth := max(28, m.width-detailWidth-2)
-	detail := m.renderTranscript(detailWidth)
-	sidebar := m.renderSidebar(sideWidth)
-	return lipgloss.JoinHorizontal(lipgloss.Top, detail, sidebar)
+	menuWidth := 30
+	if m.width < 120 {
+		menuWidth = max(24, m.width/3)
+	}
+	detailWidth := max(38, m.width-menuWidth-3)
+
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		m.renderNavigationCard(menuWidth),
+		m.renderDetailPane(detailWidth),
+	)
 }
 
-func (m runtimeConsoleModel) renderTranscript(width int) string {
+func (m runtimeConsoleModel) renderDetailPane(width int) string {
 	title := m.detailTitle
 	if title == "" {
-		title = "功能详情"
+		title = "当前内容"
 	}
 	content := m.viewport.View()
+	border := "#334155"
 	if m.picker != pickerModeNone {
-		title = "策略组选择器"
+		title = "节点选择器"
 		content = m.renderPicker(width-4, max(3, m.mainHeight-4))
+		border = "#f59e0b"
 	}
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#334155")).
+		BorderForeground(lipgloss.Color(border)).
 		Padding(0, 1).
 		Width(width)
 
@@ -548,48 +730,38 @@ func (m runtimeConsoleModel) renderTranscript(width int) string {
 	return box.Render(lipgloss.JoinVertical(lipgloss.Left, header, "", body))
 }
 
-func (m runtimeConsoleModel) renderSidebar(width int) string {
+func (m runtimeConsoleModel) renderNavigationCard(width int) string {
 	if width <= 0 {
 		return ""
 	}
 
 	lines := []string{
-		renderSectionTitle("系统摘要"),
-		"共享入口: " + m.snapshot.shareEntry,
-		"当前节点: " + m.snapshot.currentNode,
-		"运行模式: " + plainText(m.snapshot.modeSummary),
-		"出口摘要: " + plainText(m.snapshot.egressSummary),
-		"",
 		renderSectionTitle(tabLabel(m.tab)),
 	}
 	lines = append(lines, m.renderMenuLines()...)
-
-	if width >= 34 {
-		pet := petFrames()[m.petFrame]
-		lines = append(lines,
-			"",
-			renderSectionTitle("Gateway Pet"),
-			pet,
-			"mood: " + petMood(m.cfg),
-		)
-	}
-
 	lines = append(lines,
 		"",
-		renderSectionTitle("快捷提示"),
-		"R 刷新当前摘要",
-		"Q 退出控制台",
-		"底部输入框可直接执行命令",
+		renderSectionTitle("快捷键"),
+		"/ 进入命令栏",
+		"Ctrl+P 切节点",
+		"R 刷新摘要",
+		"Q 退出控制台（确认）",
 	)
 
-	card := m.renderCard(width, "控制区", lines)
+	title := "导航区"
+	border := "#334155"
+	if m.focus == consoleFocusNav && m.picker == pickerModeNone {
+		title = "导航区 · 当前聚焦"
+		border = "#38bdf8"
+	}
+	card := m.renderCard(width, title, lines, border)
 	return lipgloss.NewStyle().
 		Height(max(8, m.mainHeight)).
 		MaxHeight(max(8, m.mainHeight)).
 		Render(card)
 }
 
-func (m runtimeConsoleModel) renderCard(width int, title string, lines []string) string {
+func (m runtimeConsoleModel) renderCard(width int, title string, lines []string, borderColor string) string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7dd3fc"))
 
 	renderedLines := make([]string, 0, len(lines))
@@ -599,7 +771,7 @@ func (m runtimeConsoleModel) renderCard(width int, title string, lines []string)
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#334155")).
+		BorderForeground(lipgloss.Color(borderColor)).
 		Padding(0, 1).
 		Width(width)
 
@@ -607,25 +779,31 @@ func (m runtimeConsoleModel) renderCard(width int, title string, lines []string)
 }
 
 func (m runtimeConsoleModel) renderInput() string {
-	title := "输入命令"
-	placeholder := lipgloss.NewStyle().Foreground(lipgloss.Color("#94a3b8")).Render("可直接输入命令，也可用右侧菜单。示例: /status /groups /chains setup")
+	title := "命令栏 · 导航模式"
+	border := lipgloss.Color("#334155")
+	if m.focus == consoleFocusInput {
+		title = "命令栏 · 输入模式"
+		border = lipgloss.Color("#38bdf8")
+	}
 	if m.pending != nil {
-		title = "确认操作"
-		placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("#fbbf24")).Render(m.pending.prompt + "  输入 y / n")
+		title = "命令栏 · 等待确认"
+		border = lipgloss.Color("#f59e0b")
 	}
 	if m.picker != pickerModeNone {
-		title = "选择器"
-		placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("#fbbf24")).Render("↑/↓ 选择，Enter 确认，Esc 返回")
+		title = "命令栏 · 节点选择"
+		border = lipgloss.Color("#f59e0b")
 	}
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#475569")).
+		BorderForeground(border).
 		Padding(0, 1).
 		Width(max(36, m.width-2))
 
 	head := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#e2e8f0")).Render(title)
-	return box.Render(lipgloss.JoinVertical(lipgloss.Left, head, "", placeholder, m.input.View(), m.renderCommandSuggestions()))
+	inputLine := m.renderInputLine(max(24, m.width-10))
+	hints := lipgloss.NewStyle().Foreground(lipgloss.Color("#94a3b8")).Render(m.renderCommandSuggestions())
+	return box.Render(lipgloss.JoinVertical(lipgloss.Left, head, inputLine, hints))
 }
 
 func (m runtimeConsoleModel) renderTabs() string {
@@ -668,22 +846,76 @@ func (m runtimeConsoleModel) renderMenuLines() []string {
 }
 
 func (m runtimeConsoleModel) renderCommandSuggestions() string {
-	infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#94a3b8"))
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#cbd5e1"))
-
-	lines := []string{
-		infoStyle.Render("Tab 接受补全  ·  输入命令与菜单操作可以同时使用"),
+	if m.pending != nil {
+		return m.pending.prompt + "  ·  输入 y / n"
+	}
+	if m.picker != pickerModeNone {
+		return "↑/↓ 选择  ·  Enter 确认  ·  Esc 返回"
 	}
 
-	matches := dedupeSuggestions(m.input.MatchedSuggestions())
+	matches := m.matchingSuggestions(m.inputValue)
 	if len(matches) == 0 {
 		matches = defaultSuggestionsForTab(m.tab)
 	}
-	if len(matches) > 0 {
-		lines = append(lines, hintStyle.Render("建议: "+strings.Join(matches, "   ")))
+
+	if m.focus == consoleFocusInput || strings.TrimSpace(m.inputValue) != "" {
+		return truncateText("Tab 补全  ·  Enter 执行  ·  Esc 返回导航  ·  建议: "+strings.Join(matches, "   "), max(30, m.width-10))
 	}
 
-	return strings.Join(lines, "\n")
+	return truncateText("按 / 开始输入命令  ·  ←/→ 切换分区  ·  ↑/↓ 选择功能  ·  Ctrl+P 切换节点", max(30, m.width-10))
+}
+
+func (m runtimeConsoleModel) renderHeaderSummary() string {
+	parts := []string{
+		"入口 " + truncateText(m.snapshot.shareEntry, 18),
+		"节点 " + truncateText(m.snapshot.currentNode, 16),
+		"模式 " + truncateText(plainText(m.snapshot.modeSummary), 24),
+		"出口 " + truncateText(plainText(m.snapshot.egressSummary), 42),
+		"刷新 " + m.snapshot.refreshedAt,
+	}
+	return truncateText(strings.Join(parts, "  ·  "), max(40, m.width-10))
+}
+
+func (m runtimeConsoleModel) renderInputLine(width int) string {
+	promptStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#7dd3fc")).Bold(true)
+	textStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#e5e7eb"))
+	placeholderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748b"))
+	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#f8fafc")).Background(lipgloss.Color("#2563eb"))
+
+	prompt := "› "
+	value := m.inputValue
+	cursorPos := m.inputCursor
+	if cursorPos < 0 {
+		cursorPos = 0
+	}
+
+	if value == "" {
+		line := promptStyle.Render(prompt) + placeholderStyle.Render("例如 /status、/nodes、/chains setup")
+		return lipgloss.NewStyle().MaxWidth(width).Render(line)
+	}
+
+	runes := []rune(value)
+	if cursorPos > len(runes) {
+		cursorPos = len(runes)
+	}
+
+	before := string(runes[:cursorPos])
+	after := string(runes[cursorPos:])
+	cursorGlyph := " "
+	if cursorPos < len(runes) {
+		cursorGlyph = string(runes[cursorPos])
+		after = string(runes[cursorPos+1:])
+	}
+
+	line := promptStyle.Render(prompt) + textStyle.Render(before)
+	if m.focus == consoleFocusInput {
+		line += cursorStyle.Render(cursorGlyph)
+	} else {
+		line += textStyle.Render(cursorGlyph)
+	}
+	line += textStyle.Render(after)
+
+	return lipgloss.NewStyle().MaxWidth(width).Render(line)
 }
 
 func (m runtimeConsoleModel) detailPaneWidth() int {
@@ -745,7 +977,6 @@ func (m runtimeConsoleModel) selectedItem() consoleMenuItem {
 }
 
 func (m *runtimeConsoleModel) refreshSelectionPreview() {
-	m.refreshSnapshot()
 	item := m.selectedItem()
 	if item.title == "" {
 		m.setDetail("功能详情", []string{noteLine("当前没有可用功能。")})
@@ -779,12 +1010,11 @@ func (m *runtimeConsoleModel) executeSelectedAction() (tea.Model, tea.Cmd) {
 	item := m.selectedItem()
 	switch item.id {
 	case "overview_status":
-		m.showCapturedDetail("运行状态", func() { runStatus(nil, nil) })
+		m.setDetail("运行状态", m.renderStatusDetailLines())
 	case "overview_summary":
-		m.showCapturedDetail("配置摘要", func() { printConfigSummary(loadConfigOrDefault()) })
+		m.setDetail("配置摘要", renderConfigSummaryDetailLines(loadConfigOrDefault()))
 	case "overview_config":
-		m.action = consoleActionOpenConfig
-		return *m, tea.Quit
+		m.setDetail("配置中心", renderConfigCenterLines(loadConfigOrDefault()))
 	case "overview_guide":
 		m.showCapturedDetail("功能导航", func() { printStartGuide(loadConfigOrDefault(), m.logFile) })
 	case "routing_groups":
@@ -836,8 +1066,7 @@ func (m *runtimeConsoleModel) executeSelectedAction() (tea.Model, tea.Cmd) {
 	case "system_paths":
 		m.setDetail("运行路径", previewLinesForItem(item, m.snapshot, m.cfg, m.logFile))
 	case "system_config":
-		m.action = consoleActionOpenConfig
-		return *m, tea.Quit
+		m.setDetail("配置中心", renderConfigCenterLines(loadConfigOrDefault()))
 	default:
 		m.refreshSelectionPreview()
 	}
@@ -848,7 +1077,7 @@ func menuItemsForTab(tab consoleTab) []consoleMenuItem {
 	switch tab {
 	case consoleTabRouting:
 		return []consoleMenuItem{
-			{id: "routing_groups", key: "01", title: "策略组切换", desc: "打开策略组和节点选择器"},
+			{id: "routing_groups", key: "01", title: "切换节点", desc: "打开节点分组和节点选择器"},
 			{id: "routing_egress", key: "02", title: "出口网络", desc: "查看入口、普通出口和住宅出口"},
 			{id: "routing_logs", key: "03", title: "最近日志", desc: "读取最近 30 行运行日志"},
 			{id: "routing_panel", key: "04", title: "管理面板", desc: "查看 Web 面板入口和用途"},
@@ -869,7 +1098,7 @@ func menuItemsForTab(tab consoleTab) []consoleMenuItem {
 		}
 	case consoleTabSystem:
 		return []consoleMenuItem{
-			{id: "system_config", key: "01", title: "配置中心", desc: "打开交互式配置中心"},
+			{id: "system_config", key: "01", title: "TUI 配置中心", desc: "在 TUI 内查看当前配置与快捷入口"},
 			{id: "system_paths", key: "02", title: "运行路径", desc: "查看配置、日志和面板路径"},
 			{id: "system_stop", key: "03", title: "停止网关", desc: "停止当前运行中的网关"},
 			{id: "system_exit", key: "04", title: "退出控制台", desc: "退出 TUI，但保持网关继续运行"},
@@ -878,7 +1107,7 @@ func menuItemsForTab(tab consoleTab) []consoleMenuItem {
 		return []consoleMenuItem{
 			{id: "overview_status", key: "01", title: "运行状态", desc: "查看完整运行状态和出口网络"},
 			{id: "overview_summary", key: "02", title: "配置摘要", desc: "查看当前配置摘要和生效路径"},
-			{id: "overview_config", key: "03", title: "配置中心", desc: "进入交互式配置中心"},
+			{id: "overview_config", key: "03", title: "配置中心", desc: "在 TUI 内查看配置中心和快捷入口"},
 			{id: "overview_guide", key: "04", title: "功能导航", desc: "查看核心能力和下一步建议"},
 		}
 	}
@@ -901,7 +1130,14 @@ func previewLinesForItem(item consoleMenuItem, snap snapshot, cfg *config.Config
 			fmt.Sprintf("面板入口: %s", snap.panelURL),
 			fmt.Sprintf("网络接口: %s", snap.iface),
 			"",
-			noteLine("回车后会展开完整配置摘要。"),
+			noteLine("回车后会展开 TUI 版配置摘要。"),
+		}
+	case "overview_config", "system_config":
+		return []string{
+			"这里会留在 TUI 内展示配置中心和快捷入口。",
+			"如果需要完整编辑，可在底部输入 /config open。",
+			"",
+			noteLine("回车后不会离开 TUI。"),
 		}
 	case "overview_guide":
 		return []string{
@@ -921,7 +1157,7 @@ func previewLinesForItem(item consoleMenuItem, snap snapshot, cfg *config.Config
 	case "routing_panel":
 		return []string{
 			fmt.Sprintf("面板地址: %s", snap.panelURL),
-			"适合做节点测速、切换策略组、查看连接和流量。",
+			"适合做节点测速、切换节点、查看连接和流量。",
 			"如果你不想记命令，Web 面板和这个 TUI 可以配合使用。",
 		}
 	case "devices_mobile":
@@ -995,13 +1231,13 @@ func tabLabel(tab consoleTab) string {
 func defaultSuggestionsForTab(tab consoleTab) []string {
 	switch tab {
 	case consoleTabRouting:
-		return []string{"/groups", "/status", "/logs", "/summary"}
+		return []string{"/nodes", "/status", "/logs", "/summary"}
 	case consoleTabExtension:
 		return []string{"/chains", "/chains setup", "/update", "/restart"}
 	case consoleTabDevices:
 		return []string{"/device", "/status", "/summary", "/guide"}
 	case consoleTabSystem:
-		return []string{"/config", "/stop", "/exit", "/logs"}
+		return []string{"/config", "/config open", "/stop", "/exit"}
 	default:
 		return []string{"/status", "/summary", "/config", "/help"}
 	}
@@ -1013,8 +1249,10 @@ func consoleCommandSuggestions() []string {
 		"/status",
 		"/summary",
 		"/config",
+		"/config open",
 		"/chains",
 		"/chains setup",
+		"/nodes",
 		"/groups",
 		"/device",
 		"/logs",
@@ -1049,25 +1287,22 @@ func dedupeSuggestions(in []string) []string {
 			continue
 		}
 		out = append(out, item)
-		if len(out) >= 4 {
-			break
-		}
 	}
 	return out
 }
 
 func (m runtimeConsoleModel) renderPicker(width, height int) string {
 	if len(m.groups) == 0 {
-		return "暂无可用策略组"
+		return "暂无可用节点分组"
 	}
 
 	if m.picker == pickerModeGroups {
-		lines := []string{"选择一个策略组，然后回车进入节点列表。", ""}
+		lines := []string{"先选择一个节点分组，然后回车进入节点列表。", ""}
 		for i, group := range m.groups {
 			cursor := "  "
 			style := lipgloss.NewStyle().Foreground(lipgloss.Color("#cbd5e1"))
 			if i == m.groupCursor {
-				cursor = m.spin.View() + " "
+				cursor = "› "
 				style = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7dd3fc"))
 			}
 			lines = append(lines, style.Render(fmt.Sprintf("%s%s  [%s]  当前: %s", cursor, group.Name, group.Type, group.Now)))
@@ -1080,7 +1315,7 @@ func (m runtimeConsoleModel) renderPicker(width, height int) string {
 
 	group := m.groups[m.groupCursor]
 	lines := []string{
-		fmt.Sprintf("策略组: %s", group.Name),
+		fmt.Sprintf("节点分组: %s", group.Name),
 		fmt.Sprintf("当前节点: %s", group.Now),
 		"",
 	}
@@ -1088,7 +1323,7 @@ func (m runtimeConsoleModel) renderPicker(width, height int) string {
 		cursor := "  "
 		style := lipgloss.NewStyle().Foreground(lipgloss.Color("#cbd5e1"))
 		if i == m.nodeCursor {
-			cursor = m.spin.View() + " "
+			cursor = "› "
 			style = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#f59e0b"))
 		}
 		if node == group.Now {
@@ -1107,13 +1342,6 @@ func (m runtimeConsoleModel) renderPicker(width, height int) string {
 		Height(height).
 		MaxHeight(height).
 		Render(strings.Join(lines, "\n"))
-}
-
-func (m *runtimeConsoleModel) pushHistory(lines ...string) {
-	m.history = append(m.history, lines...)
-	if len(m.history) > 240 {
-		m.history = m.history[len(m.history)-240:]
-	}
 }
 
 func (m runtimeConsoleModel) capture(fn func()) string {
@@ -1171,30 +1399,6 @@ func newConsoleClient(cfg *config.Config) *mihomo.Client {
 	return mihomo.NewClient(apiURL, cfg.Runtime.APISecret)
 }
 
-func petTickCmd() tea.Cmd {
-	return tea.Tick(320*time.Millisecond, func(t time.Time) tea.Msg {
-		return petTickMsg(t)
-	})
-}
-
-func petFrames() []string {
-	return []string{
-		" /\\_/\\\\\n( ^.^ )\n / >🌐",
-		" /\\_/\\\\\n( o.o )\n / >✨",
-		" /\\_/\\\\\n( -.- )\n / >🛰",
-	}
-}
-
-func petMood(cfg *config.Config) string {
-	if cfg.Extension.Mode == "chains" {
-		return "guarding ai traffic"
-	}
-	if cfg.Runtime.Tun.Enabled {
-		return "sharing lan gateway"
-	}
-	return "waiting for commands"
-}
-
 func commandLine(text string) string {
 	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7dd3fc")).Render("› " + text)
 }
@@ -1209,19 +1413,254 @@ func errorLine(text string) string {
 }
 
 func outputBlock(text string) []string {
-	text = strings.TrimSpace(text)
+	text = strings.TrimSpace(stripANSI(text))
 	if text == "" {
 		return nil
 	}
 	raw := splitLines(text)
 	out := make([]string, 0, len(raw))
 	for _, line := range raw {
-		if strings.TrimSpace(line) == "" {
+		line = strings.TrimRight(plainText(line), " \t")
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
 			continue
 		}
-		out = append(out, "  "+line)
+		if isSeparatorLine(trimmed) {
+			continue
+		}
+		if isConsoleSectionTitle(trimmed) {
+			if len(out) > 0 {
+				out = append(out, "")
+			}
+			out = append(out, renderSectionTitle(trimmed))
+			continue
+		}
+		out = append(out, "  "+trimmed)
 	}
 	return out
+}
+
+func renderConfigSummaryDetailLines(cfg *config.Config) []string {
+	lines := []string{
+		renderSectionTitle("配置来源"),
+		"  配置文件: " + displayConfigPath(),
+		"  代理来源: " + cfg.Proxy.Source,
+		"  订阅名称: " + cfg.Proxy.SubscriptionName,
+	}
+	if cfg.Proxy.Source == "url" {
+		lines = append(lines, "  订阅链接: "+shortText(cfg.Proxy.SubscriptionURL, 72))
+	} else {
+		lines = append(lines, "  本地配置: "+cfg.Proxy.ConfigFile)
+	}
+
+	lines = append(lines,
+		"",
+		renderSectionTitle("运行模式"),
+		"  TUN: "+tuiOnOff(cfg.Runtime.Tun.Enabled),
+		"  本机绕过代理: "+tuiOnOff(cfg.Runtime.Tun.BypassLocal),
+		fmt.Sprintf("  端口: mixed %d | redir %d | api %d | dns %d", cfg.Runtime.Ports.Mixed, cfg.Runtime.Ports.Redir, cfg.Runtime.Ports.API, cfg.Runtime.Ports.DNS),
+		"",
+		renderSectionTitle("扩展模式"),
+		"  模式: "+extensionModeName(cfg.Extension.Mode),
+	)
+
+	if cfg.Extension.Mode == "script" {
+		lines = append(lines, "  脚本路径: "+cfg.Extension.ScriptPath)
+	}
+	if cfg.Extension.Mode == "chains" && cfg.Extension.ResidentialChain != nil {
+		lines = append(lines,
+			"  链式模式: "+cfg.Extension.ResidentialChain.Mode,
+			"  机场组: "+cfg.Extension.ResidentialChain.AirportGroup,
+		)
+	}
+
+	lines = append(lines,
+		"",
+		renderSectionTitle("规则开关"),
+		"  局域网直连: "+tuiOnOff(cfg.Rules.LanDirectEnabled()),
+		"  国内直连: "+tuiOnOff(cfg.Rules.ChinaDirectEnabled()),
+		"  Apple 规则: "+tuiOnOff(cfg.Rules.AppleRulesEnabled()),
+		"  Nintendo 代理: "+tuiOnOff(cfg.Rules.NintendoProxyEnabled()),
+		"  国外代理: "+tuiOnOff(cfg.Rules.GlobalProxyEnabled()),
+		"  广告拦截: "+tuiOnOff(cfg.Rules.AdsRejectEnabled()),
+		fmt.Sprintf("  自定义规则: 直连 %d | 代理 %d | 拦截 %d", len(cfg.Rules.ExtraDirectRules), len(cfg.Rules.ExtraProxyRules), len(cfg.Rules.ExtraRejectRules)),
+	)
+	return lines
+}
+
+func renderConfigCenterLines(cfg *config.Config) []string {
+	lines := []string{
+		renderSectionTitle("当前配置"),
+		"  代理来源: " + cfg.Proxy.Source,
+		"  TUN: " + tuiOnOff(cfg.Runtime.Tun.Enabled),
+		"  本机绕过代理: " + tuiOnOff(cfg.Runtime.Tun.BypassLocal),
+		"  扩展模式: " + extensionModeName(cfg.Extension.Mode),
+		"  国内直连: " + tuiOnOff(cfg.Rules.ChinaDirectEnabled()),
+		"  广告拦截: " + tuiOnOff(cfg.Rules.AdsRejectEnabled()),
+		"",
+		renderSectionTitle("快捷入口"),
+		noteLine("输入 /summary 查看完整配置摘要"),
+		noteLine("输入 /nodes 切换节点"),
+		noteLine("输入 /chains setup 打开链式代理向导"),
+		noteLine("输入 /config open 打开完整交互式配置中心"),
+		"",
+		renderSectionTitle("说明"),
+		noteLine("当前 TUI 先提供查看和快捷入口，完整编辑仍可通过 /config open 进入。"),
+	}
+	return lines
+}
+
+func (m *runtimeConsoleModel) renderStatusDetailLines() []string {
+	cfg := loadConfigOrDefault()
+	client := newConsoleClient(cfg)
+	p := platform.New()
+
+	running, pid, _ := p.IsRunning()
+	forwarding, _ := p.IsIPForwardingEnabled()
+	tunIf, _ := p.DetectTUNInterface()
+	iface := m.iface
+	if iface == "" {
+		iface, _ = p.DetectDefaultInterface()
+	}
+	ip := m.ip
+	if ip == "" {
+		ip, _ = p.DetectInterfaceIP(iface)
+	}
+
+	lines := []string{
+		renderSectionTitle("运行状态"),
+	}
+	if running {
+		lines = append(lines, fmt.Sprintf("  mihomo: %s (PID: %d)", tuiGood("运行中"), pid))
+	} else {
+		lines = append(lines, "  mihomo: "+tuiWarn("未运行"))
+	}
+	lines = append(lines,
+		"  IP 转发: "+tuiState(forwarding, "已开启", "未开启"),
+		"  TUN 接口: "+fallbackText(tunIf, "未检测到"),
+		"  网络接口: "+fallbackText(iface, "未识别"),
+		"  局域网 IP: "+fallbackText(ip, "未识别"),
+		"  扩展模式: "+plainText(extensionModeSummary(cfg)),
+	)
+
+	if client.IsAvailable() {
+		lines = append(lines,
+			"",
+			renderSectionTitle("代理信息"),
+		)
+		if v, err := client.GetVersion(); err == nil {
+			lines = append(lines, "  版本: "+v.Version)
+		}
+		if pg, err := client.GetProxyGroup("Proxy"); err == nil {
+			lines = append(lines, "  当前节点: "+pg.Now)
+		}
+		if conn, err := client.GetConnections(); err == nil {
+			lines = append(lines,
+				fmt.Sprintf("  活跃连接: %d", len(conn.Connections)),
+				"  上传总量: "+ui.FormatBytes(conn.UploadTotal),
+				"  下载总量: "+ui.FormatBytes(conn.DownloadTotal),
+			)
+		}
+
+		report := egress.Collect(cfg, m.dataDir, client)
+		lines = append(lines, "", renderSectionTitle("出口网络"))
+		lines = append(lines, renderEgressDetailLines(cfg, report)...)
+	}
+
+	lines = append(lines,
+		"",
+		renderSectionTitle("设备配置"),
+		"  网关 (Gateway): "+fallbackText(ip, "未识别"),
+		"  DNS: "+fallbackText(ip, "未识别"),
+		fmt.Sprintf("  API 面板: http://%s:%d/ui", fallbackText(ip, "127.0.0.1"), cfg.Runtime.Ports.API),
+	)
+	return lines
+}
+
+func renderEgressDetailLines(cfg *config.Config, report *egress.Report) []string {
+	if report == nil {
+		return []string{"  探测状态: 探测中"}
+	}
+
+	lines := []string{
+		"  探测来源: " + report.ProbeSource,
+	}
+
+	if cfg.Extension.Mode != "chains" {
+		if report.ProxyExit != nil {
+			lines = append(lines, "  当前出口: "+report.ProxyExit.Summary())
+		} else {
+			lines = append(lines, "  当前出口: 探测失败")
+		}
+		return lines
+	}
+
+	chainMode := "rule"
+	if cfg.Extension.ResidentialChain != nil && cfg.Extension.ResidentialChain.Mode != "" {
+		chainMode = cfg.Extension.ResidentialChain.Mode
+	}
+	lines = append(lines, "  链路模式: "+chainMode)
+	if report.AirportNode != nil {
+		lines = append(lines, "  入口节点: "+report.AirportNode.Summary())
+	} else {
+		lines = append(lines, "  入口节点: 未识别当前机场节点")
+	}
+	if chainMode == "rule" {
+		if report.ProxyExit != nil {
+			lines = append(lines, "  普通出口: "+report.ProxyExit.Summary())
+		} else {
+			lines = append(lines, "  普通出口: 探测失败")
+		}
+	}
+	if report.ResidentialExit != nil {
+		label := "  住宅出口: "
+		if chainMode == "global" {
+			label = "  全局出口: "
+		}
+		lines = append(lines, label+report.ResidentialExit.Summary())
+	} else {
+		lines = append(lines, "  住宅出口: 探测失败")
+	}
+	if chainMode == "rule" {
+		lines = append(lines, noteLine("普通流量走机场出口，AI 相关流量走住宅出口"))
+	} else {
+		lines = append(lines, noteLine("当前为 global 模式，所有流量都会走住宅出口"))
+	}
+	return lines
+}
+
+func tuiOnOff(enabled bool) string {
+	if enabled {
+		return tuiGood("on")
+	}
+	return tuiWarn("off")
+}
+
+func tuiState(enabled bool, onText, offText string) string {
+	if enabled {
+		return tuiGood(onText)
+	}
+	return tuiWarn(offText)
+}
+
+func tuiGood(text string) string {
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("#a3e635")).Render(text)
+}
+
+func tuiWarn(text string) string {
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("#fbbf24")).Render(text)
+}
+
+func fallbackText(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func stripANSI(s string) string {
+	return ansiEscapePattern.ReplaceAllString(s, "")
 }
 
 func plainText(s string) string {
@@ -1238,6 +1677,35 @@ func plainText(s string) string {
 		"\x1b[37m", "",
 	)
 	return replacer.Replace(s)
+}
+
+func isSeparatorLine(s string) bool {
+	return strings.Trim(s, "─- ") == ""
+}
+
+func isConsoleSectionTitle(s string) bool {
+	if strings.Contains(s, ":") {
+		return false
+	}
+	if strings.HasPrefix(s, "[") {
+		return false
+	}
+	count := utf8.RuneCountInString(s)
+	return count > 0 && count <= 8
+}
+
+func truncateText(s string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	if limit == 1 {
+		return "…"
+	}
+	return string(runes[:limit-1]) + "…"
 }
 
 func max(a, b int) int {

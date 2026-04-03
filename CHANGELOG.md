@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented here.
 
+## v2.2.1 - 2026-04-03
+
+### Fixed
+
+- Reworked the runtime TUI so navigation no longer re-runs heavy status probes on every arrow key press
+- Removed the distracting pet panel and reduced redraw pressure with a lighter two-column layout
+- Fixed TUI focus feedback so the active area is highlighted more clearly
+- Replaced captured CLI output in the TUI status and config pages with native TUI rendering
+- Added `gateway console` and `gateway console --simple` so users can reopen the workspace without restarting the gateway
+- Improved plain-command help text and renamed the main node-switching entry to `nodes` while keeping `groups` compatible
+
+### Changed
+
+- `Q` in the TUI now asks for confirmation instead of exiting immediately
+- `R` in the TUI now shows a visible refresh result and timestamp
+- `config` inside the TUI now stays in the TUI first; `config open` is the explicit path to the full interactive config center
+- Updated the Chinese and English READMEs plus command reference docs for the new console flow
+
 ## v2.2.0 - 2026-04-03
 
 ### Added

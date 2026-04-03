@@ -10,19 +10,23 @@
 | `gateway config` | Interactive config center: proxy source, LAN sharing, rules, extensions | No |
 | `gateway config show` | Show the current config summary | No |
 | `sudo gateway start` | Start the gateway and enter the runtime TUI | Yes |
+| `sudo gateway start --simple` | Start the gateway and enter the plain command console | Yes |
+| `sudo gateway console` | Re-enter the runtime TUI without restarting the gateway | Yes |
+| `sudo gateway console --simple` | Re-enter the plain command console without restarting the gateway | Yes |
 | `sudo gateway stop` | Stop the gateway | Yes |
 | `sudo gateway restart` | Restart the gateway | Yes |
 | `gateway status` | Show runtime status, entry node, regular exit, and residential exit | No |
 
 ## Runtime Console
 
-After `gateway start` succeeds in an interactive terminal, it enters a runtime TUI console.
+After `gateway start` succeeds in an interactive terminal, it enters a runtime TUI console. After leaving it, you can return with `gateway console`.
 
 Supported actions:
 
-- slash commands: `/status` `/config` `/chains` `/groups` `/logs` `/help`
-- proxy group picker: `Ctrl+P`
+- slash commands: `/status` `/summary` `/config` `/config open` `/chains` `/nodes` `/logs` `/help`
+- node picker: `Ctrl+P`
 - confirmation flow: after `/stop` or `/restart`, type `y` or `n`
+- plain command mode: `sudo gateway start --simple` or `sudo gateway console --simple`
 
 This makes it feel more like a persistent CLI workspace, not a one-shot command that prints and exits.
 
@@ -68,7 +72,7 @@ You can switch groups and nodes in two ways:
 2. Runtime TUI:
    - start the gateway
    - press `Ctrl+P`
-   - choose a proxy group
+   - choose a node group
    - choose a node and press Enter
 
 This makes the project feel closer to a CLI workbench for Clash Verge Rev style workflows.

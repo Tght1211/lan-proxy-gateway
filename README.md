@@ -72,13 +72,15 @@ graph TD
 
 - tab 分区、方向键选择、回车执行
 - 底部输入框直接执行命令
-- `Ctrl+P` 打开策略组和节点选择器
+- `Ctrl+P` 打开节点分组和节点选择器
 
-如果你只想“启动就结束”，可以使用：
+如果你更在意兼容性，或者想在低配环境里使用纯命令交互，可以使用：
 
 ```bash
 sudo gateway start --simple
 ```
+
+这个模式不会进入 TUI，而是进入一个纯命令控制台。
 
 ### 4. 规则系统
 
@@ -164,13 +166,20 @@ sudo gateway start
 
 这一步里最重要的是记住你的局域网 IP。
 
-如果你更喜欢传统的简洁输出：
+如果你更喜欢兼容性更强的纯命令模式：
 
 ```bash
 sudo gateway start --simple
 ```
 
-它会打印启动摘要后直接返回终端，不进入 TUI。
+它不会进入 TUI，而是进入一个纯命令控制台。
+
+如果你退出了控制台，之后可以随时重新进入：
+
+```bash
+sudo gateway console
+sudo gateway console --simple
+```
 
 ### 第 4 步：让其他设备接入
 
@@ -206,8 +215,10 @@ gateway status
 |---|---|
 | `gateway install` | 初始化向导 |
 | `gateway config` | 交互式配置中心 |
-| `sudo gateway start` | 启动网关并进入运行中控制台 |
-| `sudo gateway start --simple` | 用简洁模式启动：打印摘要后直接返回 |
+| `sudo gateway start` | 启动网关并进入默认工作台（TUI + 命令输入） |
+| `sudo gateway start --simple` | 启动网关并进入纯命令模式（兼容性更好） |
+| `sudo gateway console` | 重新进入默认工作台，不重启网关 |
+| `sudo gateway console --simple` | 重新进入纯命令控制台，不重启网关 |
 | `gateway status` | 查看运行状态和出口网络 |
 | `gateway chains` | 链式代理向导 |
 | `gateway switch` | 切换代理来源和扩展模式 |

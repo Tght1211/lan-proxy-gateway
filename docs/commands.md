@@ -8,19 +8,23 @@
 | `gateway config` | 交互式配置中心: 代理来源 / 局域网共享 / 规则 / 扩展 | 否 |
 | `gateway config show` | 查看当前配置摘要 | 否 |
 | `sudo gateway start` | 启动网关，并在交互终端里进入运行中控制台 | 是 |
+| `sudo gateway start --simple` | 启动网关，并进入纯命令控制台 | 是 |
+| `sudo gateway console` | 不重启网关，重新进入运行中控制台 | 是 |
+| `sudo gateway console --simple` | 不重启网关，重新进入纯命令控制台 | 是 |
 | `sudo gateway stop` | 停止网关 | 是 |
 | `sudo gateway restart` | 重启网关 | 是 |
 | `gateway status` | 查看运行状态、入口节点、普通出口、住宅出口 | 否 |
 
 ## 运行中控制台
 
-`gateway start` 在交互终端中成功启动后，会进入一个运行中 TUI 控制台。
+`gateway start` 在交互终端中成功启动后，会进入一个运行中 TUI 控制台。退出后，也可以用 `gateway console` 再次进入。
 
 支持:
 
-- slash 命令: `/status` `/config` `/chains` `/groups` `/logs` `/help`
-- 策略组选择器: `Ctrl+P`
+- slash 命令: `/status` `/summary` `/config` `/config open` `/chains` `/nodes` `/logs` `/help`
+- 节点选择器: `Ctrl+P`
 - 确认交互: `/stop` `/restart` 后输入 `y / n`
+- 纯命令模式: `sudo gateway start --simple` 或 `sudo gateway console --simple`
 
 这让它更像一个持续运行的 CLI 系统，而不是“一次性打印信息就退出”的命令。
 
@@ -66,7 +70,7 @@
 2. CLI 运行中控制台:
    - 启动网关
    - 按 `Ctrl+P`
-   - 选择策略组
+   - 选择节点分组
    - 选择节点并回车切换
 
 这让它更接近一个 CLI 版的 Clash Verge Rev 工作台。

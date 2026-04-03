@@ -72,13 +72,15 @@ By default, `gateway start` opens the runtime workspace:
 
 - tabs, arrow-key navigation, and Enter-to-run actions
 - a command bar at the bottom for direct commands
-- `Ctrl+P` for proxy group and node switching
+- `Ctrl+P` for node-group and node switching
 
-If you want the old lightweight flow, use:
+If you prefer a more compatible low-overhead mode, use:
 
 ```bash
 sudo gateway start --simple
 ```
+
+This opens a plain command console instead of the TUI.
 
 ### 4. Rule system
 
@@ -164,13 +166,20 @@ By default, startup enters the runtime workspace and shows:
 
 The most important thing here is your LAN IP.
 
-If you prefer a simple one-shot startup:
+If you prefer the plain command mode:
 
 ```bash
 sudo gateway start --simple
 ```
 
-It prints the startup summary and returns to the shell without entering the TUI.
+It skips the TUI and enters a compatibility-friendly command console.
+
+If you leave the console, you can re-enter it at any time:
+
+```bash
+sudo gateway console
+sudo gateway console --simple
+```
 
 ### Step 4: Connect another device
 
@@ -206,8 +215,10 @@ You will see:
 |---|---|
 | `gateway install` | Initial setup wizard |
 | `gateway config` | Interactive config center |
-| `sudo gateway start` | Start gateway and open runtime TUI |
-| `sudo gateway start --simple` | Start in simple mode and return after printing the summary |
+| `sudo gateway start` | Start gateway and open the default workspace (TUI + command input) |
+| `sudo gateway start --simple` | Start gateway in plain command mode for better compatibility |
+| `sudo gateway console` | Re-enter the default workspace without restarting the gateway |
+| `sudo gateway console --simple` | Re-enter the plain command console without restarting the gateway |
 | `gateway status` | Show runtime and egress status |
 | `gateway chains` | Chains / residential proxy wizard |
 | `gateway switch` | Switch proxy source and extension mode |

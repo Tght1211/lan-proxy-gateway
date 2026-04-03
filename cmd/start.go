@@ -29,7 +29,7 @@ var startSimple bool
 
 func init() {
 	rootCmd.AddCommand(startCmd)
-	startCmd.Flags().BoolVar(&startSimple, "simple", false, "使用简洁启动模式：打印摘要后直接返回，不进入 TUI")
+	startCmd.Flags().BoolVar(&startSimple, "simple", false, "使用纯命令模式：不进入 TUI，使用兼容性更好的命令交互")
 }
 
 func runStart(cmd *cobra.Command, args []string) {
@@ -135,30 +135,43 @@ func runStart(cmd *cobra.Command, args []string) {
 		ui.Success("代理服务运行正常（规则模式，无 TUN）")
 	}
 
-	if isInteractiveTerminal() && !startSimple {
-		for {
-			action := runRuntimeConsole(logFile, ip, iface, dDir)
-			switch action {
-			case consoleActionOpenConfig:
-				runConfigMenu(nil, nil)
-			case consoleActionOpenChainsSetup:
-				runChainsSetup(nil, nil)
-			case consoleActionStop:
-				runStop(nil, nil)
-				return
-			case consoleActionRestart:
-				runStop(nil, nil)
-				runStart(cmd, args)
-				return
-			default:
-				return
-			}
-		}
+	if isInteractiveTerminal() {
+		runInteractiveConsoleLoop(startSimple, logFile, ip, iface, dDir, func() {
+			runStart(cmd, args)
+		})
+		return
 	} else {
 		printCompactStartSummary(cfg, dDir, ip, iface)
-		if startSimple && isInteractiveTerminal() {
-			fmt.Println("  已使用简洁启动模式；如需运行中工作台，请去掉 --simple")
-			fmt.Println()
+	}
+}
+
+func runInteractiveConsoleLoop(simple bool, logFile, ip, iface, dDir string, restartFn func()) {
+	modeSimple := simple
+
+	for {
+		var action consoleAction
+		if modeSimple {
+			action = runSimpleRuntimeConsole(logFile, ip, iface, dDir)
+		} else {
+			action = runRuntimeConsole(logFile, ip, iface, dDir)
+		}
+
+		switch action {
+		case consoleActionOpenConfig:
+			runConfigMenu(nil, nil)
+		case consoleActionOpenChainsSetup:
+			runChainsSetup(nil, nil)
+		case consoleActionOpenTUI:
+			modeSimple = false
+		case consoleActionStop:
+			runStop(nil, nil)
+			return
+		case consoleActionRestart:
+			runStop(nil, nil)
+			restartFn()
+			return
+		default:
+			return
 		}
 	}
 }
@@ -188,50 +201,57 @@ func printCompactStartSummary(cfg *config.Config, dDir, ip, iface string) {
 	fmt.Println()
 }
 
-func runStartConsole(logFile, ip, iface, dDir string) {
+func runSimpleRuntimeConsole(logFile, ip, iface, dDir string) consoleAction {
 	reader := bufio.NewReader(os.Stdin)
+	printCompactStartSummary(loadConfigOrDefault(), dDir, ip, iface)
+	fmt.Println("  已进入纯命令模式。输入 help 查看命令，输入 exit 退出。")
+	fmt.Println()
 
 	for {
-		clearInteractiveScreen()
 		cfg := loadConfigOrDefault()
-
-		printCompactStartSummary(cfg, dDir, ip, iface)
-		ui.Separator()
-		color.New(color.Bold).Println("  快捷操作")
-		fmt.Println()
-		fmt.Println("  1) 完整状态")
-		fmt.Println("  2) 配置中心")
-		fmt.Println("  3) 链式代理 / 扩展")
-		fmt.Println("  4) 设备接入说明")
-		fmt.Println("  5) 最近日志")
-		fmt.Println("  6) 功能导航")
-		fmt.Println("  0) 退出控制台")
-		fmt.Println()
-		color.New(color.Faint).Println("  网关会继续保持运行；退出这里只是返回终端，不会停止服务")
-		fmt.Println()
-		fmt.Print("选择操作 [0-6]，也支持 s/g/e/d/l/h/q: ")
+		fmt.Print("gateway> ")
 
 		input, _ := reader.ReadString('\n')
 		choice := strings.ToLower(strings.TrimSpace(input))
 		fmt.Println()
 
 		switch choice {
-		case "1", "s", "status":
+		case "", "help", "?":
+			fmt.Println("  可用命令:")
+			fmt.Println("  status        查看运行状态")
+			fmt.Println("  summary       查看配置摘要")
+			fmt.Println("  config        打开配置中心")
+			fmt.Println("  chains        查看链式代理 / 扩展状态")
+			fmt.Println("  chains setup  打开链式代理向导")
+			fmt.Println("  nodes         切换节点（兼容 groups）")
+			fmt.Println("  device        查看设备接入说明")
+			fmt.Println("  logs          查看最近日志")
+			fmt.Println("  guide         查看功能导航")
+			fmt.Println("  update        查看升级提示")
+			fmt.Println("  tui           切换进入默认 TUI")
+			fmt.Println("  restart       重启网关")
+			fmt.Println("  stop          停止网关")
+			fmt.Println("  exit          退出纯命令模式")
+			fmt.Println()
+		case "status":
 			runStatus(nil, nil)
-			waitEnter(reader)
-		case "2", "g", "config", "menu":
-			runConfigMenu(nil, nil)
-		case "3", "e", "ext", "extension", "chains":
+		case "summary":
+			printConfigSummary(loadConfigOrDefault())
+		case "config":
+			return consoleActionOpenConfig
+		case "chains":
 			if cfg.Extension.Mode == "chains" {
 				runChainsStatus(nil, nil)
 			} else {
 				printExtensionStatus(cfg)
 			}
-			waitEnter(reader)
-		case "4", "d", "device", "devices":
+		case "chains setup":
+			return consoleActionOpenChainsSetup
+		case "nodes", "node", "groups":
+			runSimpleGroupChooser(reader, cfg)
+		case "device", "devices":
 			printDeviceSetupPanel(ip, cfg.Runtime.Ports.API)
-			waitEnter(reader)
-		case "5", "l", "log", "logs":
+		case "logs", "log":
 			ui.Separator()
 			color.New(color.Bold).Println("  最近日志")
 			ui.Separator()
@@ -239,19 +259,129 @@ func runStartConsole(logFile, ip, iface, dDir string) {
 			fmt.Println()
 			fmt.Printf("  实时查看: tail -f %s\n", logFile)
 			fmt.Println()
-			waitEnter(reader)
-		case "6", "h", "help", "guide":
+		case "guide":
 			printStartGuide(cfg, logFile)
-			waitEnter(reader)
-		case "0", "q", "quit", "exit":
-			fmt.Println("  已退出运行中控制台，网关保持运行。")
+		case "update":
+			if notice := loadUpdateNotice(); notice != nil {
+				for _, line := range renderUpdateNoticeLines(notice) {
+					fmt.Printf("  %s\n", line)
+				}
+			} else {
+				fmt.Println("  当前已经是最新版本，或本次未检测到更新。")
+			}
 			fmt.Println()
-			return
+		case "tui", "console":
+			fmt.Println("  正在切换到默认 TUI...")
+			fmt.Println()
+			return consoleActionOpenTUI
+		case "restart":
+			fmt.Print("确认重启网关？[y/N]: ")
+			answer, _ := reader.ReadString('\n')
+			if strings.TrimSpace(strings.ToLower(answer)) == "y" {
+				return consoleActionRestart
+			}
+			fmt.Println("  已取消。")
+			fmt.Println()
+		case "stop":
+			fmt.Print("确认停止网关？[y/N]: ")
+			answer, _ := reader.ReadString('\n')
+			if strings.TrimSpace(strings.ToLower(answer)) == "y" {
+				return consoleActionStop
+			}
+			fmt.Println("  已取消。")
+			fmt.Println()
+		case "q", "quit", "exit":
+			fmt.Println("  已退出纯命令模式，网关保持运行。")
+			fmt.Println("  重新进入: sudo gateway console --simple")
+			fmt.Println()
+			return consoleActionExit
 		default:
-			ui.Warn("请输入 0-6，或 s/g/e/d/l/h/q")
+			ui.Warn("未识别的命令，输入 help 查看可用命令")
 			fmt.Println()
 		}
 	}
+}
+
+func runSimpleGroupChooser(reader *bufio.Reader, cfg *config.Config) {
+	client := newConsoleClient(cfg)
+	groups, err := client.ListProxyGroups()
+	if err != nil {
+		ui.Error("读取节点分组失败: %v", err)
+		return
+	}
+	if len(groups) == 0 {
+		ui.Info("当前没有可切换的节点分组")
+		return
+	}
+
+	ui.Separator()
+	color.New(color.Bold).Println("  节点分组")
+	ui.Separator()
+	for i, group := range groups {
+		fmt.Printf("  %d) %s [%s]  当前: %s\n", i+1, group.Name, group.Type, group.Now)
+	}
+	fmt.Println()
+	fmt.Print("选择节点分组 [1-", len(groups), "]，回车取消: ")
+	rawGroup, _ := reader.ReadString('\n')
+	rawGroup = strings.TrimSpace(rawGroup)
+	if rawGroup == "" {
+		fmt.Println()
+		return
+	}
+
+	groupIndex := parseIndex(rawGroup, len(groups))
+	if groupIndex < 0 {
+		ui.Warn("无效的节点分组编号")
+		fmt.Println()
+		return
+	}
+
+	group := groups[groupIndex]
+	fmt.Println()
+	color.New(color.Bold).Printf("  节点列表 · %s\n", group.Name)
+	fmt.Println()
+	for i, node := range group.All {
+		current := ""
+		if node == group.Now {
+			current = " (current)"
+		}
+		fmt.Printf("  %d) %s%s\n", i+1, node, current)
+	}
+	fmt.Println()
+	fmt.Print("选择节点 [1-", len(group.All), "]，回车取消: ")
+	rawNode, _ := reader.ReadString('\n')
+	rawNode = strings.TrimSpace(rawNode)
+	if rawNode == "" {
+		fmt.Println()
+		return
+	}
+
+	nodeIndex := parseIndex(rawNode, len(group.All))
+	if nodeIndex < 0 {
+		ui.Warn("无效的节点编号")
+		fmt.Println()
+		return
+	}
+
+	target := group.All[nodeIndex]
+	if err := client.SelectProxy(group.Name, target); err != nil {
+		ui.Error("切换失败: %v", err)
+	} else {
+		ui.Success("已切换节点: %s -> %s", group.Name, target)
+	}
+	fmt.Println()
+}
+
+func parseIndex(value string, length int) int {
+	var idx int
+	if _, err := fmt.Sscanf(value, "%d", &idx); err != nil {
+		return -1
+	}
+	idx--
+	if idx < 0 || idx >= length {
+		return -1
+	}
+	return idx
 }
 
 func clearInteractiveScreen() {
