@@ -164,7 +164,7 @@ func runSwitch(cmd *cobra.Command, args []string) {
 		}
 		ui.Success("配置文件已生成")
 		fmt.Println()
-		ui.Info("如需生效，请重启网关: sudo gateway start")
+		ui.Info("如需生效，请重启网关: %s", elevatedCmd("start"))
 	}
 }
 
@@ -231,7 +231,7 @@ func runSwitchExtension(cmd *cobra.Command, args []string) {
 
 	fmt.Println()
 	fmt.Println("  重启网关后生效:")
-	fmt.Println("    sudo gateway restart")
+	fmt.Printf("    %s\n", elevatedCmd("restart"))
 }
 
 func saveExtensionSwitch(cfg *config.Config, cfgPath string) {

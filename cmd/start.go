@@ -102,7 +102,7 @@ func runStart(cmd *cobra.Command, args []string) {
 		ui.Step(4, 5, "启动 mihomo...")
 	}
 
-	logFile := "/tmp/lan-proxy-gateway.log"
+	logFile := defaultLogFile()
 	pid, err := p.StartProcess(binary, dDir, logFile)
 	if err != nil {
 		ui.Error("mihomo 启动失败: %s", err)
@@ -193,7 +193,7 @@ func printCompactStartSummary(cfg *config.Config, dDir, ip, iface string) {
 	fmt.Printf("  配置文件: %s\n", displayConfigPath())
 	fmt.Printf("  查看详情: gateway status\n")
 	if updateNotice != nil {
-		fmt.Printf("  新版可用: %s -> sudo gateway update\n", color.YellowString(updateNotice.Latest))
+		fmt.Printf("  新版可用: %s -> %s\n", color.YellowString(updateNotice.Latest), elevatedCmd("update"))
 	}
 	if iface != "" {
 		fmt.Printf("  网络接口: %s\n", iface)
@@ -307,7 +307,7 @@ func runSimpleRuntimeConsole(logFile, ip, iface, dDir string) consoleAction {
 			fmt.Println()
 		case "q", "quit", "exit":
 			fmt.Println("  已退出纯命令模式，网关保持运行。")
-			fmt.Println("  重新进入: sudo gateway console --simple")
+			fmt.Printf("  重新进入: %s\n", elevatedCmd("console --simple"))
 			fmt.Println()
 			return consoleActionExit
 		default:
@@ -427,7 +427,7 @@ func printStartGuide(cfg *config.Config, logFile string) {
 	if cfg.Runtime.Tun.Enabled {
 		fmt.Println("  1. 局域网共享已经就绪：Switch / PS5 / Apple TV / 手机改网关和 DNS 就能接入")
 	} else {
-		fmt.Println("  1. 运行 sudo gateway tun on，然后 sudo gateway restart，解锁局域网透明代理")
+		fmt.Printf("  1. 运行 %s，然后 %s，解锁局域网透明代理\n", elevatedCmd("tun on"), elevatedCmd("restart"))
 	}
 	switch cfg.Extension.Mode {
 	case "chains":

@@ -44,7 +44,7 @@ func runStatus(cmd *cobra.Command, args []string) {
 		fmt.Printf("  mihomo:      %s\n", color.RedString("未运行"))
 		fmt.Printf("  扩展模式:    %s\n", extensionModeSummary(cfg))
 		fmt.Println()
-		fmt.Println("  启动: sudo gateway start")
+		fmt.Printf("  启动: %s\n", elevatedCmd("start"))
 		return
 	}
 

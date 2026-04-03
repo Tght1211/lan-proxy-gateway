@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented here.
 
+## v2.2.7 - 2026-04-03
+
+### Fixed (Windows)
+
+- **Chinese garbled output** — set the console to UTF-8 (code page 65001) and enable ANSI virtual terminal processing at startup, so all Chinese text renders correctly in cmd.exe, PowerShell, and Windows Terminal instead of appearing as mojibake
+- **`gateway` not found after install** — `install.ps1` now also refreshes `$env:Path` in the current PowerShell session, so the command is usable immediately without reopening the terminal
+- **`IsRunning()` locale bug** — replaced the GBK-unsafe `"没有"` / `"No tasks"` check with a locale-independent `"mihomo.exe"` presence check, so process detection works correctly on Chinese Windows
+- **`IsIPForwardingEnabled()` locale bug** — replaced `netsh` output parsing (which emits Chinese text on Chinese Windows) with a direct registry read of `HKLM\...\IPEnableRouter`, making forwarding detection locale-independent
+- **`/tmp/` path hardcoded** — `start` and `console` commands now use `os.TempDir()` for the log file path, which resolves to the correct temporary directory on Windows
+- **`sudo` in all command hints** — every hint message now uses a runtime-aware helper that outputs `gateway <sub>` on Windows and `sudo gateway <sub>` on Unix, across all commands: `start`, `stop`, `restart`, `console`, `update`, `tun`, `chains`, `switch`, `status`
+
 ## v2.2.6 - 2026-04-03
 
 ### Fixed

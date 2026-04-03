@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -57,7 +58,11 @@ func runRootHome(cmd *cobra.Command, args []string) {
 	if updateNotice != nil {
 		color.New(color.FgYellow, color.Bold).Printf("  新版本可用: %s", updateNotice.Latest)
 		fmt.Println()
-		color.New(color.Faint).Println("  运行 sudo gateway update 可一键升级；直连失败时会自动尝试镜像")
+		if runtime.GOOS == "windows" {
+			color.New(color.Faint).Println("  在管理员终端中运行 gateway update 可一键升级；直连失败时会自动尝试镜像")
+		} else {
+			color.New(color.Faint).Println("  运行 sudo gateway update 可一键升级；直连失败时会自动尝试镜像")
+		}
 		fmt.Println()
 	}
 	ui.Separator()
@@ -71,7 +76,11 @@ func runRootHome(cmd *cobra.Command, args []string) {
 	fmt.Println(color.New(color.Bold).Sprint("  推荐流程:"))
 	fmt.Println("    1. gateway install")
 	fmt.Println("    2. gateway config")
-	fmt.Println("    3. sudo gateway start")
+	if runtime.GOOS == "windows" {
+		fmt.Println("    3. gateway start   (需要管理员终端)")
+	} else {
+		fmt.Println("    3. sudo gateway start")
+	}
 	fmt.Println("    4. gateway status")
 	fmt.Println()
 	fmt.Println(color.New(color.Bold).Sprint("  常用入口:"))

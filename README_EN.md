@@ -155,8 +155,16 @@ If you just want the fastest path, only fill these:
 
 ### Step 3: Start the gateway
 
+**macOS / Linux:**
+
 ```bash
 sudo gateway start
+```
+
+**Windows (run in an Administrator terminal):**
+
+```powershell
+gateway start
 ```
 
 By default, startup enters the runtime workspace and shows:
@@ -193,7 +201,11 @@ The most important thing here is your LAN IP.
 If you prefer the plain command mode:
 
 ```bash
+# macOS / Linux
 sudo gateway start --simple
+
+# Windows (Administrator terminal)
+gateway start --simple
 ```
 
 It skips the TUI and enters a compatibility-friendly command console.
@@ -210,8 +222,13 @@ The plain command mode now exposes the same core controls, for example:
 If you leave the console, you can re-enter it at any time:
 
 ```bash
+# macOS / Linux
 sudo gateway console
 sudo gateway console --simple
+
+# Windows (Administrator terminal)
+gateway console
+gateway console --simple
 ```
 
 ### Step 4: Connect another device
@@ -244,6 +261,8 @@ You will see:
 
 ## Common Commands
 
+> **Windows users:** commands listed with `sudo` must be run in an **Administrator terminal** without the `sudo` prefix — e.g. `sudo gateway start` → `gateway start`.
+
 | Command | Purpose |
 |---|---|
 | `gateway install` | Initial setup wizard |
@@ -258,7 +277,7 @@ You will see:
 | `gateway chains` | Chains / residential proxy wizard |
 | `gateway switch` | Switch proxy source and extension mode |
 | `gateway skill` | Show AI skill info |
-| `gateway permission install` | Install passwordless control rule |
+| `gateway permission install` | Install passwordless control rule (macOS/Linux only) |
 | `sudo gateway update` | Upgrade to the latest version |
 
 Full command reference: [docs/en/commands.md](docs/en/commands.md)

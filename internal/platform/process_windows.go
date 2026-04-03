@@ -41,7 +41,9 @@ func (p *impl) IsRunning() (bool, int, error) {
 		return false, 0, nil
 	}
 	output := strings.TrimSpace(string(out))
-	if output == "" || strings.Contains(output, "No tasks") || strings.Contains(output, "没有") {
+	// Check for the process name directly — avoids locale-dependent "No tasks" / "没有"
+	// messages that appear in GBK on Chinese Windows and don't match UTF-8 strings.
+	if !strings.Contains(strings.ToLower(output), "mihomo.exe") {
 		return false, 0, nil
 	}
 	// Parse CSV: "mihomo.exe","1234","Console","1","12,345 K"

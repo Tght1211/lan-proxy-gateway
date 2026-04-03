@@ -155,8 +155,16 @@ gateway install
 
 ### 第 3 步：启动网关
 
+**macOS / Linux：**
+
 ```bash
 sudo gateway start
+```
+
+**Windows（需以管理员身份运行终端）：**
+
+```powershell
+gateway start
 ```
 
 默认模式下，启动成功后会进入运行中工作台，终端会显示：
@@ -193,7 +201,11 @@ sudo gateway start
 如果你更喜欢兼容性更强的纯命令模式：
 
 ```bash
+# macOS / Linux
 sudo gateway start --simple
+
+# Windows（管理员终端）
+gateway start --simple
 ```
 
 它不会进入 TUI，而是进入一个纯命令控制台。
@@ -210,8 +222,13 @@ sudo gateway start --simple
 如果你退出了控制台，之后可以随时重新进入：
 
 ```bash
+# macOS / Linux
 sudo gateway console
 sudo gateway console --simple
+
+# Windows（管理员终端）
+gateway console
+gateway console --simple
 ```
 
 ### 第 4 步：让其他设备接入
@@ -244,6 +261,8 @@ gateway status
 
 ## 常用命令
 
+> Windows 用户：以下带 `sudo` 的命令需在**管理员终端**中去掉 `sudo` 运行，例如 `sudo gateway start` → `gateway start`。
+
 | 命令 | 说明 |
 |---|---|
 | `gateway install` | 初始化向导 |
@@ -258,7 +277,7 @@ gateway status
 | `gateway chains` | 链式代理向导 |
 | `gateway switch` | 切换代理来源和扩展模式 |
 | `gateway skill` | 查看 AI skill 信息 |
-| `gateway permission install` | 安装免密控制权限 |
+| `gateway permission install` | 安装免密控制权限（仅 macOS/Linux） |
 | `sudo gateway update` | 升级到最新版 |
 
 完整命令见 [docs/commands.md](docs/commands.md)。

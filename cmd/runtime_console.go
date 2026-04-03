@@ -2545,7 +2545,7 @@ func renderGuideDetailLines(cfg *config.Config, logFile string) []string {
 	if cfg.Runtime.Tun.Enabled {
 		lines = append(lines, "  局域网共享已就绪：手机、Switch、PS5、Apple TV 改网关和 DNS 就能接入")
 	} else {
-		lines = append(lines, "  先开启 TUN：运行 sudo gateway tun on，再执行 sudo gateway restart")
+		lines = append(lines, fmt.Sprintf("  先开启 TUN：运行 %s，再执行 %s", elevatedCmd("tun on"), elevatedCmd("restart")))
 	}
 
 	switch cfg.Extension.Mode {

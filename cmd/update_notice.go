@@ -63,7 +63,7 @@ func renderUpdateNoticeLines(notice *updateNotice) []string {
 
 	return []string{
 		fmt.Sprintf("发现新版本 %s（当前 %s）", notice.Latest, notice.Current),
-		"运行 sudo gateway update 可一键升级；GitHub 直连失败时会自动尝试镜像",
+		fmt.Sprintf("运行 %s 可一键升级；GitHub 直连失败时会自动尝试镜像", elevatedCmd("update")),
 	}
 }
 

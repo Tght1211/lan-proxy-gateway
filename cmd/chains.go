@@ -144,7 +144,7 @@ func runChainsSetup(cmd *cobra.Command, args []string) {
 	fmt.Println()
 	fmt.Printf("  %s\n", color.New(color.Faint).Sprint("重启网关后生效:"))
 	fmt.Println()
-	fmt.Println("    sudo gateway restart")
+	fmt.Printf("    %s\n", elevatedCmd("restart"))
 	fmt.Println()
 }
 
@@ -163,7 +163,7 @@ func runChainsDisable(cmd *cobra.Command, args []string) {
 		ui.Error("保存配置失败: %v", err)
 		os.Exit(1)
 	}
-	ui.Success("已关闭 %s 模式，重启后生效: sudo gateway restart", prev)
+	ui.Success("已关闭 %s 模式，重启后生效: %s", prev, elevatedCmd("restart"))
 }
 
 func runChainsStatus(cmd *cobra.Command, args []string) {

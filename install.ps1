@@ -54,19 +54,27 @@ $Target = Join-Path $InstallDir $Binary
 Write-Host "下载 $Asset..." -ForegroundColor Green
 Invoke-WebRequest -Uri $Url -OutFile $Target -UseBasicParsing
 
-# add to user PATH if not already there
+# Add to persistent user PATH
 $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($UserPath -notlike "*$InstallDir*") {
     [Environment]::SetEnvironmentVariable("Path", "$UserPath;$InstallDir", "User")
-    Write-Host "已将 $InstallDir 添加到用户 PATH (重启终端生效)" -ForegroundColor Yellow
+    Write-Host "已将 $InstallDir 添加到用户 PATH" -ForegroundColor Green
+}
+
+# Also refresh the current session so gateway is usable immediately without reopening terminal
+if ($env:Path -notlike "*$InstallDir*") {
+    $env:Path = "$env:Path;$InstallDir"
+    Write-Host "当前会话 PATH 已更新，无需重启终端即可使用 gateway 命令" -ForegroundColor Green
 }
 
 Write-Host ""
 Write-Host "安装成功!" -ForegroundColor Green
 Write-Host "安装位置: $Target" -ForegroundColor Green
 Write-Host ""
-Write-Host "快速开始:" -ForegroundColor Green
-Write-Host "  gateway install    # 安装向导"
+Write-Host "快速开始 (以管理员身份运行 PowerShell/终端):" -ForegroundColor Green
+Write-Host "  gateway install    # 运行安装向导（下载 mihomo、配置代理）"
 Write-Host "  gateway config     # 打开配置中心"
 Write-Host "  gateway start      # 启动网关 (需要管理员权限)"
 Write-Host "  gateway status     # 查看状态和出口网络"
+Write-Host ""
+Write-Host "提示: gateway start / stop / restart 需要在管理员终端中运行" -ForegroundColor Yellow

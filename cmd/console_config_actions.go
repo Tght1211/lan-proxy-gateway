@@ -354,7 +354,7 @@ func renderRuntimeWorkspaceLines(cfg *config.Config, status string) []string {
 		"  1 切换 TUN 开关",
 		"  2 切换本机绕过代理",
 		"",
-		noteLine("TUN 是局域网共享的核心开关；改完通常需要 sudo gateway restart。"),
+		noteLine(fmt.Sprintf("TUN 是局域网共享的核心开关；改完通常需要 %s。", elevatedCmd("restart"))),
 	)
 	return lines
 }

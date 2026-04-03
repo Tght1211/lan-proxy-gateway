@@ -67,6 +67,6 @@ func runTun(cmd *cobra.Command, args []string) {
 	}
 	fmt.Println()
 	fmt.Println("  执行以下命令使配置生效：")
-	fmt.Println("    sudo gateway restart")
+	fmt.Printf("    %s\n", elevatedCmd("restart"))
 	fmt.Println()
 }

@@ -7,6 +7,8 @@ import (
 	"net"
 	"os/exec"
 	"strings"
+
+	"golang.org/x/sys/windows/registry"
 )
 
 func (p *impl) EnableIPForwarding() error {
@@ -18,18 +20,22 @@ func (p *impl) DisableIPForwarding() error {
 }
 
 func (p *impl) IsIPForwardingEnabled() (bool, error) {
-	out, err := exec.Command("netsh", "int", "ipv4", "show", "global").Output()
+	// Use the registry to check IP forwarding — avoids parsing localized netsh output
+	// which varies between English ("Enabled") and Chinese ("已启用") and can't be
+	// reliably compared against UTF-8 strings when netsh outputs GBK on Chinese Windows.
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE,
+		`SYSTEM\CurrentControlSet\Services\Tcpip\Parameters`,
+		registry.QUERY_VALUE)
 	if err != nil {
 		return false, err
 	}
-	// Look for "IP Forwarding" or "IP 转发" line containing "enabled"
-	for _, line := range strings.Split(string(out), "\n") {
-		lower := strings.ToLower(line)
-		if strings.Contains(lower, "forwarding") && strings.Contains(lower, "enabled") {
-			return true, nil
-		}
+	defer k.Close()
+	val, _, err := k.GetIntegerValue("IPEnableRouter")
+	if err != nil {
+		// Key absent means forwarding is disabled
+		return false, nil
 	}
-	return false, nil
+	return val == 1, nil
 }
 
 func (p *impl) DisableFirewallInterference() error {

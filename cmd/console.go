@@ -13,9 +13,9 @@ var consoleCmd = &cobra.Command{
 	Short: "进入运行中的控制台（TUI 或纯命令模式）",
 	Long: `连接到 Gateway 控制台，而不重新启动网关。
 
-示例:
-  sudo gateway console
-  sudo gateway console --simple`,
+示例 (macOS/Linux 需要 sudo，Windows 需要管理员终端):
+  gateway console
+  gateway console --simple`,
 	Run: runConsole,
 }
 
@@ -35,7 +35,7 @@ func runConsole(cmd *cobra.Command, args []string) {
 	iface, _ := p.DetectDefaultInterface()
 	ip, _ := p.DetectInterfaceIP(iface)
 	dataDir := ensureDataDir()
-	logFile := "/tmp/lan-proxy-gateway.log"
+	logFile := defaultLogFile()
 
 	runInteractiveConsoleLoop(consoleSimple, logFile, ip, iface, dataDir, func() {
 		startSimple = consoleSimple
