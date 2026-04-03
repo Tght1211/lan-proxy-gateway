@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -80,6 +81,7 @@ type ProxyGroup struct {
 	Type    string   `json:"type"`
 	Name    string   `json:"name"`
 	Hidden  bool     `json:"hidden"`
+	TestURL string   `json:"testUrl"`
 }
 
 func (c *Client) GetProxyGroup(name string) (*ProxyGroup, error) {
@@ -147,6 +149,51 @@ func (c *Client) SelectProxy(groupName, proxyName string) error {
 		return fmt.Errorf("switch proxy failed: HTTP %d", resp.StatusCode)
 	}
 	return nil
+}
+
+type ProxyDelayResult struct {
+	Delay int `json:"delay"`
+}
+
+func (c *Client) GetProxyDelay(proxyName, testURL string, timeout time.Duration) (int, error) {
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	if strings.TrimSpace(testURL) == "" {
+		testURL = "http://www.gstatic.com/generate_204"
+	}
+
+	req, err := http.NewRequest(http.MethodGet, c.BaseURL+"/proxies/"+url.PathEscape(proxyName)+"/delay", nil)
+	if err != nil {
+		return 0, err
+	}
+	q := req.URL.Query()
+	q.Set("url", testURL)
+	q.Set("timeout", fmt.Sprintf("%d", timeout.Milliseconds()))
+	req.URL.RawQuery = q.Encode()
+	if c.Secret != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Secret)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		msg, _ := io.ReadAll(resp.Body)
+		if len(msg) > 0 {
+			return 0, fmt.Errorf("delay test failed: HTTP %d: %s", resp.StatusCode, string(msg))
+		}
+		return 0, fmt.Errorf("delay test failed: HTTP %d", resp.StatusCode)
+	}
+
+	var result ProxyDelayResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, err
+	}
+	return result.Delay, nil
 }
 
 type ConnectionsInfo struct {

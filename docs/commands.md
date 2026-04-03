@@ -21,9 +21,10 @@
 
 支持:
 
-- slash 命令: `/status` `/summary` `/config` `/config open` `/chains` `/nodes` `/logs` `/help`
+- slash 命令: `/status` `/summary` `/config` `/config open` `/chains` `/nodes` `/speed` `/logs` `/help`
 - 顶部 tab: `Esc` 回顶部，`←/→` 切分区，`↓ / Enter` 回到功能列表
-- 节点选择器: `Ctrl+P`
+- 右侧内容区: 会标明当前是 `信息页 / 可操作页 / 确认页`
+- 节点工作台: `Ctrl+P` 打开；进入后 `T` 测当前节点延迟
 - 刷新反馈: `R` 会刷新当前页面，并给一个很短的脉冲反馈
 - 确认交互: `/stop` `/restart` 后输入 `y / n`
 - 纯命令模式: `sudo gateway start --simple` 或 `sudo gateway console --simple`

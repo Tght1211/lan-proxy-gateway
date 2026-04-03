@@ -23,9 +23,10 @@ After `gateway start` succeeds in an interactive terminal, it enters a runtime T
 
 Supported actions:
 
-- slash commands: `/status` `/summary` `/config` `/config open` `/chains` `/nodes` `/logs` `/help`
+- slash commands: `/status` `/summary` `/config` `/config open` `/chains` `/nodes` `/speed` `/logs` `/help`
 - top tabs: `Esc` back to the header, `←/→` switch sections, `↓ / Enter` return to the action list
-- node picker: `Ctrl+P`
+- the right content area clearly marks each page as `info / action / confirm`
+- node workbench: `Ctrl+P` opens it; once inside, press `T` to test the current node latency
 - refresh cue: `R` refreshes the current page and shows a short pulse
 - confirmation flow: after `/stop` or `/restart`, type `y` or `n`
 - plain command mode: `sudo gateway start --simple` or `sudo gateway console --simple`

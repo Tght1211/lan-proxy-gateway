@@ -176,3 +176,42 @@ func TestRefreshKeyKeepsGuidePage(t *testing.T) {
 		t.Fatalf("expected refresh to preserve current guide page, got %q", updated.detailTitle)
 	}
 }
+
+func TestEnterMovesFocusToDetailForInfoPage(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+	m.tab = consoleTabOverview
+	m.cursor = 3
+	m.refreshSelectionPreview()
+
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	updated := next.(runtimeConsoleModel)
+
+	if updated.focus != consoleFocusDetail {
+		t.Fatalf("expected enter to move focus to detail, got %v", updated.focus)
+	}
+}
+
+func TestRenderMenuLinesShowsActionTag(t *testing.T) {
+	m := runtimeConsoleModel{tab: consoleTabRouting}
+	got := strings.Join(m.renderMenuLines(), "\n")
+
+	if !strings.Contains(got, "操作") {
+		t.Fatalf("expected routing menu to include action tag, got %q", got)
+	}
+}
+
+func TestPickerDelayResultUpdatesStatus(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+	m.picker = pickerModeNodes
+	m.nodeDelays = map[string]string{}
+
+	next, _ := m.Update(pickerDelayResultMsg{node: "香港 02", delay: 184})
+	updated := next.(runtimeConsoleModel)
+
+	if updated.nodeDelays["香港 02"] != "184ms" {
+		t.Fatalf("expected picker delay to be recorded, got %q", updated.nodeDelays["香港 02"])
+	}
+	if !strings.Contains(updated.pickerStatus, "香港 02") {
+		t.Fatalf("expected picker status to mention node, got %q", updated.pickerStatus)
+	}
+}

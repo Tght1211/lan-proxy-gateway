@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented here.
 
+## v2.2.4 - 2026-04-03
+
+### Fixed
+
+- Reworked the runtime TUI so right-side pages clearly indicate whether they are info pages, action pages, or confirm pages
+- Added real detail-area focus, so pressing Enter moves focus into the right pane and `Esc` returns to the left menu
+- Turned the node entry into a node workbench with clearer action hints and built-in current-node latency testing via `T`
+- Replaced the TUI device and extension pages with native TUI rendering for more consistent layout
+
+### Documentation
+
+- Updated the Chinese and English READMEs plus command docs to explain the new node-workbench and page-type flow
+
 ## v2.2.3 - 2026-04-03
 
 ### Fixed

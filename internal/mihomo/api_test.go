@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"testing"
+	"time"
 )
 
 func TestListProxyGroupsFiltersSelectableEntries(t *testing.T) {
@@ -61,5 +62,36 @@ func TestSelectProxySendsExpectedRequest(t *testing.T) {
 	}
 	if gotBody != `{"name":"香港 03"}` {
 		t.Fatalf("body = %s, want expected json", gotBody)
+	}
+}
+
+func TestGetProxyDelaySendsExpectedRequest(t *testing.T) {
+	var gotMethod, gotPath, gotQuery string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		_, _ = io.WriteString(w, `{"delay":184}`)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "")
+	delay, err := client.GetProxyDelay("香港 02", "http://www.gstatic.com/generate_204", 5*time.Second)
+	if err != nil {
+		t.Fatalf("GetProxyDelay() error = %v", err)
+	}
+
+	if delay != 184 {
+		t.Fatalf("delay = %d, want 184", delay)
+	}
+	if gotMethod != http.MethodGet {
+		t.Fatalf("method = %s, want GET", gotMethod)
+	}
+	if gotPath != "/proxies/%E9%A6%99%E6%B8%AF%2002/delay" && gotPath != "/proxies/香港 02/delay" {
+		t.Fatalf("path = %s, want encoded delay path", gotPath)
+	}
+	if gotQuery != "timeout=5000&url=http%3A%2F%2Fwww.gstatic.com%2Fgenerate_204" && gotQuery != "url=http%3A%2F%2Fwww.gstatic.com%2Fgenerate_204&timeout=5000" {
+		t.Fatalf("query = %s, want timeout and url", gotQuery)
 	}
 }

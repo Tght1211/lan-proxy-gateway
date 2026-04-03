@@ -71,8 +71,9 @@ Useful for:
 By default, `gateway start` opens the runtime workspace:
 
 - tabs, arrow-key navigation, and Enter-to-run actions
+- the right side clearly labels each page as `info / action / confirm`
 - a command bar at the bottom for direct commands
-- `Ctrl+P` for node-group and node switching
+- `Ctrl+P` opens the node workbench for switching nodes and pressing `T` to test the current node latency
 - `Esc` back to the top tabs, `←/→` to switch sections, and `↓` back into the action list
 - `R` refreshes the current page and gives a short visual refresh cue
 
@@ -171,9 +172,10 @@ Common controls:
 - `Esc` back to the top tabs
 - `←/→` switch sections
 - `↑/↓` choose actions
-- `Enter` open the current action
+- `Enter` opens the current action and moves focus into the right-side content area
 - `/` enter command input
-- `Ctrl+P` switch nodes
+- `Ctrl+P` open the node workbench
+- `T` test the current node latency inside the node workbench
 
 The most important thing here is your LAN IP.
 

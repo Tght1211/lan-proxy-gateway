@@ -223,7 +223,7 @@ func runSimpleRuntimeConsole(logFile, ip, iface, dDir string) consoleAction {
 			fmt.Println("  config        打开配置中心")
 			fmt.Println("  chains        查看链式代理 / 扩展状态")
 			fmt.Println("  chains setup  打开链式代理向导")
-			fmt.Println("  nodes         切换节点（兼容 groups）")
+			fmt.Println("  nodes         打开节点选择器（切换节点；TUI 中同页支持测速）")
 			fmt.Println("  device        查看设备接入说明")
 			fmt.Println("  logs          查看最近日志")
 			fmt.Println("  guide         查看功能导航")

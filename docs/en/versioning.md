@@ -80,6 +80,11 @@ Focus: fix the `guide` page layout, add proper header-focus handoff, and make th
 Positioning: TUI refresh feedback polish.  
 Focus: make `R` refresh the current page and add a visible but restrained refresh cue.
 
+### v2.2.4
+
+Positioning: TUI interaction-structure polish.  
+Focus: clearly separate info pages from action pages, add real right-pane focus, and merge node switching with built-in latency testing into a node workbench.
+
 ## Rules for Future Versions
 
 ### Patch

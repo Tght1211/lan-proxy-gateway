@@ -16,11 +16,12 @@ declare -A TITLES=(
   [v2.2.1]="v2.2.1 · 控制台体验修复"
   [v2.2.2]="v2.2.2 · TUI 焦点与导航收口"
   [v2.2.3]="v2.2.3 · TUI 刷新反馈增强"
+  [v2.2.4]="v2.2.4 · TUI 交互结构收口"
 )
 
-for tag in v1.0.0 v1.1.0 v1.1.1 v1.2.0 v1.3.0 v2.0.0 v2.1.0 v2.1.1 v2.2.0 v2.2.1 v2.2.2 v2.2.3; do
+for tag in v1.0.0 v1.1.0 v1.1.1 v1.2.0 v1.3.0 v2.0.0 v2.1.0 v2.1.1 v2.2.0 v2.2.1 v2.2.2 v2.2.3 v2.2.4; do
   notes_file="$ROOT_DIR/docs/releases/$tag.md"
-  if [ "$tag" = "v2.2.3" ]; then
+  if [ "$tag" = "v2.2.4" ]; then
     notes_file="$ROOT_DIR/docs/releases/latest.md"
   fi
   gh release edit "$tag" \

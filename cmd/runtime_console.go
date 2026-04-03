@@ -53,7 +53,18 @@ type consoleMenuItem struct {
 	title string
 	desc  string
 	key   string
+	kind  consoleItemKind
+	cmd   string
+	enter string
 }
+
+type consoleItemKind int
+
+const (
+	consoleItemInfo consoleItemKind = iota
+	consoleItemAction
+	consoleItemConfirm
+)
 
 type pickerMode int
 
@@ -68,10 +79,16 @@ type consoleFocus int
 const (
 	consoleFocusHeader consoleFocus = iota
 	consoleFocusNav
+	consoleFocusDetail
 	consoleFocusInput
 )
 
 type refreshPulseMsg struct{}
+type pickerDelayResultMsg struct {
+	node  string
+	delay int
+	err   error
+}
 
 const refreshPulseFrames = 4
 
@@ -118,6 +135,8 @@ type runtimeConsoleModel struct {
 	cursor       int
 	detailTitle  string
 	refreshPulse int
+	pickerStatus string
+	nodeDelays   map[string]string
 }
 
 var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
@@ -155,6 +174,7 @@ func newRuntimeConsoleModel(logFile, ip, iface, dataDir string) runtimeConsoleMo
 		tab:        consoleTabOverview,
 		focus:      consoleFocusNav,
 		historyPos: -1,
+		nodeDelays: map[string]string{},
 	}
 	m.refreshSnapshot()
 	m.refreshSelectionPreview()
@@ -182,6 +202,20 @@ func (m runtimeConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case pickerDelayResultMsg:
+		if m.nodeDelays == nil {
+			m.nodeDelays = map[string]string{}
+		}
+		if msg.err != nil {
+			m.nodeDelays[msg.node] = "失败"
+			m.pickerStatus = "测速失败: " + msg.node
+			m.setDetail("节点测速失败", []string{errorLine(msg.err.Error())})
+			return m, nil
+		}
+		m.nodeDelays[msg.node] = fmt.Sprintf("%dms", msg.delay)
+		m.pickerStatus = fmt.Sprintf("测速完成: %s · %dms", msg.node, msg.delay)
+		return m, nil
+
 	case tea.KeyMsg:
 		if m.picker != pickerModeNone {
 			return m.handlePickerKey(msg)
@@ -196,6 +230,34 @@ func (m runtimeConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.focus == consoleFocusInput {
 			return m.handleInputKey(msg)
+		}
+
+		if m.focus == consoleFocusDetail {
+			switch msg.String() {
+			case "esc":
+				m.focus = consoleFocusNav
+				return m, nil
+			case "left", "right":
+				return m, nil
+			case "up", "k":
+				m.viewport.ScrollUp(1)
+				return m, nil
+			case "down", "j":
+				m.viewport.ScrollDown(1)
+				return m, nil
+			case "pgup", "b":
+				m.viewport.HalfPageUp()
+				return m, nil
+			case "pgdown", "f":
+				m.viewport.HalfPageDown()
+				return m, nil
+			case "home":
+				m.viewport.GotoTop()
+				return m, nil
+			case "end":
+				m.viewport.GotoBottom()
+				return m, nil
+			}
 		}
 
 		switch msg.String() {
@@ -306,7 +368,8 @@ func (m *runtimeConsoleModel) handleCommand(value string) (tea.Model, tea.Cmd) {
 			noteLine("/config open   打开完整交互式配置中心"),
 			noteLine("/chains        查看链式代理 / 扩展状态"),
 			noteLine("/chains setup  打开链式代理向导"),
-			noteLine("/nodes         切换节点（兼容 /groups）"),
+			noteLine("/nodes         打开节点工作台（切换节点 / 测延迟）"),
+			noteLine("/speed         打开节点测速工作台"),
 			noteLine("/device        查看设备接入说明"),
 			noteLine("/logs          查看最近日志"),
 			noteLine("/guide         查看功能导航"),
@@ -316,38 +379,42 @@ func (m *runtimeConsoleModel) handleCommand(value string) (tea.Model, tea.Cmd) {
 			noteLine("/stop          停止网关（需确认）"),
 			noteLine("/exit          退出控制台"),
 		})
+		m.focus = consoleFocusDetail
 	case "status":
 		m.setDetail("运行状态", m.renderStatusDetailLines())
+		m.focus = consoleFocusDetail
 	case "summary":
 		m.setDetail("配置摘要", renderConfigSummaryDetailLines(loadConfigOrDefault()))
+		m.focus = consoleFocusDetail
 	case "config":
 		if len(args) > 0 && (args[0] == "open" || args[0] == "cli") {
 			m.action = consoleActionOpenConfig
 			return *m, tea.Quit
 		}
 		m.setDetail("配置中心", renderConfigCenterLines(loadConfigOrDefault()))
+		m.focus = consoleFocusDetail
 	case "chains":
 		if len(args) > 0 && args[0] == "setup" {
 			m.action = consoleActionOpenChainsSetup
 			return *m, tea.Quit
 		}
-		cfg := loadConfigOrDefault()
-		if cfg.Extension.Mode == "chains" {
-			m.showCapturedDetail("链式代理状态", func() { runChainsStatus(nil, nil) })
-		} else {
-			m.showCapturedDetail("扩展状态", func() { printExtensionStatus(cfg) })
-		}
+		m.setDetail("扩展状态", renderExtensionStatusLines(loadConfigOrDefault()))
+		m.focus = consoleFocusDetail
 	case "groups":
 		fallthrough
 	case "nodes", "node":
 		return m.openGroupPicker()
+	case "speed":
+		return m.openGroupPicker()
 	case "device":
-		cfg := loadConfigOrDefault()
-		m.showCapturedDetail("设备接入", func() { printDeviceSetupPanel(m.ip, cfg.Runtime.Ports.API) })
+		m.setDetail("设备接入", renderDeviceSetupLines(m.ip, loadConfigOrDefault().Runtime.Ports.API))
+		m.focus = consoleFocusDetail
 	case "logs", "log":
 		m.setDetail("最近日志", m.captureLogLines(30))
+		m.focus = consoleFocusDetail
 	case "guide":
 		m.setDetail("功能导航", renderGuideDetailLines(loadConfigOrDefault(), m.logFile))
+		m.focus = consoleFocusDetail
 	case "update":
 		if m.update == nil {
 			m.setDetail("升级提示", []string{noteLine("当前已经是最新版本，或本次未检测到更新。")})
@@ -358,14 +425,18 @@ func (m *runtimeConsoleModel) handleCommand(value string) (tea.Model, tea.Cmd) {
 			}
 			m.setDetail("升级提示", lines)
 		}
+		m.focus = consoleFocusDetail
 	case "clear":
 		m.refreshSelectionPreview()
+		m.focus = consoleFocusNav
 	case "restart":
 		m.pending = &pendingConfirm{prompt: "确认重启网关？", action: consoleActionRestart}
 		m.setDetail("确认重启", []string{noteLine("等待确认: 输入 y / n")})
+		m.focus = consoleFocusDetail
 	case "stop":
 		m.pending = &pendingConfirm{prompt: "确认停止网关？", action: consoleActionStop}
 		m.setDetail("确认停止", []string{noteLine("等待确认: 输入 y / n")})
+		m.focus = consoleFocusDetail
 	case "exit", "quit":
 		m.pending = &pendingConfirm{prompt: "确认退出控制台？", action: consoleActionExit}
 		m.focus = consoleFocusInput
@@ -449,13 +520,16 @@ func (m *runtimeConsoleModel) focusHint() string {
 		return "确认操作中，输入 y / n"
 	}
 	if m.picker != pickerModeNone {
-		return "节点选择中，↑/↓ 选择，Enter 确认，Esc 返回"
+		return "节点工作台：↑/↓ 选择，Enter 确认切换，T 测延迟，Esc 返回"
 	}
 	if m.focus == consoleFocusInput {
 		return "输入模式：Enter 执行，Tab 补全，Esc 返回导航"
 	}
 	if m.focus == consoleFocusHeader {
 		return "顶部聚焦：←/→ 切换分区，↓ / Enter 进入功能列表，/ 开始输入命令"
+	}
+	if m.focus == consoleFocusDetail {
+		return "内容聚焦：↑/↓ 滚动内容，Esc 返回左侧，/ 开始输入命令"
 	}
 	return "导航模式：←/→ 分区，↑/↓ 功能，/ 开始输入命令"
 }
@@ -464,6 +538,20 @@ func refreshPulseTickCmd() tea.Cmd {
 	return tea.Tick(45*time.Millisecond, func(time.Time) tea.Msg {
 		return refreshPulseMsg{}
 	})
+}
+
+func proxyDelayCmd(client *mihomo.Client, node, testURL string) tea.Cmd {
+	return func() tea.Msg {
+		delay, err := client.GetProxyDelay(node, testURL, 5*time.Second)
+		return pickerDelayResultMsg{node: node, delay: delay, err: err}
+	}
+}
+
+func pickerTestURL(group mihomo.ProxyGroup) string {
+	if strings.TrimSpace(group.TestURL) != "" {
+		return group.TestURL
+	}
+	return "http://www.gstatic.com/generate_204"
 }
 
 func (m runtimeConsoleModel) refreshPulseActive() bool {
@@ -611,9 +699,11 @@ func (m runtimeConsoleModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd
 	case "esc":
 		if m.picker == pickerModeNodes {
 			m.picker = pickerModeGroups
+			m.pickerStatus = "已返回分组列表"
 			return m, nil
 		}
 		m.picker = pickerModeNone
+		m.focus = consoleFocusNav
 		return m, nil
 	case "up", "k":
 		if m.picker == pickerModeGroups && m.groupCursor > 0 {
@@ -632,6 +722,22 @@ func (m runtimeConsoleModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd
 				m.nodeCursor++
 			}
 		}
+	case "t":
+		if m.picker != pickerModeNodes || len(m.groups) == 0 {
+			m.pickerStatus = "先进入节点列表，再按 T 测当前节点延迟"
+			return m, nil
+		}
+		group := m.groups[m.groupCursor]
+		if len(group.All) == 0 {
+			return m, nil
+		}
+		target := group.All[m.nodeCursor]
+		if m.nodeDelays == nil {
+			m.nodeDelays = map[string]string{}
+		}
+		m.nodeDelays[target] = "测速中..."
+		m.pickerStatus = "正在测速: " + target
+		return m, proxyDelayCmd(m.client, target, pickerTestURL(group))
 	case "enter":
 		if m.picker == pickerModeGroups {
 			if len(m.groups) == 0 {
@@ -639,6 +745,7 @@ func (m runtimeConsoleModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd
 			}
 			m.picker = pickerModeNodes
 			m.nodeCursor = 0
+			m.pickerStatus = "已进入节点列表：Enter 切换节点，T 测当前节点延迟"
 			return m, nil
 		}
 		if m.picker == pickerModeNodes {
@@ -651,13 +758,16 @@ func (m runtimeConsoleModel) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd
 			}
 			target := group.All[m.nodeCursor]
 			if err := m.client.SelectProxy(group.Name, target); err != nil {
-				m.setDetail("节点切换失败", []string{errorLine("切换失败: " + err.Error())})
+				m.picker = pickerModeNone
+				m.focus = consoleFocusDetail
+				m.setDetail("节点工作台", renderNodeWorkspaceLines(m.snapshot, errorLine("切换失败: "+err.Error())))
 			} else {
-				m.setDetail("节点已切换", []string{successLine(fmt.Sprintf("已切换节点: %s -> %s", group.Name, target))})
+				m.pickerStatus = fmt.Sprintf("已切换节点: %s -> %s", group.Name, target)
+				m.picker = pickerModeNone
+				m.focus = consoleFocusDetail
+				m.refreshSnapshot()
+				m.setDetail("节点工作台", renderNodeWorkspaceLines(m.snapshot, successLine(m.pickerStatus)))
 			}
-			m.picker = pickerModeNone
-			m.refreshSnapshot()
-			m.refreshSelectionPreview()
 			return m, nil
 		}
 	}
@@ -669,10 +779,12 @@ func (m *runtimeConsoleModel) openGroupPicker() (tea.Model, tea.Cmd) {
 	groups, err := m.client.ListProxyGroups()
 	if err != nil {
 		m.setDetail("节点分组读取失败", []string{errorLine("无法读取节点分组: " + err.Error())})
+		m.focus = consoleFocusDetail
 		return *m, nil
 	}
 	if len(groups) == 0 {
 		m.setDetail("节点切换器", []string{noteLine("当前没有可切换的节点分组。")})
+		m.focus = consoleFocusDetail
 		return *m, nil
 	}
 
@@ -680,6 +792,10 @@ func (m *runtimeConsoleModel) openGroupPicker() (tea.Model, tea.Cmd) {
 	m.groupCursor = 0
 	m.nodeCursor = 0
 	m.picker = pickerModeGroups
+	m.focus = consoleFocusDetail
+	m.detailTitle = "节点工作台"
+	m.nodeDelays = map[string]string{}
+	m.pickerStatus = "先选一个分组，回车进入节点列表；进入后按 T 测当前节点延迟"
 	return *m, nil
 }
 
@@ -763,16 +879,20 @@ func (m runtimeConsoleModel) renderMain() string {
 }
 
 func (m runtimeConsoleModel) renderDetailPane(width int) string {
-	title := m.detailTitle
+	title := m.detailDisplayTitle()
 	if title == "" {
 		title = "当前内容"
 	}
 	content := m.viewport.View()
 	border := "#334155"
+	headerColor := lipgloss.Color("#e2e8f0")
 	if m.picker != pickerModeNone {
-		title = "节点选择器"
+		title = "节点工作台 · 可操作页"
 		content = m.renderPicker(width-4, max(3, m.mainHeight-4))
 		border = "#f59e0b"
+		headerColor = lipgloss.Color("#fde68a")
+	} else if m.focus == consoleFocusDetail {
+		border = "#38bdf8"
 	}
 	if m.refreshPulseActive() && m.picker == pickerModeNone {
 		border = "#22d3ee"
@@ -783,7 +903,7 @@ func (m runtimeConsoleModel) renderDetailPane(width int) string {
 		Padding(0, 1).
 		Width(width)
 
-	header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#e2e8f0")).Render(title)
+	header := lipgloss.NewStyle().Bold(true).Foreground(headerColor).Render(title)
 	bodyHeight := max(3, m.mainHeight-4)
 	body := lipgloss.NewStyle().
 		MaxWidth(width - 4).
@@ -813,6 +933,7 @@ func (m runtimeConsoleModel) renderNavigationCard(width int) string {
 		renderSectionTitle("快捷键"),
 		"/ 进入命令栏",
 		"Ctrl+P 切节点",
+		"Enter 打开右侧页",
 		"R 刷新摘要",
 		"Q 退出控制台（确认）",
 	)
@@ -904,7 +1025,7 @@ func (m runtimeConsoleModel) renderMenuLines() []string {
 	items := menuItemsForTab(m.tab)
 	lines := make([]string, 0, len(items)+1)
 	for i, item := range items {
-		label := fmt.Sprintf("%s %s", item.key, item.title)
+		label := fmt.Sprintf("%s %s %s", item.key, renderItemKindTag(item.kind), item.title)
 		if i == m.cursor {
 			label = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7dd3fc")).Render("› " + label)
 		} else {
@@ -913,7 +1034,7 @@ func (m runtimeConsoleModel) renderMenuLines() []string {
 		lines = append(lines, label)
 		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#64748b")).Render("    "+item.desc))
 	}
-	lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#94a3b8")).Render("Enter 执行  ·  Ctrl+P 切节点"))
+	lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#94a3b8")).Render("Enter 打开右侧页  ·  Ctrl+P 切节点"))
 	return lines
 }
 
@@ -922,7 +1043,7 @@ func (m runtimeConsoleModel) renderCommandSuggestions() string {
 		return m.pending.prompt + "  ·  输入 y / n"
 	}
 	if m.picker != pickerModeNone {
-		return "↑/↓ 选择  ·  Enter 确认  ·  Esc 返回"
+		return "↑/↓ 选择  ·  Enter 切换节点  ·  T 测当前节点延迟  ·  Esc 返回"
 	}
 
 	matches := m.matchingSuggestions(m.inputValue)
@@ -935,6 +1056,9 @@ func (m runtimeConsoleModel) renderCommandSuggestions() string {
 	}
 	if m.focus == consoleFocusHeader {
 		return truncateText("顶部区域已聚焦  ·  ←/→ 切换分区  ·  ↓ 进入功能列表  ·  / 开始输入命令", max(30, m.width-10))
+	}
+	if m.focus == consoleFocusDetail {
+		return truncateText("右侧内容已聚焦  ·  ↑/↓ 滚动  ·  Esc 返回左侧  ·  / 开始输入命令", max(30, m.width-10))
 	}
 
 	return truncateText("按 / 开始输入命令  ·  ↑/↓ 选择功能  ·  Esc 回顶部  ·  Ctrl+P 切换节点", max(30, m.width-10))
@@ -1011,6 +1135,58 @@ func renderSectionTitle(title string) string {
 		Render(title)
 }
 
+func (m runtimeConsoleModel) detailDisplayTitle() string {
+	title := strings.TrimSpace(m.detailTitle)
+	if title == "" {
+		return "当前内容"
+	}
+	if m.picker != pickerModeNone {
+		return title
+	}
+	switch title {
+	case "确认重启", "确认停止", "确认退出":
+		return title + " · 确认页"
+	case "节点工作台":
+		return title + " · 可操作页"
+	default:
+		return title + " · 信息页"
+	}
+}
+
+func renderItemKindTag(kind consoleItemKind) string {
+	switch kind {
+	case consoleItemAction:
+		return lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#fde68a")).
+			Background(lipgloss.Color("#3f2f10")).
+			Padding(0, 1).
+			Render("操作")
+	case consoleItemConfirm:
+		return lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#fecaca")).
+			Background(lipgloss.Color("#3f1d1d")).
+			Padding(0, 1).
+			Render("确认")
+	default:
+		return lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#bfdbfe")).
+			Background(lipgloss.Color("#172554")).
+			Padding(0, 1).
+			Render("查看")
+	}
+}
+
+func itemModeLabel(item consoleMenuItem) string {
+	switch item.kind {
+	case consoleItemAction:
+		return "可操作页"
+	case consoleItemConfirm:
+		return "确认页"
+	default:
+		return "信息页"
+	}
+}
+
 func (m *runtimeConsoleModel) nextTab() {
 	m.tab = (m.tab + 1) % 5
 	m.cursor = 0
@@ -1059,9 +1235,15 @@ func (m *runtimeConsoleModel) refreshSelectionPreview() {
 	}
 
 	lines := []string{
-		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7dd3fc")).Render(item.title),
+		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7dd3fc")).Render(item.title + " · " + itemModeLabel(item)),
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#94a3b8")).Render(item.desc),
 		"",
+	}
+	if item.enter != "" {
+		lines = append(lines, noteLine("回车后: "+item.enter))
+	}
+	if item.cmd != "" {
+		lines = append(lines, noteLine("命令入口: "+item.cmd), "")
 	}
 	lines = append(lines, previewLinesForItem(item, m.snapshot, m.cfg, m.logFile)...)
 	m.setDetail(item.title, lines)
@@ -1083,11 +1265,11 @@ func (m *runtimeConsoleModel) refreshCurrentDetail() {
 	case "最近日志":
 		m.setDetail("最近日志", m.captureLogLines(30))
 	case "设备接入":
-		m.showCapturedDetail("设备接入", func() { printDeviceSetupPanel(m.ip, cfg.Runtime.Ports.API) })
-	case "链式代理状态":
-		m.showCapturedDetail("链式代理状态", func() { runChainsStatus(nil, nil) })
+		m.setDetail("设备接入", renderDeviceSetupLines(m.ip, cfg.Runtime.Ports.API))
 	case "扩展状态":
-		m.showCapturedDetail("扩展状态", func() { printExtensionStatus(cfg) })
+		m.setDetail("扩展状态", renderExtensionStatusLines(cfg))
+	case "节点工作台":
+		m.setDetail("节点工作台", renderNodeWorkspaceLines(m.snapshot, noteLine("按回车进入节点工作台，或按 Ctrl+P 直接打开。")))
 	case "升级提示":
 		if m.update == nil {
 			m.setDetail("升级提示", []string{noteLine("当前已经是最新版本，或本次未检测到更新。")})
@@ -1122,27 +1304,30 @@ func (m *runtimeConsoleModel) executeSelectedAction() (tea.Model, tea.Cmd) {
 	switch item.id {
 	case "overview_status":
 		m.setDetail("运行状态", m.renderStatusDetailLines())
+		m.focus = consoleFocusDetail
 	case "overview_summary":
 		m.setDetail("配置摘要", renderConfigSummaryDetailLines(loadConfigOrDefault()))
+		m.focus = consoleFocusDetail
 	case "overview_config":
 		m.setDetail("配置中心", renderConfigCenterLines(loadConfigOrDefault()))
+		m.focus = consoleFocusDetail
 	case "overview_guide":
 		m.setDetail("功能导航", renderGuideDetailLines(loadConfigOrDefault(), m.logFile))
+		m.focus = consoleFocusDetail
 	case "routing_groups":
 		return m.openGroupPicker()
 	case "routing_egress":
 		m.setDetail("出口网络", previewLinesForItem(item, m.snapshot, m.cfg, m.logFile))
+		m.focus = consoleFocusDetail
 	case "routing_logs":
 		m.setDetail("最近日志", m.captureLogLines(30))
+		m.focus = consoleFocusDetail
 	case "routing_panel":
 		m.setDetail("管理面板", previewLinesForItem(item, m.snapshot, m.cfg, m.logFile))
+		m.focus = consoleFocusDetail
 	case "extension_status":
-		cfg := loadConfigOrDefault()
-		if cfg.Extension.Mode == "chains" {
-			m.showCapturedDetail("链式代理状态", func() { runChainsStatus(nil, nil) })
-		} else {
-			m.showCapturedDetail("扩展状态", func() { printExtensionStatus(cfg) })
-		}
+		m.setDetail("扩展状态", renderExtensionStatusLines(loadConfigOrDefault()))
+		m.focus = consoleFocusDetail
 	case "extension_setup":
 		m.action = consoleActionOpenChainsSetup
 		return *m, tea.Quit
@@ -1156,28 +1341,36 @@ func (m *runtimeConsoleModel) executeSelectedAction() (tea.Model, tea.Cmd) {
 			}
 			m.setDetail("升级提示", lines)
 		}
+		m.focus = consoleFocusDetail
 	case "extension_restart":
 		m.pending = &pendingConfirm{prompt: "确认重启网关？", action: consoleActionRestart}
 		m.setDetail("确认重启", []string{noteLine("等待确认: 输入 y / n，或继续用方向键查看其他内容。")})
+		m.focus = consoleFocusDetail
 	case "devices_setup":
-		cfg := loadConfigOrDefault()
-		m.showCapturedDetail("设备接入", func() { printDeviceSetupPanel(m.ip, cfg.Runtime.Ports.API) })
+		m.setDetail("设备接入", renderDeviceSetupLines(m.ip, loadConfigOrDefault().Runtime.Ports.API))
+		m.focus = consoleFocusDetail
 	case "devices_mobile":
 		m.setDetail("手机 / 平板", previewLinesForItem(item, m.snapshot, m.cfg, m.logFile))
+		m.focus = consoleFocusDetail
 	case "devices_console":
 		m.setDetail("游戏机 / 电视", previewLinesForItem(item, m.snapshot, m.cfg, m.logFile))
+		m.focus = consoleFocusDetail
 	case "devices_entry":
 		m.setDetail("共享入口", previewLinesForItem(item, m.snapshot, m.cfg, m.logFile))
+		m.focus = consoleFocusDetail
 	case "system_stop":
 		m.pending = &pendingConfirm{prompt: "确认停止网关？", action: consoleActionStop}
 		m.setDetail("确认停止", []string{noteLine("等待确认: 输入 y / n，或继续用方向键查看其他内容。")})
+		m.focus = consoleFocusDetail
 	case "system_exit":
 		m.action = consoleActionExit
 		return *m, tea.Quit
 	case "system_paths":
 		m.setDetail("运行路径", previewLinesForItem(item, m.snapshot, m.cfg, m.logFile))
+		m.focus = consoleFocusDetail
 	case "system_config":
 		m.setDetail("配置中心", renderConfigCenterLines(loadConfigOrDefault()))
+		m.focus = consoleFocusDetail
 	default:
 		m.refreshSelectionPreview()
 	}
@@ -1188,38 +1381,38 @@ func menuItemsForTab(tab consoleTab) []consoleMenuItem {
 	switch tab {
 	case consoleTabRouting:
 		return []consoleMenuItem{
-			{id: "routing_groups", key: "01", title: "切换节点", desc: "打开节点分组和节点选择器"},
-			{id: "routing_egress", key: "02", title: "出口网络", desc: "查看入口、普通出口和住宅出口"},
-			{id: "routing_logs", key: "03", title: "最近日志", desc: "读取最近 30 行运行日志"},
-			{id: "routing_panel", key: "04", title: "管理面板", desc: "查看 Web 面板入口和用途"},
+			{id: "routing_groups", key: "01", title: "节点与测速", desc: "打开节点工作台，切换节点并测当前节点延迟", kind: consoleItemAction, cmd: "/nodes", enter: "进入节点工作台"},
+			{id: "routing_egress", key: "02", title: "出口网络", desc: "查看入口、普通出口和住宅出口", kind: consoleItemInfo, cmd: "/status", enter: "打开出口与状态详情"},
+			{id: "routing_logs", key: "03", title: "最近日志", desc: "读取最近 30 行运行日志", kind: consoleItemInfo, cmd: "/logs", enter: "打开日志页"},
+			{id: "routing_panel", key: "04", title: "管理面板", desc: "查看 Web 面板入口和用途", kind: consoleItemInfo, cmd: "/summary", enter: "查看面板入口说明"},
 		}
 	case consoleTabExtension:
 		return []consoleMenuItem{
-			{id: "extension_status", key: "01", title: "扩展状态", desc: "查看 chains / script 当前状态"},
-			{id: "extension_setup", key: "02", title: "Chains 向导", desc: "进入链式代理配置向导"},
-			{id: "extension_update", key: "03", title: "升级提示", desc: "检查是否有新版本可用"},
-			{id: "extension_restart", key: "04", title: "重启网关", desc: "应用配置变更并重启服务"},
+			{id: "extension_status", key: "01", title: "扩展状态", desc: "查看 chains / script 当前状态", kind: consoleItemInfo, cmd: "/chains", enter: "打开扩展状态页"},
+			{id: "extension_setup", key: "02", title: "Chains 向导", desc: "进入链式代理配置向导", kind: consoleItemAction, cmd: "/chains setup", enter: "进入链式代理向导"},
+			{id: "extension_update", key: "03", title: "升级提示", desc: "检查是否有新版本可用", kind: consoleItemInfo, cmd: "/update", enter: "打开升级提示"},
+			{id: "extension_restart", key: "04", title: "重启网关", desc: "应用配置变更并重启服务", kind: consoleItemConfirm, cmd: "/restart", enter: "进入重启确认"},
 		}
 	case consoleTabDevices:
 		return []consoleMenuItem{
-			{id: "devices_setup", key: "01", title: "设备接入", desc: "展示网关和 DNS 的填写方式"},
-			{id: "devices_mobile", key: "02", title: "手机 / 平板", desc: "iPhone / Android 快速接入提示"},
-			{id: "devices_console", key: "03", title: "游戏机 / 电视", desc: "Switch / PS5 / Apple TV / 电视接入提示"},
-			{id: "devices_entry", key: "04", title: "共享入口", desc: "查看当前局域网共享入口信息"},
+			{id: "devices_setup", key: "01", title: "设备接入", desc: "展示网关和 DNS 的填写方式", kind: consoleItemInfo, cmd: "/device", enter: "打开设备接入说明"},
+			{id: "devices_mobile", key: "02", title: "手机 / 平板", desc: "iPhone / Android 快速接入提示", kind: consoleItemInfo, cmd: "/device", enter: "打开手机接入提示"},
+			{id: "devices_console", key: "03", title: "游戏机 / 电视", desc: "Switch / PS5 / Apple TV / 电视接入提示", kind: consoleItemInfo, cmd: "/device", enter: "打开游戏机与电视接入提示"},
+			{id: "devices_entry", key: "04", title: "共享入口", desc: "查看当前局域网共享入口信息", kind: consoleItemInfo, cmd: "/summary", enter: "打开共享入口信息"},
 		}
 	case consoleTabSystem:
 		return []consoleMenuItem{
-			{id: "system_config", key: "01", title: "TUI 配置中心", desc: "在 TUI 内查看当前配置与快捷入口"},
-			{id: "system_paths", key: "02", title: "运行路径", desc: "查看配置、日志和面板路径"},
-			{id: "system_stop", key: "03", title: "停止网关", desc: "停止当前运行中的网关"},
-			{id: "system_exit", key: "04", title: "退出控制台", desc: "退出 TUI，但保持网关继续运行"},
+			{id: "system_config", key: "01", title: "TUI 配置中心", desc: "在 TUI 内查看当前配置与快捷入口", kind: consoleItemInfo, cmd: "/config", enter: "打开配置中心页"},
+			{id: "system_paths", key: "02", title: "运行路径", desc: "查看配置、日志和面板路径", kind: consoleItemInfo, cmd: "/summary", enter: "打开运行路径页"},
+			{id: "system_stop", key: "03", title: "停止网关", desc: "停止当前运行中的网关", kind: consoleItemConfirm, cmd: "/stop", enter: "进入停止确认"},
+			{id: "system_exit", key: "04", title: "退出控制台", desc: "退出 TUI，但保持网关继续运行", kind: consoleItemConfirm, cmd: "/exit", enter: "进入退出确认"},
 		}
 	default:
 		return []consoleMenuItem{
-			{id: "overview_status", key: "01", title: "运行状态", desc: "查看完整运行状态和出口网络"},
-			{id: "overview_summary", key: "02", title: "配置摘要", desc: "查看当前配置摘要和生效路径"},
-			{id: "overview_config", key: "03", title: "配置中心", desc: "在 TUI 内查看配置中心和快捷入口"},
-			{id: "overview_guide", key: "04", title: "功能导航", desc: "查看核心能力和下一步建议"},
+			{id: "overview_status", key: "01", title: "运行状态", desc: "查看完整运行状态和出口网络", kind: consoleItemInfo, cmd: "/status", enter: "打开运行状态页"},
+			{id: "overview_summary", key: "02", title: "配置摘要", desc: "查看当前配置摘要和生效路径", kind: consoleItemInfo, cmd: "/summary", enter: "打开配置摘要页"},
+			{id: "overview_config", key: "03", title: "配置中心", desc: "在 TUI 内查看配置中心和快捷入口", kind: consoleItemInfo, cmd: "/config", enter: "打开配置中心页"},
+			{id: "overview_guide", key: "04", title: "功能导航", desc: "查看核心能力和下一步建议", kind: consoleItemInfo, cmd: "/guide", enter: "打开功能导航页"},
 		}
 	}
 }
@@ -1233,7 +1426,7 @@ func previewLinesForItem(item consoleMenuItem, snap snapshot, cfg *config.Config
 			fmt.Sprintf("运行模式: %s", plainText(snap.modeSummary)),
 			fmt.Sprintf("出口摘要: %s", plainText(snap.egressSummary)),
 			"",
-			noteLine("回车后会在这里展开完整运行状态。"),
+			noteLine("这是信息页。回车后右侧会展开完整运行状态，焦点也会切到内容区。"),
 		}
 	case "overview_summary":
 		return []string{
@@ -1241,14 +1434,14 @@ func previewLinesForItem(item consoleMenuItem, snap snapshot, cfg *config.Config
 			fmt.Sprintf("面板入口: %s", snap.panelURL),
 			fmt.Sprintf("网络接口: %s", snap.iface),
 			"",
-			noteLine("回车后会展开 TUI 版配置摘要。"),
+			noteLine("这是信息页。回车后会展开 TUI 版配置摘要。"),
 		}
 	case "overview_config", "system_config":
 		return []string{
 			"这里会留在 TUI 内展示配置中心和快捷入口。",
 			"如果需要完整编辑，可在底部输入 /config open。",
 			"",
-			noteLine("回车后不会离开 TUI。"),
+			noteLine("这是信息页。回车后不会离开 TUI。"),
 		}
 	case "overview_guide":
 		return []string{
@@ -1256,14 +1449,22 @@ func previewLinesForItem(item consoleMenuItem, snap snapshot, cfg *config.Config
 			"2. 再决定是继续调节点、配置 chains，还是拿设备接入",
 			"3. 任何时候都可以从底部输入框直接执行命令",
 			"",
-			noteLine("回车后会展开完整功能导航。"),
+			noteLine("这是信息页。回车后会展开完整功能导航。"),
+		}
+	case "routing_groups":
+		return []string{
+			"这是一个可操作页，不是纯信息页。",
+			"进入后可以浏览节点分组、切换节点、按 T 测当前节点延迟。",
+			"如果你只是想快速切节点，也可以直接按 Ctrl+P。",
+			"",
+			noteLine("回车后进入节点工作台。"),
 		}
 	case "routing_egress":
 		return []string{
 			fmt.Sprintf("当前节点: %s", snap.currentNode),
 			fmt.Sprintf("出口摘要: %s", plainText(snap.egressSummary)),
 			"",
-			noteLine("更细的入口 / 普通出口 / 住宅出口信息可用 gateway status 查看。"),
+			noteLine("这是信息页。更细的入口 / 普通出口 / 住宅出口信息会在这里展开。"),
 		}
 	case "routing_panel":
 		return []string{
@@ -1301,7 +1502,7 @@ func previewLinesForItem(item consoleMenuItem, snap snapshot, cfg *config.Config
 	default:
 		return []string{
 			noteLine(item.desc),
-			noteLine("回车执行这个功能，或在底部输入框里直接输入命令。"),
+			noteLine("回车打开这个功能，或在底部输入框里直接输入命令。"),
 			fmt.Sprintf("当前模式: %s", plainText(snap.modeSummary)),
 			fmt.Sprintf("当前节点: %s", snap.currentNode),
 			fmt.Sprintf("扩展模式: %s", cfg.Extension.Mode),
@@ -1342,7 +1543,7 @@ func tabLabel(tab consoleTab) string {
 func defaultSuggestionsForTab(tab consoleTab) []string {
 	switch tab {
 	case consoleTabRouting:
-		return []string{"/nodes", "/status", "/logs", "/summary"}
+		return []string{"/nodes", "/speed", "/status", "/logs"}
 	case consoleTabExtension:
 		return []string{"/chains", "/chains setup", "/update", "/restart"}
 	case consoleTabDevices:
@@ -1364,6 +1565,7 @@ func consoleCommandSuggestions() []string {
 		"/chains",
 		"/chains setup",
 		"/nodes",
+		"/speed",
 		"/groups",
 		"/device",
 		"/logs",
@@ -1408,7 +1610,15 @@ func (m runtimeConsoleModel) renderPicker(width, height int) string {
 	}
 
 	if m.picker == pickerModeGroups {
-		lines := []string{"先选择一个节点分组，然后回车进入节点列表。", ""}
+		lines := []string{
+			renderSectionTitle("当前阶段"),
+			"  先选择一个节点分组，然后回车进入节点列表。",
+			"  进入节点列表后，可以切换节点，也可以按 T 测当前节点延迟。",
+		}
+		if strings.TrimSpace(m.pickerStatus) != "" {
+			lines = append(lines, "", noteLine(m.pickerStatus))
+		}
+		lines = append(lines, "", renderSectionTitle("节点分组"))
 		for i, group := range m.groups {
 			cursor := "  "
 			style := lipgloss.NewStyle().Foreground(lipgloss.Color("#cbd5e1"))
@@ -1418,6 +1628,7 @@ func (m runtimeConsoleModel) renderPicker(width, height int) string {
 			}
 			lines = append(lines, style.Render(fmt.Sprintf("%s%s  [%s]  当前: %s", cursor, group.Name, group.Type, group.Now)))
 		}
+		lines = append(lines, "", noteLine("Enter 进入节点列表  ·  Esc 返回左侧"))
 		return lipgloss.NewStyle().
 			Height(height).
 			MaxHeight(height).
@@ -1426,9 +1637,15 @@ func (m runtimeConsoleModel) renderPicker(width, height int) string {
 
 	group := m.groups[m.groupCursor]
 	lines := []string{
-		fmt.Sprintf("节点分组: %s", group.Name),
-		fmt.Sprintf("当前节点: %s", group.Now),
+		renderSectionTitle("当前分组"),
+		fmt.Sprintf("  节点分组: %s", group.Name),
+		fmt.Sprintf("  当前节点: %s", group.Now),
+		fmt.Sprintf("  测试地址: %s", shortText(pickerTestURL(group), 56)),
 		"",
+		renderSectionTitle("节点列表"),
+	}
+	if strings.TrimSpace(m.pickerStatus) != "" {
+		lines = append(lines, noteLine(m.pickerStatus), "")
 	}
 	for i, node := range group.All {
 		cursor := "  "
@@ -1437,11 +1654,16 @@ func (m runtimeConsoleModel) renderPicker(width, height int) string {
 			cursor = "› "
 			style = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#f59e0b"))
 		}
+		delayInfo := "未测速"
+		if value := strings.TrimSpace(m.nodeDelays[node]); value != "" {
+			delayInfo = value
+		}
 		if node == group.Now {
 			node += "  (current)"
 		}
-		lines = append(lines, style.Render(cursor+node))
+		lines = append(lines, style.Render(fmt.Sprintf("%s%s  ·  %s", cursor, truncateText(node, 24), delayInfo)))
 	}
+	lines = append(lines, "", noteLine("Enter 切换节点  ·  T 测当前节点延迟  ·  Esc 返回分组"))
 	if width > 0 {
 		return lipgloss.NewStyle().
 			Width(width).
@@ -1618,6 +1840,74 @@ func renderConfigCenterLines(cfg *config.Config) []string {
 		renderSectionTitle("说明"),
 		noteLine("当前 TUI 先提供查看和快捷入口，完整编辑仍可通过 /config open 进入。"),
 	}
+	return lines
+}
+
+func renderNodeWorkspaceLines(snap snapshot, statusLine string) []string {
+	lines := []string{
+		renderSectionTitle("节点工作台"),
+		"  这是一个可操作页：进入后可以切换节点，也可以测当前节点延迟。",
+		fmt.Sprintf("  当前节点: %s", snap.currentNode),
+		fmt.Sprintf("  当前出口: %s", plainText(snap.egressSummary)),
+	}
+	if strings.TrimSpace(statusLine) != "" {
+		lines = append(lines, "", statusLine)
+	}
+	lines = append(lines,
+		"",
+		renderSectionTitle("常用操作"),
+		noteLine("回车进入节点工作台"),
+		noteLine("进入后按 T 测当前节点延迟"),
+		noteLine("也可以直接按 Ctrl+P 打开"),
+	)
+	return lines
+}
+
+func renderDeviceSetupLines(ip string, apiPort int) []string {
+	return []string{
+		renderSectionTitle("设备接入"),
+		"  网关 (Gateway): " + ip,
+		"  DNS: " + ip,
+		"  IP: 同网段任意可用 IP",
+		"  子网掩码: 255.255.255.0",
+		"",
+		renderSectionTitle("验证方式"),
+		"  手机上优先验证浏览器 / YouTube / App Store。",
+		"  游戏机和电视可优先验证 eShop / PSN / 流媒体。",
+		"",
+		noteLine(fmt.Sprintf("API 面板: http://%s:%d/ui", ip, apiPort)),
+	}
+}
+
+func renderExtensionStatusLines(cfg *config.Config) []string {
+	lines := []string{
+		renderSectionTitle("扩展状态"),
+		"  模式: " + extensionModeName(cfg.Extension.Mode),
+	}
+	switch cfg.Extension.Mode {
+	case "chains":
+		if cfg.Extension.ResidentialChain != nil {
+			lines = append(lines,
+				"  链式模式: "+fallbackText(cfg.Extension.ResidentialChain.Mode, "rule"),
+				"  住宅代理: "+fmt.Sprintf("%s:%d (%s)", cfg.Extension.ResidentialChain.ProxyServer, cfg.Extension.ResidentialChain.ProxyPort, cfg.Extension.ResidentialChain.ProxyType),
+				"  机场组: "+fallbackText(cfg.Extension.ResidentialChain.AirportGroup, "Auto"),
+			)
+		} else {
+			lines = append(lines, errorLine("chains 已启用，但 residential_chain 配置为空"))
+		}
+	case "script":
+		lines = append(lines, "  脚本路径: "+fallbackText(cfg.Extension.ScriptPath, "未配置"))
+	default:
+		lines = append(lines, noteLine("当前未启用扩展模式。可用 /chains setup 打开内置链式代理向导。"))
+	}
+
+	lines = append(lines,
+		"",
+		renderSectionTitle("快捷入口"),
+		noteLine("/chains 查看当前状态"),
+		noteLine("/chains setup 进入链式代理向导"),
+		noteLine("/config open 打开完整配置中心"),
+	)
 	return lines
 }
 
