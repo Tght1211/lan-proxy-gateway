@@ -2,6 +2,8 @@ package config
 
 import (
 	"os"
+	"slices"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -15,10 +17,19 @@ type Config struct {
 
 type ProxyConfig struct {
 	// Source: url = 使用订阅链接 | file = 使用本地 Clash/mihomo 配置文件
-	Source           string `yaml:"source"`
-	SubscriptionURL  string `yaml:"subscription_url,omitempty"`
-	ConfigFile       string `yaml:"config_file,omitempty"`
-	SubscriptionName string `yaml:"subscription_name"`
+	Source           string         `yaml:"source"`
+	SubscriptionURL  string         `yaml:"subscription_url,omitempty"`
+	ConfigFile       string         `yaml:"config_file,omitempty"`
+	SubscriptionName string         `yaml:"subscription_name"`
+	CurrentProfile   string         `yaml:"current_profile,omitempty"`
+	Profiles         []ProxyProfile `yaml:"profiles,omitempty"`
+}
+
+type ProxyProfile struct {
+	Name            string `yaml:"name"`
+	Source          string `yaml:"source"`
+	SubscriptionURL string `yaml:"subscription_url,omitempty"`
+	ConfigFile      string `yaml:"config_file,omitempty"`
 }
 
 type ExtensionConfig struct {
@@ -78,6 +89,13 @@ func DefaultConfig() *Config {
 		Proxy: ProxyConfig{
 			Source:           "url",
 			SubscriptionName: "subscription",
+			CurrentProfile:   "subscription",
+			Profiles: []ProxyProfile{
+				{
+					Name:   "subscription",
+					Source: "url",
+				},
+			},
 		},
 		Runtime: RuntimeConfig{
 			Ports: PortsConfig{
@@ -85,6 +103,9 @@ func DefaultConfig() *Config {
 				Redir: 7892,
 				API:   9090,
 				DNS:   53,
+			},
+			Tun: TunConfig{
+				Enabled: true,
 			},
 		},
 		Extension: ExtensionConfig{},
@@ -214,6 +235,45 @@ func sanitizeProxy(proxy ProxyConfig) *ProxyConfig {
 	if sanitized.SubscriptionName == "" {
 		sanitized.SubscriptionName = "subscription"
 	}
+	selectedName := strings.TrimSpace(sanitized.CurrentProfile)
+	if selectedName == "" {
+		selectedName = sanitized.SubscriptionName
+	}
+
+	active := sanitizeProxyProfile(ProxyProfile{
+		Name:            sanitized.SubscriptionName,
+		Source:          sanitized.Source,
+		SubscriptionURL: sanitized.SubscriptionURL,
+		ConfigFile:      sanitized.ConfigFile,
+	})
+
+	profiles := normalizeProxyProfiles(sanitized.Profiles)
+	if len(profiles) == 0 {
+		profiles = []ProxyProfile{active}
+	}
+
+	selectedIdx := indexOfProfile(profiles, selectedName)
+	if selectedIdx < 0 {
+		selectedIdx = indexOfProfile(profiles, active.Name)
+	}
+
+	switch {
+	case selectedIdx >= 0:
+		profiles[selectedIdx] = active
+	case active.Name != "":
+		profiles = append(profiles, active)
+		selectedIdx = len(profiles) - 1
+	default:
+		selectedIdx = 0
+	}
+
+	selected := profiles[selectedIdx]
+	sanitized.Source = selected.Source
+	sanitized.SubscriptionURL = selected.SubscriptionURL
+	sanitized.ConfigFile = selected.ConfigFile
+	sanitized.SubscriptionName = selected.Name
+	sanitized.CurrentProfile = selected.Name
+	sanitized.Profiles = profiles
 	return &sanitized
 }
 
@@ -233,6 +293,68 @@ func sanitizeRuntime(runtime RuntimeConfig) *RuntimeConfig {
 		sanitized.Ports.DNS = defaults.DNS
 	}
 	return &sanitized
+}
+
+func sanitizeProxyProfile(profile ProxyProfile) ProxyProfile {
+	sanitized := profile
+	sanitized.Name = strings.TrimSpace(sanitized.Name)
+	sanitized.Source = strings.ToLower(strings.TrimSpace(sanitized.Source))
+	if sanitized.Source == "" {
+		sanitized.Source = "url"
+	}
+	if sanitized.Name == "" {
+		sanitized.Name = "subscription"
+	}
+	sanitized.SubscriptionURL = strings.TrimSpace(sanitized.SubscriptionURL)
+	sanitized.ConfigFile = strings.TrimSpace(sanitized.ConfigFile)
+	return sanitized
+}
+
+func normalizeProxyProfiles(profiles []ProxyProfile) []ProxyProfile {
+	if len(profiles) == 0 {
+		return nil
+	}
+	normalized := make([]ProxyProfile, 0, len(profiles))
+	seen := make([]string, 0, len(profiles))
+	for _, profile := range profiles {
+		sanitized := sanitizeProxyProfile(profile)
+		if slices.Contains(seen, sanitized.Name) {
+			continue
+		}
+		seen = append(seen, sanitized.Name)
+		normalized = append(normalized, sanitized)
+	}
+	return normalized
+}
+
+func indexOfProfile(profiles []ProxyProfile, name string) int {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return -1
+	}
+	for idx, profile := range profiles {
+		if profile.Name == name {
+			return idx
+		}
+	}
+	return -1
+}
+
+func (p ProxyConfig) ActiveProfile() ProxyProfile {
+	profiles := normalizeProxyProfiles(p.Profiles)
+	selected := strings.TrimSpace(p.CurrentProfile)
+	if selected == "" {
+		selected = p.SubscriptionName
+	}
+	if idx := indexOfProfile(profiles, selected); idx >= 0 {
+		return profiles[idx]
+	}
+	return sanitizeProxyProfile(ProxyProfile{
+		Name:            p.SubscriptionName,
+		Source:          p.Source,
+		SubscriptionURL: p.SubscriptionURL,
+		ConfigFile:      p.ConfigFile,
+	})
 }
 
 func sanitizeRules(rules RulesConfig) *RulesConfig {

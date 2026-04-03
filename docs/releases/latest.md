@@ -1,57 +1,55 @@
-# LAN Proxy Gateway v2.2.7
+# LAN Proxy Gateway v2.2.8
 
-这一版把 Windows 兼容性做了一次完整补验，不只是修文案，而是把安装、更新、状态检测、开机自启和提示链路一起收了一轮。
+这一版对 TUI 控制台做了一次产品化改版，首页真正变成了 Clash 风格的状态 Dashboard，同时彻底清理了旧命令栏的残留逻辑。
 
-## 重点修复
+## 重点变更
 
-### 1. 终端与权限判断更稳
+### 1. TUI 首页改为 Dashboard
 
-- 启动时会主动切到 UTF-8 代码页 `65001`
-- 同时开启 ANSI 虚拟终端支持
-- 管理员权限判断不再依赖脆弱的 `net session`，改成 Windows Token 成员检测
+- 启动后默认聚焦顶部，先看整体状态，再决定进入哪个工作台
+- 首页一屏展示：
+  - **订阅情况**：订阅名称、来源站点、到期时间、剩余流量、用量进度条
+  - **当前节点**：工作模式（规则/全局/直连）、策略组、当前节点
+  - **网络设置**：TUN 状态、TUN 接口、局域网共享、本机绕过代理
+  - **流量统计**：上下行速度、活跃连接、上传/下载总量、内核占用、趋势图
+  - **IP 链路**：当前 IP、入口 IP、出口 IP
+  - **常用站点延迟**：YouTube / Google / GitHub / Apple
 
-### 2. 安装和更新链路补齐
+### 2. 顶部 Tab 精简为三个分区
 
-- `install.ps1` 安装完成后会立刻刷新当前 PowerShell 的 `$env:Path`
-- Windows 下的 `gateway update` 改成后台替换锁定中的 `.exe`
-- 当前进程退出后会自动完成替换并重新启动网关
+- **首页**：Dashboard 总览 + 连接与流量 + IP 与延迟
+- **代理**：节点与分组 + 网络设置 + 规则推荐 + 出口网络
+- **订阅**：订阅管理 + 代理来源 + 扩展模式 + 住宅代理 + 状态概览
 
-### 3. 中文 Windows 下的状态检测更可靠
+### 3. 删除底部命令栏
 
-- `IsRunning()` 不再依赖 `"没有"` / `"No tasks"` 这类本地化文本
-- `IsIPForwardingEnabled()` 不再解析 `netsh` 的中英文输出
-- 默认网卡与默认网关改成按默认路由表识别，不再容易误选 VPN / 虚拟网卡
+- 移除了旧的 `命令栏` 面板（`renderInput`）和命令补全提示（`renderCommandSuggestions`）
+- 确认操作（重启/停止/退出）和参数输入（修改 URL、名称等）改为居中覆盖弹窗
+- 底部区域现在只显示当前焦点区的操作提示
 
-### 4. Windows 的开机自启和命令提示更合理
+### 4. 菜单预览区优化
 
-- `gateway service install` 在 Windows 下改成安装任务计划程序启动任务
-- 不再把普通 CLI 伪装成 `sc.exe` 服务
-- 日志和运行提示也按平台输出：
-  - Windows：`gateway <subcommand>`、`Get-Content -Wait`
-  - macOS / Linux：`sudo gateway <subcommand>`、`tail -f`
-
-### 5. 路径细节补齐
-
-- 日志路径统一走 `os.TempDir()`
-- 本地配置路径现在同时支持 `~/...` 和 `~\...`
+- 左侧菜单预览卡片新增"**当前摘要**"和"**下一步**"区块
+- 下一步区块直接告知"回车进入"和对应快捷命令（如 `Ctrl+P`、`/tun`、`/rule` 等）
+- 按 R 刷新时，"功能导航"等信息页会原地刷新，不再跳回首页
 
 ## 下载
 
 | 系统 | 直接下载 |
 |---|---|
-| macOS Apple Silicon | [gateway-darwin-arm64](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.7/gateway-darwin-arm64) / [gateway-darwin-arm64.tar.gz](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.7/gateway-darwin-arm64.tar.gz) |
-| macOS Intel | [gateway-darwin-amd64](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.7/gateway-darwin-amd64) / [gateway-darwin-amd64.tar.gz](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.7/gateway-darwin-amd64.tar.gz) |
-| Linux x86_64 | [gateway-linux-amd64](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.7/gateway-linux-amd64) / [gateway-linux-amd64.tar.gz](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.7/gateway-linux-amd64.tar.gz) |
-| Linux ARM64 | [gateway-linux-arm64](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.7/gateway-linux-arm64) / [gateway-linux-arm64.tar.gz](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.7/gateway-linux-arm64.tar.gz) |
-| Windows x86_64 | [gateway-windows-amd64.exe](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.7/gateway-windows-amd64.exe) / [gateway-windows-amd64.zip](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.7/gateway-windows-amd64.zip) |
+| macOS Apple Silicon | [gateway-darwin-arm64](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.8/gateway-darwin-arm64) / [gateway-darwin-arm64.tar.gz](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.8/gateway-darwin-arm64.tar.gz) |
+| macOS Intel | [gateway-darwin-amd64](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.8/gateway-darwin-amd64) / [gateway-darwin-amd64.tar.gz](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.8/gateway-darwin-amd64.tar.gz) |
+| Linux x86_64 | [gateway-linux-amd64](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.8/gateway-linux-amd64) / [gateway-linux-amd64.tar.gz](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.8/gateway-linux-amd64.tar.gz) |
+| Linux ARM64 | [gateway-linux-arm64](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.8/gateway-linux-arm64) / [gateway-linux-arm64.tar.gz](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.8/gateway-linux-arm64.tar.gz) |
+| Windows x86_64 | [gateway-windows-amd64.exe](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.8/gateway-windows-amd64.exe) / [gateway-windows-amd64.zip](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.8/gateway-windows-amd64.zip) |
 
-校验文件: [SHA256SUMS](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.7/SHA256SUMS)
+校验文件: [SHA256SUMS](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v2.2.8/SHA256SUMS)
 
 ## 建议验证
 
-升级到 `v2.2.7` 后，建议顺手确认这几处：
+升级到 `v2.2.8` 后，建议顺手确认这几处：
 
-1. 在 Windows PowerShell 里安装完成后，直接输入 `gateway`，确认当前窗口无需重开就能识别命令
-2. 执行 `gateway update`，确认更新流程会在后台替换并重新启动，而不是卡在当前 `.exe`
-3. 执行 `gateway status`，确认默认网卡、IP 转发和进程状态都能正常显示
-4. 执行 `gateway service install`，确认开机自启任务能被正常创建
+1. 执行 `gateway start`，确认首页自动展示订阅流量进度条、当前节点和延迟数据
+2. 按 `←/→` 切换首页/代理/订阅三个 Tab，确认左侧菜单和右侧预览正常联动
+3. 在左侧菜单预览卡片中确认能看到"当前摘要"和"下一步（回车/命令）"提示
+4. 在任意信息页按 `R` 刷新，确认页面原地更新，不会跳回首页

@@ -46,7 +46,7 @@ func TestConsoleLayoutFitsWindowHeight(t *testing.T) {
 	m.height = 38
 	m.resize()
 
-	totalHeight := lipgloss.Height(m.renderHeader()) + lipgloss.Height(m.renderMain()) + lipgloss.Height(m.renderInput())
+	totalHeight := lipgloss.Height(m.renderHeader()) + lipgloss.Height(m.renderMain()) + lipgloss.Height(m.renderFooter())
 	if totalHeight > m.height {
 		t.Fatalf("expected console to fit window height, got total=%d height=%d", totalHeight, m.height)
 	}
@@ -83,17 +83,18 @@ func TestRenderConfigSummaryDetailLinesHasSections(t *testing.T) {
 	}
 }
 
-func TestTypingFromNavFocusMovesToCommandInput(t *testing.T) {
+func TestTypingSlashInNavFocusIsIgnored(t *testing.T) {
 	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+	m.focus = consoleFocusNav
 
 	next, _ := m.Update(tea.KeyPressMsg{Text: "/"})
 	updated := next.(runtimeConsoleModel)
 
-	if updated.focus != consoleFocusInput {
-		t.Fatalf("expected focus to switch to input, got %v", updated.focus)
+	if updated.focus != consoleFocusNav {
+		t.Fatalf("expected nav focus to remain after typing slash, got %v", updated.focus)
 	}
-	if updated.inputValue != "/" {
-		t.Fatalf("expected input value to start with slash, got %q", updated.inputValue)
+	if updated.inputValue != "" {
+		t.Fatalf("expected input value to stay empty in nav mode, got %q", updated.inputValue)
 	}
 }
 
@@ -180,14 +181,15 @@ func TestRefreshKeyKeepsGuidePage(t *testing.T) {
 func TestEnterMovesFocusToDetailForInfoPage(t *testing.T) {
 	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
 	m.tab = consoleTabOverview
-	m.cursor = 3
+	m.cursor = 0
+	m.focus = consoleFocusNav
 	m.refreshSelectionPreview()
 
 	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	updated := next.(runtimeConsoleModel)
 
 	if updated.focus != consoleFocusDetail {
-		t.Fatalf("expected enter to move focus to detail, got %v", updated.focus)
+		t.Fatalf("expected enter from nav to move focus to detail, got %v", updated.focus)
 	}
 }
 
@@ -315,14 +317,14 @@ func TestMouseWheelScrollsDetailPaneWhenFocused(t *testing.T) {
 	}
 }
 
-func TestRenderInputShowsRefreshHintDuringPulse(t *testing.T) {
+func TestRenderFooterShowsRefreshHintDuringPulse(t *testing.T) {
 	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
 	m.width = 120
 	m.refreshPulse = refreshPulseFrames
 
-	got := plainText(m.renderInput())
-	if !strings.Contains(got, "正在刷新当前页面") {
-		t.Fatalf("expected input panel to show refresh hint during pulse, got %q", got)
+	got := plainText(m.renderHeader())
+	if !strings.Contains(got, "↻") {
+		t.Fatalf("expected header to show refresh marker during pulse, got %q", got)
 	}
 }
 

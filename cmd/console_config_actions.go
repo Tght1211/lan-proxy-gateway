@@ -44,6 +44,59 @@ func ensureConsoleChain(cfg *config.Config) *config.ResidentialChain {
 	return cfg.Extension.ResidentialChain
 }
 
+func activeProxyProfile(cfg *config.Config) config.ProxyProfile {
+	return cfg.Proxy.ActiveProfile()
+}
+
+func listProxyProfiles(cfg *config.Config) []config.ProxyProfile {
+	if cfg == nil {
+		return nil
+	}
+	profiles := append([]config.ProxyProfile(nil), cfg.Proxy.Profiles...)
+	if len(profiles) == 0 {
+		profiles = []config.ProxyProfile{cfg.Proxy.ActiveProfile()}
+	}
+	return profiles
+}
+
+func applyActiveProxyProfile(cfg *config.Config, profile config.ProxyProfile) {
+	cfg.Proxy.Source = profile.Source
+	cfg.Proxy.SubscriptionName = profile.Name
+	cfg.Proxy.SubscriptionURL = profile.SubscriptionURL
+	cfg.Proxy.ConfigFile = profile.ConfigFile
+	cfg.Proxy.CurrentProfile = profile.Name
+}
+
+func upsertProxyProfile(cfg *config.Config, profile config.ProxyProfile, activate bool) {
+	profile.Name = strings.TrimSpace(profile.Name)
+	if profile.Name == "" {
+		profile.Name = "subscription"
+	}
+	profile.Source = strings.ToLower(strings.TrimSpace(profile.Source))
+	if profile.Source == "" {
+		profile.Source = "url"
+	}
+	profile.SubscriptionURL = strings.TrimSpace(profile.SubscriptionURL)
+	profile.ConfigFile = strings.TrimSpace(profile.ConfigFile)
+
+	profiles := listProxyProfiles(cfg)
+	replaced := false
+	for idx := range profiles {
+		if profiles[idx].Name == profile.Name {
+			profiles[idx] = profile
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		profiles = append(profiles, profile)
+	}
+	cfg.Proxy.Profiles = profiles
+	if activate {
+		applyActiveProxyProfile(cfg, profile)
+	}
+}
+
 func normalizeOnOffToggle(value string, current bool) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "toggle", "":
@@ -168,6 +221,7 @@ func updateProxySource(source string) (*config.Config, error) {
 			return fmt.Errorf("代理来源仅支持 url 或 file")
 		}
 		cfg.Proxy.Source = source
+		upsertProxyProfile(cfg, activeProxyProfile(cfg), true)
 		return nil
 	})
 }
@@ -179,6 +233,10 @@ func updateSubscriptionURL(url string) (*config.Config, error) {
 			return fmt.Errorf("订阅链接不能为空")
 		}
 		cfg.Proxy.SubscriptionURL = url
+		if cfg.Proxy.Source == "" {
+			cfg.Proxy.Source = "url"
+		}
+		upsertProxyProfile(cfg, activeProxyProfile(cfg), true)
 		return nil
 	})
 }
@@ -190,6 +248,10 @@ func updateProxyConfigFile(path string) (*config.Config, error) {
 			return err
 		}
 		cfg.Proxy.ConfigFile = validated
+		if cfg.Proxy.Source == "" {
+			cfg.Proxy.Source = "file"
+		}
+		upsertProxyProfile(cfg, activeProxyProfile(cfg), true)
 		return nil
 	})
 }
@@ -200,8 +262,71 @@ func updateSubscriptionName(name string) (*config.Config, error) {
 		if name == "" {
 			return fmt.Errorf("订阅名称不能为空")
 		}
+		current := strings.TrimSpace(cfg.Proxy.CurrentProfile)
+		if current == "" {
+			current = cfg.Proxy.SubscriptionName
+		}
+		for idx := range cfg.Proxy.Profiles {
+			if cfg.Proxy.Profiles[idx].Name == current {
+				cfg.Proxy.Profiles[idx].Name = name
+				break
+			}
+		}
 		cfg.Proxy.SubscriptionName = name
+		cfg.Proxy.CurrentProfile = name
+		upsertProxyProfile(cfg, activeProxyProfile(cfg), true)
 		return nil
+	})
+}
+
+func createSubscriptionProfile(name, source, value string) (*config.Config, error) {
+	return updateConsoleConfig(func(cfg *config.Config) error {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("订阅名称不能为空")
+		}
+		source, err := normalizeProxySource(source)
+		if err != nil {
+			return err
+		}
+
+		profile := config.ProxyProfile{
+			Name:   name,
+			Source: source,
+		}
+		switch source {
+		case "url":
+			value = strings.TrimSpace(value)
+			if value == "" {
+				return fmt.Errorf("订阅链接不能为空")
+			}
+			profile.SubscriptionURL = value
+		case "file":
+			validated, err := validateExistingFile(value)
+			if err != nil {
+				return err
+			}
+			profile.ConfigFile = validated
+		}
+		upsertProxyProfile(cfg, profile, true)
+		return nil
+	})
+}
+
+func switchSubscriptionProfile(name string) (*config.Config, error) {
+	return updateConsoleConfig(func(cfg *config.Config) error {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("请填写要切换的订阅名称")
+		}
+		for _, profile := range listProxyProfiles(cfg) {
+			if profile.Name != name {
+				continue
+			}
+			applyActiveProxyProfile(cfg, profile)
+			return nil
+		}
+		return fmt.Errorf("未找到订阅: %s", name)
 	})
 }
 
@@ -310,16 +435,100 @@ func updateChainPassword(password string) (*config.Config, error) {
 	})
 }
 
+func providerSourceHost(cfg *config.Config) string {
+	profile := activeProxyProfile(cfg)
+	if profile.Source != "url" {
+		return "本地文件"
+	}
+	value := strings.TrimSpace(profile.SubscriptionURL)
+	value = strings.TrimPrefix(value, "https://")
+	value = strings.TrimPrefix(value, "http://")
+	if idx := strings.Index(value, "/"); idx >= 0 {
+		value = value[:idx]
+	}
+	if value == "" {
+		return "未设置"
+	}
+	return value
+}
+
+func compactProfileList(cfg *config.Config) string {
+	profiles := listProxyProfiles(cfg)
+	if len(profiles) == 0 {
+		return "无"
+	}
+	names := make([]string, 0, len(profiles))
+	for _, profile := range profiles {
+		name := profile.Name
+		if profile.Name == cfg.Proxy.CurrentProfile {
+			name += " (current)"
+		}
+		names = append(names, name)
+	}
+	return strings.Join(names, " / ")
+}
+
+func renderSubscriptionProfilesLines(cfg *config.Config) []string {
+	lines := []string{renderSectionTitle("订阅档案")}
+	for _, profile := range listProxyProfiles(cfg) {
+		current := ""
+		if profile.Name == cfg.Proxy.CurrentProfile {
+			current = "  (current)"
+		}
+		if profile.Source == "url" {
+			lines = append(lines, "  - "+profile.Name+" · url · "+shortText(profile.SubscriptionURL, 56)+current)
+		} else {
+			lines = append(lines, "  - "+profile.Name+" · file · "+shortText(profile.ConfigFile, 56)+current)
+		}
+	}
+	return lines
+}
+
+func renderSubscriptionWorkspaceLines(cfg *config.Config, status string) []string {
+	profile := activeProxyProfile(cfg)
+	lines := []string{
+		renderSectionTitle("当前订阅"),
+		"  当前档案: " + profile.Name,
+		"  来源: " + profile.Source,
+		"  订阅概览: " + compactProfileList(cfg),
+	}
+	if profile.Source == "url" {
+		lines = append(lines, "  订阅链接: "+shortText(profile.SubscriptionURL, 72))
+		lines = append(lines, "  来源站点: "+providerSourceHost(cfg))
+	} else {
+		lines = append(lines, "  本地配置: "+fallbackText(profile.ConfigFile, "未设置"))
+	}
+	lines = append(lines, "")
+	lines = append(lines, renderSubscriptionProfilesLines(cfg)...)
+	if status != "" {
+		lines = append(lines, "", status)
+	}
+	lines = append(lines,
+		"",
+		renderSectionTitle("工作台操作"),
+		"  1 新建 URL 订阅",
+		"  2 新建本地文件订阅",
+		"  3 切换当前订阅",
+		"  U 编辑当前订阅链接",
+		"  F 编辑当前本地配置路径",
+		"  N 重命名当前订阅",
+		"",
+		noteLine("订阅切换会写入 gateway.yaml，重启网关后生效。"),
+	)
+	return lines
+}
+
 func renderProxyWorkspaceLines(cfg *config.Config, status string) []string {
+	profile := activeProxyProfile(cfg)
 	lines := []string{
 		renderSectionTitle("当前代理来源"),
-		"  来源: " + cfg.Proxy.Source,
-		"  订阅名称: " + fallbackText(cfg.Proxy.SubscriptionName, "subscription"),
+		"  来源: " + profile.Source,
+		"  订阅名称: " + fallbackText(profile.Name, "subscription"),
 	}
-	if cfg.Proxy.Source == "url" {
-		lines = append(lines, "  订阅链接: "+shortText(cfg.Proxy.SubscriptionURL, 72))
+	if profile.Source == "url" {
+		lines = append(lines, "  订阅链接: "+shortText(profile.SubscriptionURL, 72))
 	} else {
-		lines = append(lines, "  本地配置: "+fallbackText(cfg.Proxy.ConfigFile, "未设置"))
+		lines = append(lines, "  本地配置: "+fallbackText(profile.ConfigFile, "未设置"))
 	}
 	if status != "" {
 		lines = append(lines, "", status)
@@ -343,6 +552,7 @@ func renderRuntimeWorkspaceLines(cfg *config.Config, status string) []string {
 		renderSectionTitle("当前运行模式"),
 		"  TUN: " + tuiOnOff(cfg.Runtime.Tun.Enabled),
 		"  本机绕过代理: " + tuiOnOff(cfg.Runtime.Tun.BypassLocal),
+		"  局域网共享: " + tuiState(cfg.Runtime.Tun.Enabled, "已开启（依赖 TUN）", "不可用"),
 		fmt.Sprintf("  端口: mixed %d | redir %d | api %d | dns %d", cfg.Runtime.Ports.Mixed, cfg.Runtime.Ports.Redir, cfg.Runtime.Ports.API, cfg.Runtime.Ports.DNS),
 	}
 	if status != "" {
@@ -354,7 +564,7 @@ func renderRuntimeWorkspaceLines(cfg *config.Config, status string) []string {
 		"  1 切换 TUN 开关",
 		"  2 切换本机绕过代理",
 		"",
-		noteLine(fmt.Sprintf("TUN 是局域网共享的核心开关；改完通常需要 %s。", elevatedCmd("restart"))),
+		noteLine(fmt.Sprintf("TUN 是局域网共享的核心开关；关闭后局域网设备无法再通过这台机器上网。改完通常需要 %s。", elevatedCmd("restart"))),
 	)
 	return lines
 }
@@ -386,6 +596,7 @@ func renderExtensionWorkspaceLines(cfg *config.Config, status string) []string {
 	lines := []string{
 		renderSectionTitle("当前扩展模式"),
 		"  模式: " + extensionModeName(cfg.Extension.Mode),
+		"  说明: script 与 chains 二选一",
 	}
 	if cfg.Extension.Mode == "script" {
 		lines = append(lines, "  script_path: "+fallbackText(cfg.Extension.ScriptPath, "未设置"))

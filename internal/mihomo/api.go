@@ -84,6 +84,24 @@ type ProxyGroup struct {
 	TestURL string   `json:"testUrl"`
 }
 
+type ProviderProxy struct {
+	Alive   bool     `json:"alive"`
+	All     []string `json:"all"`
+	Name    string   `json:"name"`
+	Now     string   `json:"now"`
+	Type    string   `json:"type"`
+	TestURL string   `json:"testUrl"`
+}
+
+type ProxyProvider struct {
+	Name        string          `json:"name"`
+	Type        string          `json:"type"`
+	VehicleType string          `json:"vehicleType"`
+	UpdatedAt   string          `json:"updatedAt"`
+	Proxies     []ProviderProxy `json:"proxies"`
+	TestURL     string          `json:"testUrl"`
+}
+
 func (c *Client) GetProxyGroup(name string) (*ProxyGroup, error) {
 	var pg ProxyGroup
 	if err := c.get("/proxies/"+url.PathEscape(name), &pg); err != nil {
@@ -118,6 +136,17 @@ func (c *Client) ListProxyGroups() ([]ProxyGroup, error) {
 		return groups[i].Name < groups[j].Name
 	})
 	return groups, nil
+}
+
+func (c *Client) GetProxyProvider(name string) (*ProxyProvider, error) {
+	var provider ProxyProvider
+	if err := c.get("/providers/proxies/"+url.PathEscape(name), &provider); err != nil {
+		return nil, err
+	}
+	if provider.Name == "" {
+		provider.Name = name
+	}
+	return &provider, nil
 }
 
 func (c *Client) SelectProxy(groupName, proxyName string) error {

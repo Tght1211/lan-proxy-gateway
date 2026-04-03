@@ -9,11 +9,12 @@ import (
 )
 
 const (
-	detailTitleProxyWorkspace     = "代理来源工作台"
-	detailTitleRuntimeWorkspace   = "运行模式工作台"
-	detailTitleRulesWorkspace     = "规则工作台"
-	detailTitleExtensionWorkspace = "扩展模式工作台"
-	detailTitleChainWorkspace     = "住宅代理工作台"
+	detailTitleProxyWorkspace        = "代理来源工作台"
+	detailTitleRuntimeWorkspace      = "运行模式工作台"
+	detailTitleRulesWorkspace        = "规则工作台"
+	detailTitleSubscriptionWorkspace = "订阅管理工作台"
+	detailTitleExtensionWorkspace    = "扩展模式工作台"
+	detailTitleChainWorkspace        = "住宅代理工作台"
 )
 
 func (m *runtimeConsoleModel) applyUpdatedConfig(cfg *config.Config) {
@@ -40,6 +41,13 @@ func (m *runtimeConsoleModel) openRulesWorkspace(status string) {
 	cfg := loadConfigOrDefault()
 	m.applyUpdatedConfig(cfg)
 	m.setDetail(detailTitleRulesWorkspace, renderRulesWorkspaceLines(cfg, status))
+	m.focus = consoleFocusDetail
+}
+
+func (m *runtimeConsoleModel) openSubscriptionWorkspace(status string) {
+	cfg := loadConfigOrDefault()
+	m.applyUpdatedConfig(cfg)
+	m.setDetail(detailTitleSubscriptionWorkspace, renderSubscriptionWorkspaceLines(cfg, status))
 	m.focus = consoleFocusDetail
 }
 
@@ -76,7 +84,7 @@ func (m *runtimeConsoleModel) openWorkspacePrompt(title, label, placeholder, cur
 		apply:       apply,
 	}, current, []string{
 		renderSectionTitle(label),
-		noteLine("在底部输入框中输入新值，按 Enter 保存，按 Esc 取消。"),
+		noteLine("会弹出输入框；按 Enter 保存，按 Esc 取消。"),
 	})
 }
 
@@ -88,10 +96,110 @@ func (m *runtimeConsoleModel) handleDetailWorkspaceKey(msg tea.KeyMsg) (tea.Mode
 		return m.handleRuntimeWorkspaceKey(msg)
 	case detailTitleRulesWorkspace:
 		return m.handleRulesWorkspaceKey(msg)
+	case detailTitleSubscriptionWorkspace:
+		return m.handleSubscriptionWorkspaceKey(msg)
 	case detailTitleExtensionWorkspace:
 		return m.handleExtensionWorkspaceKey(msg)
 	case detailTitleChainWorkspace:
 		return m.handleChainWorkspaceKey(msg)
+	default:
+		return *m, nil, false
+	}
+}
+
+func (m *runtimeConsoleModel) handleSubscriptionWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	cfg := loadConfigOrDefault()
+	current := activeProxyProfile(cfg)
+
+	switch strings.ToLower(msg.String()) {
+	case "1":
+		m.openWorkspacePrompt(detailTitleSubscriptionWorkspace, "新建 URL 订阅 · 第一步", "先输入订阅名称", "", func(m *runtimeConsoleModel, name string) error {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				return fmt.Errorf("订阅名称不能为空")
+			}
+			m.openWorkspacePrompt(detailTitleSubscriptionWorkspace, "新建 URL 订阅 · 第二步", "再粘贴订阅链接", "", func(m *runtimeConsoleModel, value string) error {
+				cfg, err := createSubscriptionProfile(name, "url", value)
+				if err != nil {
+					return err
+				}
+				m.applyUpdatedConfig(cfg)
+				m.openSubscriptionWorkspace(successLine("已新建并切换到 URL 订阅: " + name))
+				return nil
+			})
+			return nil
+		})
+		return *m, nil, true
+	case "2":
+		m.openWorkspacePrompt(detailTitleSubscriptionWorkspace, "新建本地文件订阅 · 第一步", "先输入订阅名称", "", func(m *runtimeConsoleModel, name string) error {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				return fmt.Errorf("订阅名称不能为空")
+			}
+			m.openWorkspacePrompt(detailTitleSubscriptionWorkspace, "新建本地文件订阅 · 第二步", "再输入本地配置文件路径", "", func(m *runtimeConsoleModel, value string) error {
+				cfg, err := createSubscriptionProfile(name, "file", value)
+				if err != nil {
+					return err
+				}
+				m.applyUpdatedConfig(cfg)
+				m.openSubscriptionWorkspace(successLine("已新建并切换到本地文件订阅: " + name))
+				return nil
+			})
+			return nil
+		})
+		return *m, nil, true
+	case "3":
+		m.openWorkspacePrompt(detailTitleSubscriptionWorkspace, "切换订阅", "输入要切换的订阅名称", cfg.Proxy.CurrentProfile, func(m *runtimeConsoleModel, value string) error {
+			nextCfg, err := switchSubscriptionProfile(value)
+			if err != nil {
+				return err
+			}
+			m.applyUpdatedConfig(nextCfg)
+			m.openSubscriptionWorkspace(successLine("已切换当前订阅: " + strings.TrimSpace(value)))
+			return nil
+		})
+		return *m, nil, true
+	case "u":
+		if current.Source != "url" {
+			m.openSubscriptionWorkspace(errorLine("当前订阅不是 url 模式，先切到 URL 订阅再编辑链接"))
+			return *m, nil, true
+		}
+		m.openWorkspacePrompt(detailTitleSubscriptionWorkspace, "编辑订阅链接", "输入新的订阅链接", current.SubscriptionURL, func(m *runtimeConsoleModel, value string) error {
+			nextCfg, err := updateSubscriptionURL(value)
+			if err != nil {
+				return err
+			}
+			m.applyUpdatedConfig(nextCfg)
+			m.openSubscriptionWorkspace(successLine("订阅链接已更新"))
+			return nil
+		})
+		return *m, nil, true
+	case "f":
+		if current.Source != "file" {
+			m.openSubscriptionWorkspace(errorLine("当前订阅不是 file 模式，先切到本地文件订阅再编辑路径"))
+			return *m, nil, true
+		}
+		m.openWorkspacePrompt(detailTitleSubscriptionWorkspace, "编辑本地配置文件路径", "例如 /path/to/clash.yaml", current.ConfigFile, func(m *runtimeConsoleModel, value string) error {
+			nextCfg, err := updateProxyConfigFile(value)
+			if err != nil {
+				return err
+			}
+			m.applyUpdatedConfig(nextCfg)
+			m.openSubscriptionWorkspace(successLine("本地配置文件路径已更新"))
+			return nil
+		})
+		return *m, nil, true
+	case "n":
+		m.openWorkspacePrompt(detailTitleSubscriptionWorkspace, "重命名当前订阅", "输入新的订阅名称", current.Name, func(m *runtimeConsoleModel, value string) error {
+			nextCfg, err := updateSubscriptionName(value)
+			if err != nil {
+				return err
+			}
+			m.applyUpdatedConfig(nextCfg)
+			m.openSubscriptionWorkspace(successLine("当前订阅已重命名"))
+			return nil
+		})
+		return *m, nil, true
 	default:
 		return *m, nil, false
 	}

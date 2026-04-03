@@ -33,6 +33,37 @@ func handleSimpleConfigCommand(raw string) (consoleAction, bool) {
 	args := fields[1:]
 
 	switch cmd {
+	case "subscription", "subscriptions", "profile", "profiles", "sub":
+		if len(args) == 0 || strings.EqualFold(args[0], "list") {
+			printSimpleDetail("订阅管理工作台", renderSubscriptionWorkspaceLines(loadConfigOrDefault(), ""))
+			return consoleActionNone, true
+		}
+		switch strings.ToLower(args[0]) {
+		case "use":
+			if len(args) < 2 {
+				printSimpleDetail("订阅管理工作台", renderSubscriptionWorkspaceLines(loadConfigOrDefault(), errorLine("用法: subscription use <订阅名称>")))
+				return consoleActionNone, true
+			}
+			cfg, err := switchSubscriptionProfile(strings.Join(args[1:], " "))
+			if err != nil {
+				printSimpleDetail("订阅管理工作台", renderSubscriptionWorkspaceLines(loadConfigOrDefault(), errorLine(err.Error())))
+				return consoleActionNone, true
+			}
+			printSimpleDetail("订阅管理工作台", renderSubscriptionWorkspaceLines(cfg, successLine("已切换当前订阅")))
+			return consoleActionNone, true
+		case "add":
+			if len(args) < 4 {
+				printSimpleDetail("订阅管理工作台", renderSubscriptionWorkspaceLines(loadConfigOrDefault(), errorLine("用法: subscription add url|file <名称> <链接或路径>")))
+				return consoleActionNone, true
+			}
+			cfg, err := createSubscriptionProfile(args[2], args[1], strings.Join(args[3:], " "))
+			if err != nil {
+				printSimpleDetail("订阅管理工作台", renderSubscriptionWorkspaceLines(loadConfigOrDefault(), errorLine(err.Error())))
+				return consoleActionNone, true
+			}
+			printSimpleDetail("订阅管理工作台", renderSubscriptionWorkspaceLines(cfg, successLine("已新建并切换到订阅: "+args[2])))
+			return consoleActionNone, true
+		}
 	case "proxy":
 		if len(args) == 0 {
 			printSimpleDetail("代理来源工作台", renderProxyWorkspaceLines(loadConfigOrDefault(), ""))
