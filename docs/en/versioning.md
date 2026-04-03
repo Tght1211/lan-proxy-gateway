@@ -90,6 +90,11 @@ Focus: clearly separate info pages from action pages, add real right-pane focus,
 Positioning: Windows kernel and upgrade-path fixes.  
 Focus: fix the official Windows `mihomo` zip extraction naming and make `gateway update` request the correct `.exe` release asset.
 
+### v2.2.6
+
+Positioning: console-workbench expansion.  
+Focus: bring proxy source, TUN, local bypass, rule toggles, extension mode, and residential-proxy fields directly into both the TUI and the plain command console, while also polishing refresh and navigation-boundary feedback.
+
 ## Rules for Future Versions
 
 ### Patch

@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented here.
 
+## v2.2.6 - 2026-04-03
+
+### Fixed
+
+- When focus stays in the left navigation list, `←/→` no longer switches top tabs by mistake
+- Added a short red boundary feedback in the navigation list, with an explicit `Esc` hint for returning to the top tab area
+- Added a whole-page refresh pulse for `R`, so refreshes now feel visible instead of silent
+- Stopped preview pages from repeating the same title and hint text in the right-side pane
+- Enabled mouse-wheel scrolling when the main detail area is focused and content overflows
+- Updated the `gateway install` completion screen to show both startup modes and the `console` re-entry commands
+
+### Changed
+
+- Turned the runtime console from a mostly read-only TUI into a real workbench with action pages for:
+  - proxy source
+  - TUN / local bypass
+  - recommended rule switches
+  - extension mode
+  - residential proxy fields
+- Brought the plain command mode closer to feature parity with the TUI, so core config changes can also be done with commands such as `proxy`, `tun`, `rule`, `extension`, and `chain`
+
+### Documentation
+
+- Updated the Chinese and English README files plus command reference docs for the new console workbenches and plain-command examples
+
 ## v2.2.5 - 2026-04-03
 
 ### Fixed

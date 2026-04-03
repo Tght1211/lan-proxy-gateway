@@ -38,6 +38,13 @@ type pendingConfirm struct {
 	action consoleAction
 }
 
+type inputPrompt struct {
+	title       string
+	label       string
+	placeholder string
+	apply       func(m *runtimeConsoleModel, value string) error
+}
+
 type consoleTab int
 
 const (
@@ -84,6 +91,7 @@ const (
 )
 
 type refreshPulseMsg struct{}
+type navAlertPulseMsg struct{}
 type pickerDelayResultMsg struct {
 	node  string
 	delay int
@@ -91,6 +99,7 @@ type pickerDelayResultMsg struct {
 }
 
 const refreshPulseFrames = 4
+const navAlertFrames = 5
 
 type snapshot struct {
 	modeSummary   string
@@ -126,17 +135,19 @@ type runtimeConsoleModel struct {
 	action consoleAction
 
 	pending *pendingConfirm
+	prompt  *inputPrompt
 
-	picker       pickerMode
-	groups       []mihomo.ProxyGroup
-	groupCursor  int
-	nodeCursor   int
-	tab          consoleTab
-	cursor       int
-	detailTitle  string
-	refreshPulse int
-	pickerStatus string
-	nodeDelays   map[string]string
+	picker        pickerMode
+	groups        []mihomo.ProxyGroup
+	groupCursor   int
+	nodeCursor    int
+	tab           consoleTab
+	cursor        int
+	detailTitle   string
+	refreshPulse  int
+	navAlertPulse int
+	pickerStatus  string
+	nodeDelays    map[string]string
 }
 
 var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
@@ -202,6 +213,27 @@ func (m runtimeConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case navAlertPulseMsg:
+		if m.navAlertPulse > 0 {
+			m.navAlertPulse--
+			if m.navAlertPulse > 0 {
+				return m, navAlertTickCmd()
+			}
+		}
+		return m, nil
+
+	case tea.MouseWheelMsg:
+		if m.focus == consoleFocusDetail {
+			return m.handleDetailWheel(msg.Mouse().Button)
+		}
+		return m, nil
+
+	case tea.MouseMsg:
+		if m.focus == consoleFocusNav && m.picker == pickerModeNone {
+			return m, nil
+		}
+		return m, nil
+
 	case pickerDelayResultMsg:
 		if m.nodeDelays == nil {
 			m.nodeDelays = map[string]string{}
@@ -233,6 +265,9 @@ func (m runtimeConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.focus == consoleFocusDetail {
+			if model, cmd, handled := m.handleDetailWorkspaceKey(msg); handled {
+				return model, cmd
+			}
 			switch msg.String() {
 			case "esc":
 				m.focus = consoleFocusNav
@@ -267,10 +302,24 @@ func (m runtimeConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "left":
+			if m.focus == consoleFocusNav {
+				m.triggerNavBoundaryAlert()
+				return m, navAlertTickCmd()
+			}
+			if m.focus != consoleFocusHeader {
+				return m, nil
+			}
 			m.prevTab()
 			m.refreshSelectionPreview()
 			return m, nil
 		case "right":
+			if m.focus == consoleFocusNav {
+				m.triggerNavBoundaryAlert()
+				return m, navAlertTickCmd()
+			}
+			if m.focus != consoleFocusHeader {
+				return m, nil
+			}
 			m.nextTab()
 			m.refreshSelectionPreview()
 			return m, nil
@@ -278,6 +327,7 @@ func (m runtimeConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focus == consoleFocusHeader {
 				return m, nil
 			}
+			m.navAlertPulse = 0
 			m.moveCursor(-1)
 			m.refreshSelectionPreview()
 			return m, nil
@@ -286,6 +336,7 @@ func (m runtimeConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focus = consoleFocusNav
 				return m, nil
 			}
+			m.navAlertPulse = 0
 			m.moveCursor(1)
 			m.refreshSelectionPreview()
 			return m, nil
@@ -308,6 +359,7 @@ func (m runtimeConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focus = consoleFocusNav
 				return m, nil
 			}
+			m.navAlertPulse = 0
 			return m.executeSelectedAction()
 		}
 
@@ -325,6 +377,7 @@ func (m runtimeConsoleModel) View() tea.View {
 	if m.width == 0 || m.height == 0 {
 		v := tea.NewView("loading...")
 		v.AltScreen = true
+		v.MouseMode = tea.MouseModeCellMotion
 		return v
 	}
 
@@ -332,8 +385,16 @@ func (m runtimeConsoleModel) View() tea.View {
 	main := m.renderMain()
 	input := m.renderInput()
 
-	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, header, main, input))
+	page := lipgloss.JoinVertical(lipgloss.Left, header, main, input)
+	if m.refreshPulseActive() {
+		page = lipgloss.NewStyle().
+			PaddingLeft(m.refreshPulseOffset()).
+			Render(page)
+	}
+
+	v := tea.NewView(page)
 	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 
@@ -366,7 +427,14 @@ func (m *runtimeConsoleModel) handleCommand(value string) (tea.Model, tea.Cmd) {
 			noteLine("/summary       查看配置摘要"),
 			noteLine("/config        查看 TUI 配置中心"),
 			noteLine("/config open   打开完整交互式配置中心"),
+			noteLine("/proxy         打开代理来源工作台"),
+			noteLine("/proxy source  切换 url / file"),
+			noteLine("/tun on|off    切换 TUN"),
+			noteLine("/bypass on|off 切换本机绕过代理"),
+			noteLine("/rule <name>   切换 lan/china/apple/nintendo/global/ads"),
 			noteLine("/chains        查看链式代理 / 扩展状态"),
+			noteLine("/extension     打开扩展模式工作台"),
+			noteLine("/chain         打开住宅代理工作台"),
 			noteLine("/chains setup  打开链式代理向导"),
 			noteLine("/nodes         打开节点工作台（切换节点 / 测延迟）"),
 			noteLine("/speed         打开节点测速工作台"),
@@ -393,13 +461,302 @@ func (m *runtimeConsoleModel) handleCommand(value string) (tea.Model, tea.Cmd) {
 		}
 		m.setDetail("配置中心", renderConfigCenterLines(loadConfigOrDefault()))
 		m.focus = consoleFocusDetail
+	case "proxy":
+		if len(args) == 0 {
+			m.openProxyWorkspace("")
+			return *m, nil
+		}
+		switch strings.ToLower(args[0]) {
+		case "source":
+			if len(args) < 2 {
+				m.openProxyWorkspace(errorLine("用法: /proxy source url|file"))
+				return *m, nil
+			}
+			source, err := normalizeProxySource(args[1])
+			if err != nil {
+				m.openProxyWorkspace(errorLine(err.Error()))
+				return *m, nil
+			}
+			cfg, err := updateProxySource(source)
+			if err != nil {
+				m.openProxyWorkspace(errorLine(err.Error()))
+				return *m, nil
+			}
+			m.applyUpdatedConfig(cfg)
+			m.openProxyWorkspace(successLine("代理来源已切换为 " + source))
+			return *m, nil
+		case "url":
+			if len(args) < 2 {
+				m.openProxyWorkspace(errorLine("用法: /proxy url <订阅链接>"))
+				return *m, nil
+			}
+			cfg, err := updateSubscriptionURL(strings.Join(args[1:], " "))
+			if err != nil {
+				m.openProxyWorkspace(errorLine(err.Error()))
+				return *m, nil
+			}
+			m.applyUpdatedConfig(cfg)
+			m.openProxyWorkspace(successLine("订阅链接已更新"))
+			return *m, nil
+		case "file":
+			if len(args) < 2 {
+				m.openProxyWorkspace(errorLine("用法: /proxy file <本地配置文件路径>"))
+				return *m, nil
+			}
+			cfg, err := updateProxyConfigFile(strings.Join(args[1:], " "))
+			if err != nil {
+				m.openProxyWorkspace(errorLine(err.Error()))
+				return *m, nil
+			}
+			m.applyUpdatedConfig(cfg)
+			m.openProxyWorkspace(successLine("本地配置文件路径已更新"))
+			return *m, nil
+		case "name":
+			if len(args) < 2 {
+				m.openProxyWorkspace(errorLine("用法: /proxy name <订阅名称>"))
+				return *m, nil
+			}
+			cfg, err := updateSubscriptionName(strings.Join(args[1:], " "))
+			if err != nil {
+				m.openProxyWorkspace(errorLine(err.Error()))
+				return *m, nil
+			}
+			m.applyUpdatedConfig(cfg)
+			m.openProxyWorkspace(successLine("订阅名称已更新"))
+			return *m, nil
+		default:
+			m.openProxyWorkspace(errorLine("支持: /proxy source|url|file|name"))
+			return *m, nil
+		}
+	case "source":
+		if len(args) < 1 {
+			m.openProxyWorkspace("")
+			return *m, nil
+		}
+		source, err := normalizeProxySource(args[0])
+		if err != nil {
+			m.openProxyWorkspace(errorLine(err.Error()))
+			return *m, nil
+		}
+		cfg, err := updateProxySource(source)
+		if err != nil {
+			m.openProxyWorkspace(errorLine(err.Error()))
+			return *m, nil
+		}
+		m.applyUpdatedConfig(cfg)
+		m.openProxyWorkspace(successLine("代理来源已切换为 " + source))
+		return *m, nil
+	case "tun":
+		if len(args) == 0 {
+			m.openRuntimeWorkspace("")
+			return *m, nil
+		}
+		enabled, err := normalizeOnOffToggle(args[0], loadConfigOrDefault().Runtime.Tun.Enabled)
+		if err != nil {
+			m.openRuntimeWorkspace(errorLine("用法: /tun on|off|toggle"))
+			return *m, nil
+		}
+		cfg, err := updateTunEnabled(enabled)
+		if err != nil {
+			m.openRuntimeWorkspace(errorLine(err.Error()))
+			return *m, nil
+		}
+		m.applyUpdatedConfig(cfg)
+		m.openRuntimeWorkspace(successLine("TUN 已切换为 " + onOff(enabled)))
+		return *m, nil
+	case "bypass":
+		if len(args) == 0 {
+			m.openRuntimeWorkspace("")
+			return *m, nil
+		}
+		enabled, err := normalizeOnOffToggle(args[0], loadConfigOrDefault().Runtime.Tun.BypassLocal)
+		if err != nil {
+			m.openRuntimeWorkspace(errorLine("用法: /bypass on|off|toggle"))
+			return *m, nil
+		}
+		cfg, err := updateBypassLocal(enabled)
+		if err != nil {
+			m.openRuntimeWorkspace(errorLine(err.Error()))
+			return *m, nil
+		}
+		m.applyUpdatedConfig(cfg)
+		m.openRuntimeWorkspace(successLine("本机绕过代理已切换为 " + onOff(enabled)))
+		return *m, nil
+	case "rules":
+		m.openRulesWorkspace("")
+		return *m, nil
+	case "rule":
+		if len(args) == 0 {
+			m.openRulesWorkspace("")
+			return *m, nil
+		}
+		ruleName := strings.ToLower(args[0])
+		currentCfg := loadConfigOrDefault()
+		current := map[string]bool{
+			"lan":      currentCfg.Rules.LanDirectEnabled(),
+			"china":    currentCfg.Rules.ChinaDirectEnabled(),
+			"apple":    currentCfg.Rules.AppleRulesEnabled(),
+			"nintendo": currentCfg.Rules.NintendoProxyEnabled(),
+			"global":   currentCfg.Rules.GlobalProxyEnabled(),
+			"ads":      currentCfg.Rules.AdsRejectEnabled(),
+		}[ruleName]
+		enabled, err := normalizeOnOffToggle("", current)
+		if len(args) > 1 {
+			enabled, err = normalizeOnOffToggle(args[1], current)
+		}
+		if err != nil {
+			m.openRulesWorkspace(errorLine("用法: /rule <lan|china|apple|nintendo|global|ads> [on|off|toggle]"))
+			return *m, nil
+		}
+		cfg, err := updateRuleToggle(ruleName, enabled)
+		if err != nil {
+			m.openRulesWorkspace(errorLine(err.Error()))
+			return *m, nil
+		}
+		m.applyUpdatedConfig(cfg)
+		m.openRulesWorkspace(successLine(ruleName + " 已切换为 " + onOff(enabled)))
+		return *m, nil
 	case "chains":
+		if len(args) > 0 && args[0] == "mode" {
+			if len(args) < 2 {
+				m.openExtensionWorkspace(errorLine("用法: /chains mode rule|global"))
+				return *m, nil
+			}
+			mode, err := normalizeChainMode(args[1])
+			if err != nil {
+				m.openExtensionWorkspace(errorLine(err.Error()))
+				return *m, nil
+			}
+			cfg, err := updateChainMode(mode)
+			if err != nil {
+				m.openExtensionWorkspace(errorLine(err.Error()))
+				return *m, nil
+			}
+			m.applyUpdatedConfig(cfg)
+			m.openExtensionWorkspace(successLine("chains 路由模式已切换为 " + mode))
+			return *m, nil
+		}
 		if len(args) > 0 && args[0] == "setup" {
 			m.action = consoleActionOpenChainsSetup
 			return *m, tea.Quit
 		}
 		m.setDetail("扩展状态", renderExtensionStatusLines(loadConfigOrDefault()))
 		m.focus = consoleFocusDetail
+	case "extension", "mode":
+		if len(args) == 0 {
+			m.openExtensionWorkspace("")
+			return *m, nil
+		}
+		mode, err := normalizeExtensionMode(args[0])
+		if err != nil {
+			m.openExtensionWorkspace(errorLine(err.Error()))
+			return *m, nil
+		}
+		cfg, err := updateExtensionMode(mode)
+		if err != nil {
+			m.openExtensionWorkspace(errorLine(err.Error()))
+			return *m, nil
+		}
+		m.applyUpdatedConfig(cfg)
+		modeName := "off"
+		if mode != "" {
+			modeName = mode
+		}
+		m.openExtensionWorkspace(successLine("扩展模式已切换为 " + modeName))
+		return *m, nil
+	case "script":
+		if len(args) == 0 {
+			m.openExtensionWorkspace("")
+			return *m, nil
+		}
+		cfg, err := updateScriptPath(strings.Join(args, " "))
+		if err != nil {
+			m.openExtensionWorkspace(errorLine(err.Error()))
+			return *m, nil
+		}
+		m.applyUpdatedConfig(cfg)
+		m.openExtensionWorkspace(successLine("script_path 已更新"))
+		return *m, nil
+	case "chain", "residential":
+		if len(args) == 0 {
+			m.openChainWorkspace("")
+			return *m, nil
+		}
+		switch strings.ToLower(args[0]) {
+		case "server":
+			if len(args) < 2 {
+				m.openChainWorkspace(errorLine("用法: /chain server <住宅代理服务器>"))
+				return *m, nil
+			}
+			cfg, err := updateChainServer(strings.Join(args[1:], " "))
+			if err != nil {
+				m.openChainWorkspace(errorLine(err.Error()))
+				return *m, nil
+			}
+			m.applyUpdatedConfig(cfg)
+			m.openChainWorkspace(successLine("住宅代理服务器已更新"))
+			return *m, nil
+		case "port":
+			if len(args) < 2 {
+				m.openChainWorkspace(errorLine("用法: /chain port <端口>"))
+				return *m, nil
+			}
+			cfg, err := updateChainPort(args[1])
+			if err != nil {
+				m.openChainWorkspace(errorLine(err.Error()))
+				return *m, nil
+			}
+			m.applyUpdatedConfig(cfg)
+			m.openChainWorkspace(successLine("住宅代理端口已更新"))
+			return *m, nil
+		case "type":
+			if len(args) < 2 {
+				m.openChainWorkspace(errorLine("用法: /chain type socks5|http"))
+				return *m, nil
+			}
+			cfg, err := updateChainProxyType(args[1])
+			if err != nil {
+				m.openChainWorkspace(errorLine(err.Error()))
+				return *m, nil
+			}
+			m.applyUpdatedConfig(cfg)
+			m.openChainWorkspace(successLine("住宅代理协议已更新"))
+			return *m, nil
+		case "airport":
+			if len(args) < 2 {
+				m.openChainWorkspace(errorLine("用法: /chain airport <机场组名称>"))
+				return *m, nil
+			}
+			cfg, err := updateChainAirportGroup(strings.Join(args[1:], " "))
+			if err != nil {
+				m.openChainWorkspace(errorLine(err.Error()))
+				return *m, nil
+			}
+			m.applyUpdatedConfig(cfg)
+			m.openChainWorkspace(successLine("机场出口组已更新"))
+			return *m, nil
+		case "user":
+			cfg, err := updateChainUsername(strings.Join(args[1:], " "))
+			if err != nil {
+				m.openChainWorkspace(errorLine(err.Error()))
+				return *m, nil
+			}
+			m.applyUpdatedConfig(cfg)
+			m.openChainWorkspace(successLine("住宅代理用户名已更新"))
+			return *m, nil
+		case "password", "pass":
+			cfg, err := updateChainPassword(strings.Join(args[1:], " "))
+			if err != nil {
+				m.openChainWorkspace(errorLine(err.Error()))
+				return *m, nil
+			}
+			m.applyUpdatedConfig(cfg)
+			m.openChainWorkspace(successLine("住宅代理密码已更新"))
+			return *m, nil
+		default:
+			m.openChainWorkspace(errorLine("支持: /chain server|port|type|airport|user|password"))
+			return *m, nil
+		}
 	case "groups":
 		fallthrough
 	case "nodes", "node":
@@ -456,11 +813,35 @@ func (m *runtimeConsoleModel) handleCommand(value string) (tea.Model, tea.Cmd) {
 func (m *runtimeConsoleModel) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		if m.prompt != nil {
+			m.clearInputPrompt()
+			m.focus = consoleFocusDetail
+			m.refreshCurrentDetail()
+			return *m, nil
+		}
 		m.focus = consoleFocusNav
 		return *m, nil
 	case "enter":
 		value := strings.TrimSpace(m.inputValue)
 		m.pushHistory(value)
+		if m.prompt != nil {
+			prompt := m.prompt
+			m.clearInputPrompt()
+			m.historyPos = -1
+			m.focus = consoleFocusDetail
+			if prompt.apply == nil {
+				return *m, nil
+			}
+			if err := prompt.apply(m, value); err != nil {
+				m.setDetail(prompt.title, []string{
+					errorLine(err.Error()),
+					"",
+					noteLine("可再次按对应快捷键重新输入。"),
+				})
+				return *m, nil
+			}
+			return *m, nil
+		}
 		m.setInputValue("")
 		m.historyPos = -1
 		if value == "" {
@@ -529,7 +910,7 @@ func (m *runtimeConsoleModel) focusHint() string {
 		return "顶部聚焦：←/→ 切换分区，↓ / Enter 进入功能列表，/ 开始输入命令"
 	}
 	if m.focus == consoleFocusDetail {
-		return "内容聚焦：↑/↓ 滚动内容，Esc 返回左侧，/ 开始输入命令"
+		return "内容聚焦：↑/↓ 或鼠标滚轮滚动，Esc 返回左侧，/ 开始输入命令"
 	}
 	return "导航模式：←/→ 分区，↑/↓ 功能，/ 开始输入命令"
 }
@@ -538,6 +919,33 @@ func refreshPulseTickCmd() tea.Cmd {
 	return tea.Tick(45*time.Millisecond, func(time.Time) tea.Msg {
 		return refreshPulseMsg{}
 	})
+}
+
+func navAlertTickCmd() tea.Cmd {
+	return tea.Tick(60*time.Millisecond, func(time.Time) tea.Msg {
+		return navAlertPulseMsg{}
+	})
+}
+
+func (m *runtimeConsoleModel) handleDetailWheel(button tea.MouseButton) (tea.Model, tea.Cmd) {
+	if m.picker != pickerModeNone {
+		switch button {
+		case tea.MouseWheelUp:
+			return m.handlePickerKey(tea.KeyPressMsg{Code: tea.KeyUp})
+		case tea.MouseWheelDown:
+			return m.handlePickerKey(tea.KeyPressMsg{Code: tea.KeyDown})
+		default:
+			return *m, nil
+		}
+	}
+
+	switch button {
+	case tea.MouseWheelUp:
+		m.viewport.ScrollUp(3)
+	case tea.MouseWheelDown:
+		m.viewport.ScrollDown(3)
+	}
+	return *m, nil
 }
 
 func proxyDelayCmd(client *mihomo.Client, node, testURL string) tea.Cmd {
@@ -558,19 +966,97 @@ func (m runtimeConsoleModel) refreshPulseActive() bool {
 	return m.refreshPulse > 0
 }
 
+func (m runtimeConsoleModel) navAlertActive() bool {
+	return m.navAlertPulse > 0
+}
+
 func (m runtimeConsoleModel) refreshPulseOffset() int {
 	if !m.refreshPulseActive() {
 		return 0
 	}
 	if m.refreshPulse%2 == 0 {
+		return 2
+	}
+	return 1
+}
+
+func (m runtimeConsoleModel) refreshPulseBorderColor(defaultColor string) string {
+	if !m.refreshPulseActive() {
+		return defaultColor
+	}
+	if m.refreshPulse%2 == 0 {
+		return "#67e8f9"
+	}
+	return "#22d3ee"
+}
+
+func (m runtimeConsoleModel) refreshPulseTitleColor(defaultColor string) string {
+	if !m.refreshPulseActive() {
+		return defaultColor
+	}
+	if m.refreshPulse%2 == 0 {
+		return "#ecfeff"
+	}
+	return "#cffafe"
+}
+
+func (m runtimeConsoleModel) refreshPulseHintLine() string {
+	if !m.refreshPulseActive() {
+		return ""
+	}
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#67e8f9")).
+		Render("↻ 正在刷新当前页面")
+}
+
+func (m runtimeConsoleModel) refreshPulseBodyStyle() lipgloss.Style {
+	if !m.refreshPulseActive() {
+		return lipgloss.NewStyle()
+	}
+	if m.refreshPulse%2 == 0 {
+		return lipgloss.NewStyle().PaddingLeft(1)
+	}
+	return lipgloss.NewStyle().PaddingRight(1)
+}
+
+func (m runtimeConsoleModel) navAlertOffset() int {
+	if !m.navAlertActive() {
+		return 0
+	}
+	if m.navAlertPulse%2 == 0 {
 		return 1
 	}
 	return 0
 }
 
+func (m *runtimeConsoleModel) triggerNavBoundaryAlert() {
+	m.navAlertPulse = navAlertFrames
+}
+
 func (m *runtimeConsoleModel) setInputValue(value string) {
 	m.inputValue = value
 	m.inputCursor = len([]rune(value))
+}
+
+func (m *runtimeConsoleModel) openInputPrompt(prompt *inputPrompt, currentValue string, detailLines []string) {
+	if prompt == nil {
+		return
+	}
+	m.prompt = prompt
+	m.focus = consoleFocusInput
+	m.setInputValue(currentValue)
+	if len(detailLines) == 0 {
+		detailLines = []string{
+			renderSectionTitle(prompt.label),
+			noteLine("在底部输入框中输入新值，按 Enter 保存，按 Esc 取消。"),
+		}
+	}
+	m.setDetail(prompt.title, detailLines)
+}
+
+func (m *runtimeConsoleModel) clearInputPrompt() {
+	m.prompt = nil
+	m.setInputValue("")
 }
 
 func (m *runtimeConsoleModel) insertInput(text string) {
@@ -836,7 +1322,7 @@ func (m *runtimeConsoleModel) resize() {
 func (m runtimeConsoleModel) renderHeader() string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#f8fafc"))
+		Foreground(lipgloss.Color(m.refreshPulseTitleColor("#f8fafc")))
 	subStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#94a3b8"))
 
 	title := "Gateway Console"
@@ -853,7 +1339,7 @@ func (m runtimeConsoleModel) renderHeader() string {
 		border = lipgloss.Color("#38bdf8")
 	}
 	if m.refreshPulseActive() {
-		border = lipgloss.Color("#22d3ee")
+		border = lipgloss.Color(m.refreshPulseBorderColor("#22d3ee"))
 	}
 
 	return lipgloss.NewStyle().
@@ -895,7 +1381,8 @@ func (m runtimeConsoleModel) renderDetailPane(width int) string {
 		border = "#38bdf8"
 	}
 	if m.refreshPulseActive() && m.picker == pickerModeNone {
-		border = "#22d3ee"
+		border = m.refreshPulseBorderColor("#22d3ee")
+		headerColor = lipgloss.Color(m.refreshPulseTitleColor("#e2e8f0"))
 	}
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -911,9 +1398,7 @@ func (m runtimeConsoleModel) renderDetailPane(width int) string {
 		MaxHeight(bodyHeight).
 		Render(content)
 	if m.refreshPulseActive() && m.picker == pickerModeNone {
-		body = lipgloss.NewStyle().
-			PaddingLeft(m.refreshPulseOffset()).
-			Render(body)
+		body = m.refreshPulseBodyStyle().Render(body)
 	}
 
 	return box.Render(lipgloss.JoinVertical(lipgloss.Left, header, "", body))
@@ -928,6 +1413,9 @@ func (m runtimeConsoleModel) renderNavigationCard(width int) string {
 		renderSectionTitle(tabLabel(m.tab)),
 	}
 	lines = append(lines, m.renderMenuLines()...)
+	if m.navAlertActive() {
+		lines = append(lines, "", errorLine("左右键只在顶部可用。先按 Esc 回顶部菜单。"))
+	}
 	lines = append(lines,
 		"",
 		renderSectionTitle("快捷键"),
@@ -944,15 +1432,36 @@ func (m runtimeConsoleModel) renderNavigationCard(width int) string {
 		title = "导航区 · 当前聚焦"
 		border = "#38bdf8"
 	}
-	card := m.renderCard(width, title, lines, border)
+	if m.navAlertActive() {
+		title = "导航区 · 先按 Esc 回顶部"
+		border = "#ef4444"
+	} else if m.refreshPulseActive() {
+		border = m.refreshPulseBorderColor(border)
+	}
+	shakeOffset := m.navAlertOffset()
+	cardWidth := width - shakeOffset
+	if cardWidth < 24 {
+		cardWidth = width
+		shakeOffset = 0
+	}
+	card := m.renderCard(cardWidth, title, lines, border)
 	return lipgloss.NewStyle().
+		Width(width).
 		Height(max(8, m.mainHeight)).
 		MaxHeight(max(8, m.mainHeight)).
-		Render(card)
+		Render(lipgloss.NewStyle().PaddingLeft(shakeOffset).Render(card))
 }
 
 func (m runtimeConsoleModel) renderCard(width int, title string, lines []string, borderColor string) string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7dd3fc"))
+	titleColor := "#7dd3fc"
+	if borderColor == "#ef4444" {
+		titleColor = "#fca5a5"
+	} else if borderColor == "#f59e0b" {
+		titleColor = "#fde68a"
+	} else if m.refreshPulseActive() {
+		titleColor = m.refreshPulseTitleColor(titleColor)
+	}
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(titleColor))
 
 	renderedLines := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -970,30 +1479,46 @@ func (m runtimeConsoleModel) renderCard(width int, title string, lines []string,
 
 func (m runtimeConsoleModel) renderInput() string {
 	title := "命令栏 · 导航模式"
-	border := lipgloss.Color("#334155")
-	if m.focus == consoleFocusInput {
+	borderColor := "#334155"
+	titleColor := "#e2e8f0"
+	if m.prompt != nil {
+		title = "命令栏 · 参数输入"
+		borderColor = "#38bdf8"
+	}
+	if m.focus == consoleFocusInput && m.prompt == nil {
 		title = "命令栏 · 输入模式"
-		border = lipgloss.Color("#38bdf8")
+		borderColor = "#38bdf8"
 	}
 	if m.pending != nil {
 		title = "命令栏 · 等待确认"
-		border = lipgloss.Color("#f59e0b")
+		borderColor = "#f59e0b"
+		titleColor = "#fde68a"
 	}
 	if m.picker != pickerModeNone {
 		title = "命令栏 · 节点选择"
-		border = lipgloss.Color("#f59e0b")
+		borderColor = "#f59e0b"
+		titleColor = "#fde68a"
+	}
+	if m.refreshPulseActive() && m.pending == nil && m.picker == pickerModeNone {
+		borderColor = m.refreshPulseBorderColor(borderColor)
+		titleColor = m.refreshPulseTitleColor(titleColor)
 	}
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(border).
+		BorderForeground(lipgloss.Color(borderColor)).
 		Padding(0, 1).
 		Width(max(36, m.width-2))
 
-	head := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#e2e8f0")).Render(title)
+	head := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(titleColor)).Render(title)
 	inputLine := m.renderInputLine(max(24, m.width-10))
 	hints := lipgloss.NewStyle().Foreground(lipgloss.Color("#94a3b8")).Render(m.renderCommandSuggestions())
-	return box.Render(lipgloss.JoinVertical(lipgloss.Left, head, inputLine, hints))
+	lines := []string{head}
+	if hint := m.refreshPulseHintLine(); hint != "" && m.pending == nil && m.picker == pickerModeNone {
+		lines = append(lines, hint)
+	}
+	lines = append(lines, inputLine, hints)
+	return box.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
 func (m runtimeConsoleModel) renderTabs() string {
@@ -1042,6 +1567,9 @@ func (m runtimeConsoleModel) renderCommandSuggestions() string {
 	if m.pending != nil {
 		return m.pending.prompt + "  ·  输入 y / n"
 	}
+	if m.prompt != nil {
+		return truncateText("正在输入: "+m.prompt.label+"  ·  Enter 保存  ·  Esc 取消", max(30, m.width-10))
+	}
 	if m.picker != pickerModeNone {
 		return "↑/↓ 选择  ·  Enter 切换节点  ·  T 测当前节点延迟  ·  Esc 返回"
 	}
@@ -1058,7 +1586,10 @@ func (m runtimeConsoleModel) renderCommandSuggestions() string {
 		return truncateText("顶部区域已聚焦  ·  ←/→ 切换分区  ·  ↓ 进入功能列表  ·  / 开始输入命令", max(30, m.width-10))
 	}
 	if m.focus == consoleFocusDetail {
-		return truncateText("右侧内容已聚焦  ·  ↑/↓ 滚动  ·  Esc 返回左侧  ·  / 开始输入命令", max(30, m.width-10))
+		return truncateText("右侧内容已聚焦  ·  ↑/↓ 或鼠标滚轮滚动  ·  Esc 返回左侧  ·  / 开始输入命令", max(30, m.width-10))
+	}
+	if m.navAlertActive() {
+		return truncateText("当前在左侧导航区  ·  ↑/↓ 选择功能  ·  Esc 回顶部菜单  ·  左右键只在顶部可用", max(30, m.width-10))
 	}
 
 	return truncateText("按 / 开始输入命令  ·  ↑/↓ 选择功能  ·  Esc 回顶部  ·  Ctrl+P 切换节点", max(30, m.width-10))
@@ -1089,7 +1620,11 @@ func (m runtimeConsoleModel) renderInputLine(width int) string {
 	}
 
 	if value == "" {
-		line := promptStyle.Render(prompt) + placeholderStyle.Render("例如 /status、/nodes、/chains setup")
+		placeholder := "例如 /status、/nodes、/chains setup"
+		if m.prompt != nil && strings.TrimSpace(m.prompt.placeholder) != "" {
+			placeholder = m.prompt.placeholder
+		}
+		line := promptStyle.Render(prompt) + placeholderStyle.Render(placeholder)
 		return lipgloss.NewStyle().MaxWidth(width).Render(line)
 	}
 
@@ -1143,11 +1678,12 @@ func (m runtimeConsoleModel) detailDisplayTitle() string {
 	if m.picker != pickerModeNone {
 		return title
 	}
+	if strings.HasSuffix(title, "工作台") {
+		return title + " · 可操作页"
+	}
 	switch title {
 	case "确认重启", "确认停止", "确认退出":
 		return title + " · 确认页"
-	case "节点工作台":
-		return title + " · 可操作页"
 	default:
 		return title + " · 信息页"
 	}
@@ -1235,16 +1771,20 @@ func (m *runtimeConsoleModel) refreshSelectionPreview() {
 	}
 
 	lines := []string{
-		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7dd3fc")).Render(item.title + " · " + itemModeLabel(item)),
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#94a3b8")).Render(item.desc),
-		"",
 	}
+	nextSteps := make([]string, 0, 2)
 	if item.enter != "" {
-		lines = append(lines, noteLine("回车后: "+item.enter))
+		nextSteps = append(nextSteps, "  回车: "+item.enter)
 	}
 	if item.cmd != "" {
-		lines = append(lines, noteLine("命令入口: "+item.cmd), "")
+		nextSteps = append(nextSteps, "  命令: "+item.cmd)
 	}
+	if len(nextSteps) > 0 {
+		lines = append(lines, "", renderSectionTitle("下一步"))
+		lines = append(lines, nextSteps...)
+	}
+	lines = append(lines, "", renderSectionTitle("当前摘要"))
 	lines = append(lines, previewLinesForItem(item, m.snapshot, m.cfg, m.logFile)...)
 	m.setDetail(item.title, lines)
 }
@@ -1268,6 +1808,16 @@ func (m *runtimeConsoleModel) refreshCurrentDetail() {
 		m.setDetail("设备接入", renderDeviceSetupLines(m.ip, cfg.Runtime.Ports.API))
 	case "扩展状态":
 		m.setDetail("扩展状态", renderExtensionStatusLines(cfg))
+	case detailTitleProxyWorkspace:
+		m.setDetail(detailTitleProxyWorkspace, renderProxyWorkspaceLines(cfg, ""))
+	case detailTitleRuntimeWorkspace:
+		m.setDetail(detailTitleRuntimeWorkspace, renderRuntimeWorkspaceLines(cfg, ""))
+	case detailTitleRulesWorkspace:
+		m.setDetail(detailTitleRulesWorkspace, renderRulesWorkspaceLines(cfg, ""))
+	case detailTitleExtensionWorkspace:
+		m.setDetail(detailTitleExtensionWorkspace, renderExtensionWorkspaceLines(cfg, ""))
+	case detailTitleChainWorkspace:
+		m.setDetail(detailTitleChainWorkspace, renderChainWorkspaceLines(cfg, ""))
 	case "节点工作台":
 		m.setDetail("节点工作台", renderNodeWorkspaceLines(m.snapshot, noteLine("按回车进入节点工作台，或按 Ctrl+P 直接打开。")))
 	case "升级提示":
@@ -1316,6 +1866,10 @@ func (m *runtimeConsoleModel) executeSelectedAction() (tea.Model, tea.Cmd) {
 		m.focus = consoleFocusDetail
 	case "routing_groups":
 		return m.openGroupPicker()
+	case "routing_proxy":
+		m.openProxyWorkspace("")
+	case "routing_rules":
+		m.openRulesWorkspace("")
 	case "routing_egress":
 		m.setDetail("出口网络", previewLinesForItem(item, m.snapshot, m.cfg, m.logFile))
 		m.focus = consoleFocusDetail
@@ -1325,6 +1879,10 @@ func (m *runtimeConsoleModel) executeSelectedAction() (tea.Model, tea.Cmd) {
 	case "routing_panel":
 		m.setDetail("管理面板", previewLinesForItem(item, m.snapshot, m.cfg, m.logFile))
 		m.focus = consoleFocusDetail
+	case "extension_workspace":
+		m.openExtensionWorkspace("")
+	case "extension_chain":
+		m.openChainWorkspace("")
 	case "extension_status":
 		m.setDetail("扩展状态", renderExtensionStatusLines(loadConfigOrDefault()))
 		m.focus = consoleFocusDetail
@@ -1368,6 +1926,8 @@ func (m *runtimeConsoleModel) executeSelectedAction() (tea.Model, tea.Cmd) {
 	case "system_paths":
 		m.setDetail("运行路径", previewLinesForItem(item, m.snapshot, m.cfg, m.logFile))
 		m.focus = consoleFocusDetail
+	case "system_runtime":
+		m.openRuntimeWorkspace("")
 	case "system_config":
 		m.setDetail("配置中心", renderConfigCenterLines(loadConfigOrDefault()))
 		m.focus = consoleFocusDetail
@@ -1382,16 +1942,16 @@ func menuItemsForTab(tab consoleTab) []consoleMenuItem {
 	case consoleTabRouting:
 		return []consoleMenuItem{
 			{id: "routing_groups", key: "01", title: "节点与测速", desc: "打开节点工作台，切换节点并测当前节点延迟", kind: consoleItemAction, cmd: "/nodes", enter: "进入节点工作台"},
-			{id: "routing_egress", key: "02", title: "出口网络", desc: "查看入口、普通出口和住宅出口", kind: consoleItemInfo, cmd: "/status", enter: "打开出口与状态详情"},
-			{id: "routing_logs", key: "03", title: "最近日志", desc: "读取最近 30 行运行日志", kind: consoleItemInfo, cmd: "/logs", enter: "打开日志页"},
-			{id: "routing_panel", key: "04", title: "管理面板", desc: "查看 Web 面板入口和用途", kind: consoleItemInfo, cmd: "/summary", enter: "查看面板入口说明"},
+			{id: "routing_proxy", key: "02", title: "代理来源", desc: "切换订阅 / 本地文件，并修改订阅信息", kind: consoleItemAction, cmd: "/proxy", enter: "进入代理来源工作台"},
+			{id: "routing_rules", key: "03", title: "规则开关", desc: "切换国内直连、广告拦截等推荐规则", kind: consoleItemAction, cmd: "/rules", enter: "进入规则工作台"},
+			{id: "routing_egress", key: "04", title: "出口网络", desc: "查看入口、普通出口和住宅出口", kind: consoleItemInfo, cmd: "/status", enter: "打开出口与状态详情"},
 		}
 	case consoleTabExtension:
 		return []consoleMenuItem{
-			{id: "extension_status", key: "01", title: "扩展状态", desc: "查看 chains / script 当前状态", kind: consoleItemInfo, cmd: "/chains", enter: "打开扩展状态页"},
-			{id: "extension_setup", key: "02", title: "Chains 向导", desc: "进入链式代理配置向导", kind: consoleItemAction, cmd: "/chains setup", enter: "进入链式代理向导"},
-			{id: "extension_update", key: "03", title: "升级提示", desc: "检查是否有新版本可用", kind: consoleItemInfo, cmd: "/update", enter: "打开升级提示"},
-			{id: "extension_restart", key: "04", title: "重启网关", desc: "应用配置变更并重启服务", kind: consoleItemConfirm, cmd: "/restart", enter: "进入重启确认"},
+			{id: "extension_workspace", key: "01", title: "扩展模式", desc: "切换 chains / script / off，并查看当前模式", kind: consoleItemAction, cmd: "/extension", enter: "进入扩展模式工作台"},
+			{id: "extension_chain", key: "02", title: "住宅代理", desc: "编辑住宅代理、机场组和协议参数", kind: consoleItemAction, cmd: "/chain", enter: "进入住宅代理工作台"},
+			{id: "extension_status", key: "03", title: "扩展状态", desc: "查看 chains / script 当前状态", kind: consoleItemInfo, cmd: "/chains", enter: "打开扩展状态页"},
+			{id: "extension_setup", key: "04", title: "Chains 向导", desc: "需要完整引导时，进入链式代理配置向导", kind: consoleItemAction, cmd: "/chains setup", enter: "进入链式代理向导"},
 		}
 	case consoleTabDevices:
 		return []consoleMenuItem{
@@ -1402,7 +1962,7 @@ func menuItemsForTab(tab consoleTab) []consoleMenuItem {
 		}
 	case consoleTabSystem:
 		return []consoleMenuItem{
-			{id: "system_config", key: "01", title: "TUI 配置中心", desc: "在 TUI 内查看当前配置与快捷入口", kind: consoleItemInfo, cmd: "/config", enter: "打开配置中心页"},
+			{id: "system_runtime", key: "01", title: "运行模式", desc: "切换 TUN、本机绕过代理，管理网关运行方式", kind: consoleItemAction, cmd: "/tun", enter: "进入运行模式工作台"},
 			{id: "system_paths", key: "02", title: "运行路径", desc: "查看配置、日志和面板路径", kind: consoleItemInfo, cmd: "/summary", enter: "打开运行路径页"},
 			{id: "system_stop", key: "03", title: "停止网关", desc: "停止当前运行中的网关", kind: consoleItemConfirm, cmd: "/stop", enter: "进入停止确认"},
 			{id: "system_exit", key: "04", title: "退出控制台", desc: "退出 TUI，但保持网关继续运行", kind: consoleItemConfirm, cmd: "/exit", enter: "进入退出确认"},
@@ -1411,7 +1971,7 @@ func menuItemsForTab(tab consoleTab) []consoleMenuItem {
 		return []consoleMenuItem{
 			{id: "overview_status", key: "01", title: "运行状态", desc: "查看完整运行状态和出口网络", kind: consoleItemInfo, cmd: "/status", enter: "打开运行状态页"},
 			{id: "overview_summary", key: "02", title: "配置摘要", desc: "查看当前配置摘要和生效路径", kind: consoleItemInfo, cmd: "/summary", enter: "打开配置摘要页"},
-			{id: "overview_config", key: "03", title: "配置中心", desc: "在 TUI 内查看配置中心和快捷入口", kind: consoleItemInfo, cmd: "/config", enter: "打开配置中心页"},
+			{id: "overview_config", key: "03", title: "配置工作台", desc: "进入 TUI 内配置总览和快捷入口", kind: consoleItemInfo, cmd: "/config", enter: "打开配置中心页"},
 			{id: "overview_guide", key: "04", title: "功能导航", desc: "查看核心能力和下一步建议", kind: consoleItemInfo, cmd: "/guide", enter: "打开功能导航页"},
 		}
 	}
@@ -1438,10 +1998,24 @@ func previewLinesForItem(item consoleMenuItem, snap snapshot, cfg *config.Config
 		}
 	case "overview_config", "system_config":
 		return []string{
-			"这里会留在 TUI 内展示配置中心和快捷入口。",
-			"如果需要完整编辑，可在底部输入 /config open。",
+			"这里会集中展示工作台入口，不用离开 TUI 就能改大部分常用配置。",
+			"需要完整问答式引导时，也可以继续用 /config open。",
 			"",
 			noteLine("这是信息页。回车后不会离开 TUI。"),
+		}
+	case "routing_proxy":
+		return []string{
+			fmt.Sprintf("当前来源: %s", cfg.Proxy.Source),
+			fmt.Sprintf("订阅名称: %s", fallbackText(cfg.Proxy.SubscriptionName, "subscription")),
+			"",
+			noteLine("这是可操作页。回车后可以切换来源、改订阅链接和本地配置路径。"),
+		}
+	case "routing_rules":
+		return []string{
+			fmt.Sprintf("国内直连: %s", tuiOnOff(cfg.Rules.ChinaDirectEnabled())),
+			fmt.Sprintf("广告拦截: %s", tuiOnOff(cfg.Rules.AdsRejectEnabled())),
+			"",
+			noteLine("这是可操作页。回车后按 1-6 直接切换推荐规则。"),
 		}
 	case "overview_guide":
 		return []string{
@@ -1465,6 +2039,25 @@ func previewLinesForItem(item consoleMenuItem, snap snapshot, cfg *config.Config
 			fmt.Sprintf("出口摘要: %s", plainText(snap.egressSummary)),
 			"",
 			noteLine("这是信息页。更细的入口 / 普通出口 / 住宅出口信息会在这里展开。"),
+		}
+	case "extension_workspace":
+		chainMode := "rule"
+		if cfg.Extension.ResidentialChain != nil && strings.TrimSpace(cfg.Extension.ResidentialChain.Mode) != "" {
+			chainMode = cfg.Extension.ResidentialChain.Mode
+		}
+		return []string{
+			fmt.Sprintf("扩展模式: %s", extensionModeName(cfg.Extension.Mode)),
+			fmt.Sprintf("chains 路由: %s", chainMode),
+			"",
+			noteLine("这是可操作页。回车后可以直接切 chains / script / off，并切 rule / global。"),
+		}
+	case "extension_chain":
+		chain := ensureConsoleChain(cfg)
+		return []string{
+			fmt.Sprintf("住宅代理: %s:%d (%s)", fallbackText(chain.ProxyServer, "未设置"), chain.ProxyPort, fallbackText(chain.ProxyType, "socks5")),
+			fmt.Sprintf("机场组: %s", fallbackText(chain.AirportGroup, "Auto")),
+			"",
+			noteLine("这是可操作页。回车后可直接修改住宅代理、协议、机场组和认证信息。"),
 		}
 	case "routing_panel":
 		return []string{
@@ -1499,6 +2092,13 @@ func previewLinesForItem(item consoleMenuItem, snap snapshot, cfg *config.Config
 			fmt.Sprintf("数据目录: %s", ensureDataDir()),
 			fmt.Sprintf("管理面板: %s", snap.panelURL),
 		}
+	case "system_runtime":
+		return []string{
+			fmt.Sprintf("TUN: %s", tuiOnOff(cfg.Runtime.Tun.Enabled)),
+			fmt.Sprintf("本机绕过代理: %s", tuiOnOff(cfg.Runtime.Tun.BypassLocal)),
+			"",
+			noteLine("这是可操作页。回车后可以直接切换 TUN 和本机绕过代理。"),
+		}
 	default:
 		return []string{
 			noteLine(item.desc),
@@ -1513,15 +2113,15 @@ func previewLinesForItem(item consoleMenuItem, snap snapshot, cfg *config.Config
 func activeTabDescription(tab consoleTab) string {
 	switch tab {
 	case consoleTabRouting:
-		return "节点、出口、面板和日志"
+		return "节点、代理来源、规则和出口"
 	case consoleTabExtension:
-		return "chains / script / update / restart"
+		return "chains / script / 住宅代理"
 	case consoleTabDevices:
 		return "局域网接入与设备配置"
 	case consoleTabSystem:
-		return "配置中心、路径、停止和退出"
+		return "运行模式、路径、停止和退出"
 	default:
-		return "总览当前运行状态与配置摘要"
+		return "总览当前状态、配置和下一步"
 	}
 }
 
@@ -1543,13 +2143,13 @@ func tabLabel(tab consoleTab) string {
 func defaultSuggestionsForTab(tab consoleTab) []string {
 	switch tab {
 	case consoleTabRouting:
-		return []string{"/nodes", "/speed", "/status", "/logs"}
+		return []string{"/nodes", "/proxy", "/rules", "/status"}
 	case consoleTabExtension:
-		return []string{"/chains", "/chains setup", "/update", "/restart"}
+		return []string{"/extension", "/chain", "/chains", "/chains setup"}
 	case consoleTabDevices:
 		return []string{"/device", "/status", "/summary", "/guide"}
 	case consoleTabSystem:
-		return []string{"/config", "/config open", "/stop", "/exit"}
+		return []string{"/tun", "/bypass", "/summary", "/stop"}
 	default:
 		return []string{"/status", "/summary", "/config", "/help"}
 	}
@@ -1562,7 +2162,30 @@ func consoleCommandSuggestions() []string {
 		"/summary",
 		"/config",
 		"/config open",
+		"/proxy",
+		"/proxy source url",
+		"/proxy source file",
+		"/proxy url",
+		"/proxy file",
+		"/proxy name",
+		"/tun",
+		"/tun on",
+		"/tun off",
+		"/bypass",
+		"/bypass on",
+		"/bypass off",
+		"/rules",
+		"/rule china",
+		"/rule ads",
 		"/chains",
+		"/extension",
+		"/extension chains",
+		"/extension script",
+		"/extension off",
+		"/chain",
+		"/chain server",
+		"/chain port",
+		"/chain airport",
 		"/chains setup",
 		"/nodes",
 		"/speed",
@@ -1832,13 +2455,17 @@ func renderConfigCenterLines(cfg *config.Config) []string {
 		"  广告拦截: " + tuiOnOff(cfg.Rules.AdsRejectEnabled()),
 		"",
 		renderSectionTitle("快捷入口"),
-		noteLine("输入 /summary 查看完整配置摘要"),
+		noteLine("输入 /proxy 进入代理来源工作台"),
+		noteLine("输入 /tun 或 /bypass 调整运行模式"),
+		noteLine("输入 /rules 切换推荐规则"),
+		noteLine("输入 /extension / /chain 管理 chains / script / 住宅代理"),
 		noteLine("输入 /nodes 切换节点"),
-		noteLine("输入 /chains setup 打开链式代理向导"),
+		noteLine("输入 /chains setup 打开完整链式代理向导"),
 		noteLine("输入 /config open 打开完整交互式配置中心"),
 		"",
 		renderSectionTitle("说明"),
-		noteLine("当前 TUI 先提供查看和快捷入口，完整编辑仍可通过 /config open 进入。"),
+		noteLine("常用配置现在可以直接在 TUI 和简单模式中修改。"),
+		noteLine("需要问答式引导时，再使用 /config open。"),
 	}
 	return lines
 }

@@ -215,3 +215,166 @@ func TestPickerDelayResultUpdatesStatus(t *testing.T) {
 		t.Fatalf("expected picker status to mention node, got %q", updated.pickerStatus)
 	}
 }
+
+func TestLeftFromNavDoesNotChangeTabAndStartsNavAlert(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+	m.focus = consoleFocusNav
+	m.tab = consoleTabRouting
+
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	updated := next.(runtimeConsoleModel)
+
+	if updated.tab != consoleTabRouting {
+		t.Fatalf("expected left from nav to keep current tab, got %v", updated.tab)
+	}
+	if updated.navAlertPulse <= 0 {
+		t.Fatalf("expected left from nav to trigger nav alert pulse, got %d", updated.navAlertPulse)
+	}
+}
+
+func TestRightFromHeaderStillChangesTab(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+	m.focus = consoleFocusHeader
+	m.tab = consoleTabOverview
+
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	updated := next.(runtimeConsoleModel)
+
+	if updated.tab != consoleTabRouting {
+		t.Fatalf("expected right from header to switch tab, got %v", updated.tab)
+	}
+}
+
+func TestRenderNavigationCardShowsEscHintDuringNavAlert(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+	m.focus = consoleFocusNav
+	m.navAlertPulse = navAlertFrames
+	m.mainHeight = 24
+
+	got := plainText(m.renderNavigationCard(72))
+	if !strings.Contains(got, "先按 Esc 回顶部") {
+		t.Fatalf("expected nav alert card to show esc hint, got %q", got)
+	}
+	if !strings.Contains(got, "左右键只在顶部可用") {
+		t.Fatalf("expected nav alert card to explain boundary, got %q", got)
+	}
+}
+
+func TestRefreshSelectionPreviewDoesNotDuplicateDetailTitle(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+	m.tab = consoleTabOverview
+	m.cursor = 0
+	m.refreshSelectionPreview()
+
+	got := plainText(m.viewport.GetContent())
+	if strings.Contains(got, "运行状态 · 信息页") {
+		t.Fatalf("expected preview body to avoid repeating detail title, got %q", got)
+	}
+	if !strings.Contains(got, "当前摘要") {
+		t.Fatalf("expected preview body to include summary section, got %q", got)
+	}
+}
+
+func TestRefreshSelectionPreviewShowsNextStepSection(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+	m.tab = consoleTabOverview
+	m.cursor = 0
+	m.refreshSelectionPreview()
+
+	got := plainText(m.viewport.GetContent())
+	if !strings.Contains(got, "下一步") {
+		t.Fatalf("expected preview body to include next-step section, got %q", got)
+	}
+	if !strings.Contains(got, "回车:") || !strings.Contains(got, "命令:") {
+		t.Fatalf("expected preview body to show enter and command hints, got %q", got)
+	}
+	if strings.Contains(got, "回车后:") {
+		t.Fatalf("expected preview body to use compact next-step layout, got %q", got)
+	}
+}
+
+func TestMouseWheelScrollsDetailPaneWhenFocused(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+	m.width = 120
+	m.height = 30
+	m.resize()
+	m.focus = consoleFocusDetail
+
+	lines := make([]string, 0, 80)
+	for i := 0; i < 80; i++ {
+		lines = append(lines, "line")
+	}
+	m.setDetail("长内容", lines)
+	start := m.viewport.YOffset()
+
+	next, _ := m.Update(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
+	updated := next.(runtimeConsoleModel)
+
+	if updated.viewport.YOffset() <= start {
+		t.Fatalf("expected mouse wheel to scroll detail viewport, got start=%d end=%d", start, updated.viewport.YOffset())
+	}
+}
+
+func TestRenderInputShowsRefreshHintDuringPulse(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+	m.width = 120
+	m.refreshPulse = refreshPulseFrames
+
+	got := plainText(m.renderInput())
+	if !strings.Contains(got, "正在刷新当前页面") {
+		t.Fatalf("expected input panel to show refresh hint during pulse, got %q", got)
+	}
+}
+
+func TestRenderHeaderShowsRefreshMarker(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+	m.width = 120
+	m.refreshPulse = refreshPulseFrames
+
+	got := plainText(m.renderHeader())
+	if !strings.Contains(got, "Gateway Console  ↻") {
+		t.Fatalf("expected header to show refresh marker during pulse, got %q", got)
+	}
+}
+
+func TestHandleCommandTunOffUpdatesRuntimeWorkspace(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+
+	next, _ := m.handleCommand("/tun off")
+	updated := next.(runtimeConsoleModel)
+
+	if updated.detailTitle != detailTitleRuntimeWorkspace {
+		t.Fatalf("expected tun command to open runtime workspace, got %q", updated.detailTitle)
+	}
+	if updated.cfg.Runtime.Tun.Enabled {
+		t.Fatalf("expected tun command to disable TUN")
+	}
+}
+
+func TestHandleCommandRuleAdsOffUpdatesRulesWorkspace(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+
+	next, _ := m.handleCommand("/rule ads off")
+	updated := next.(runtimeConsoleModel)
+
+	if updated.detailTitle != detailTitleRulesWorkspace {
+		t.Fatalf("expected rule command to open rules workspace, got %q", updated.detailTitle)
+	}
+	if updated.cfg.Rules.AdsRejectEnabled() {
+		t.Fatalf("expected ads rule to be disabled")
+	}
+}
+
+func TestHandleCommandExtensionChainsUpdatesExtensionWorkspace(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+
+	next, _ := m.handleCommand("/extension chains")
+	updated := next.(runtimeConsoleModel)
+
+	if updated.detailTitle != detailTitleExtensionWorkspace {
+		t.Fatalf("expected extension command to open extension workspace, got %q", updated.detailTitle)
+	}
+	if updated.cfg.Extension.Mode != "chains" {
+		t.Fatalf("expected extension mode to be chains, got %q", updated.cfg.Extension.Mode)
+	}
+}

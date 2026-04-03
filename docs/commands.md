@@ -21,15 +21,27 @@
 
 支持:
 
-- slash 命令: `/status` `/summary` `/config` `/config open` `/chains` `/nodes` `/speed` `/logs` `/help`
+- slash 命令: `/status` `/summary` `/config` `/config open` `/proxy` `/tun` `/bypass` `/rules` `/rule` `/extension` `/chain` `/chains` `/nodes` `/speed` `/logs` `/help`
 - 顶部 tab: `Esc` 回顶部，`←/→` 切分区，`↓ / Enter` 回到功能列表
 - 右侧内容区: 会标明当前是 `信息页 / 可操作页 / 确认页`
 - 节点工作台: `Ctrl+P` 打开；进入后 `T` 测当前节点延迟
+- 配置工作台: 可以直接在 TUI 内切 `代理来源 / TUN / 本机绕过 / 规则开关 / chains 模式 / 住宅代理`
 - 刷新反馈: `R` 会刷新当前页面，并给一个很短的脉冲反馈
 - 确认交互: `/stop` `/restart` 后输入 `y / n`
-- 纯命令模式: `sudo gateway start --simple` 或 `sudo gateway console --simple`
+- 纯命令模式: `sudo gateway start --simple` 或 `sudo gateway console --simple`，支持同一批核心配置动作
 
 这让它更像一个持续运行的 CLI 系统，而不是“一次性打印信息就退出”的命令。
+
+纯命令模式常用例子:
+
+- `proxy source url`
+- `proxy url https://example.com/sub`
+- `tun on`
+- `bypass off`
+- `rule ads off`
+- `extension chains`
+- `chain mode global`
+- `chain airport Auto`
 
 ## 配置与切换
 

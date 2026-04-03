@@ -212,8 +212,16 @@ func runSimpleRuntimeConsole(logFile, ip, iface, dDir string) consoleAction {
 		fmt.Print("gateway> ")
 
 		input, _ := reader.ReadString('\n')
-		choice := strings.ToLower(strings.TrimSpace(input))
+		rawChoice := strings.TrimSpace(input)
+		choice := strings.ToLower(rawChoice)
 		fmt.Println()
+
+		if action, handled := handleSimpleConfigCommand(rawChoice); handled {
+			if action != consoleActionNone {
+				return action
+			}
+			continue
+		}
 
 		switch choice {
 		case "", "help", "?":
@@ -221,7 +229,14 @@ func runSimpleRuntimeConsole(logFile, ip, iface, dDir string) consoleAction {
 			fmt.Println("  status        查看运行状态")
 			fmt.Println("  summary       查看配置摘要")
 			fmt.Println("  config        打开配置中心")
+			fmt.Println("  proxy         打开代理来源工作台")
+			fmt.Println("  proxy source  切换 url / file")
+			fmt.Println("  tun on|off    切换 TUN")
+			fmt.Println("  bypass on|off 切换本机绕过代理")
+			fmt.Println("  rule ...      切换推荐规则开关")
 			fmt.Println("  chains        查看链式代理 / 扩展状态")
+			fmt.Println("  extension     打开扩展模式工作台")
+			fmt.Println("  chain         打开住宅代理工作台")
 			fmt.Println("  chains setup  打开链式代理向导")
 			fmt.Println("  nodes         打开节点选择器（切换节点；TUI 中同页支持测速）")
 			fmt.Println("  device        查看设备接入说明")

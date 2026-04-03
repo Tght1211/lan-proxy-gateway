@@ -23,15 +23,27 @@ After `gateway start` succeeds in an interactive terminal, it enters a runtime T
 
 Supported actions:
 
-- slash commands: `/status` `/summary` `/config` `/config open` `/chains` `/nodes` `/speed` `/logs` `/help`
+- slash commands: `/status` `/summary` `/config` `/config open` `/proxy` `/tun` `/bypass` `/rules` `/rule` `/extension` `/chain` `/chains` `/nodes` `/speed` `/logs` `/help`
 - top tabs: `Esc` back to the header, `←/→` switch sections, `↓ / Enter` return to the action list
 - the right content area clearly marks each page as `info / action / confirm`
 - node workbench: `Ctrl+P` opens it; once inside, press `T` to test the current node latency
+- config workbenches: you can now change proxy source, TUN, local bypass, rule switches, chains mode, and residential-proxy settings directly inside the TUI
 - refresh cue: `R` refreshes the current page and shows a short pulse
 - confirmation flow: after `/stop` or `/restart`, type `y` or `n`
-- plain command mode: `sudo gateway start --simple` or `sudo gateway console --simple`
+- plain command mode: `sudo gateway start --simple` or `sudo gateway console --simple`, with the same core config actions
 
 This makes it feel more like a persistent CLI workspace, not a one-shot command that prints and exits.
+
+Common plain-command examples:
+
+- `proxy source url`
+- `proxy url https://example.com/sub`
+- `tun on`
+- `bypass off`
+- `rule ads off`
+- `extension chains`
+- `chain mode global`
+- `chain airport Auto`
 
 ## Switching and Configuration
 

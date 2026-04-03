@@ -166,6 +166,7 @@ sudo gateway start
 - 运行模式
 - 出口摘要
 - 运行中 TUI 控制台
+- 可直接修改的工作台入口
 
 常用操作：
 
@@ -176,6 +177,16 @@ sudo gateway start
 - `/` 进入命令输入
 - `Ctrl+P` 打开节点工作台
 - `T` 在节点工作台里测当前节点延迟
+- `R` 刷新当前页
+
+工作台里现在可以直接处理这些常用配置：
+
+- 代理来源和订阅信息
+- TUN 和本机绕过代理
+- 国内直连 / 广告拦截等推荐规则
+- chains / script / off
+- chains 的 `rule / global`
+- 住宅代理和机场出口组
 
 这一步里最重要的是记住你的局域网 IP。
 
@@ -186,6 +197,15 @@ sudo gateway start --simple
 ```
 
 它不会进入 TUI，而是进入一个纯命令控制台。
+
+纯命令模式和 TUI 现在共享同一批核心能力，例如：
+
+- `proxy source url`
+- `tun on`
+- `bypass off`
+- `rule ads off`
+- `extension chains`
+- `chain mode global`
 
 如果你退出了控制台，之后可以随时重新进入：
 
@@ -232,6 +252,8 @@ gateway status
 | `sudo gateway start --simple` | 启动网关并进入纯命令模式（兼容性更好） |
 | `sudo gateway console` | 重新进入默认工作台，不重启网关 |
 | `sudo gateway console --simple` | 重新进入纯命令控制台，不重启网关 |
+| `gateway tun on` | 开启 TUN 透明代理 |
+| `gateway tun off` | 关闭 TUN 透明代理 |
 | `gateway status` | 查看运行状态和出口网络 |
 | `gateway chains` | 链式代理向导 |
 | `gateway switch` | 切换代理来源和扩展模式 |

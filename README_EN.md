@@ -166,6 +166,7 @@ By default, startup enters the runtime workspace and shows:
 - runtime mode
 - egress summary
 - the runtime TUI console
+- direct workbench entries for common settings
 
 Common controls:
 
@@ -176,6 +177,16 @@ Common controls:
 - `/` enter command input
 - `Ctrl+P` open the node workbench
 - `T` test the current node latency inside the node workbench
+- `R` refresh the current page
+
+The workspace now handles these common tasks directly:
+
+- proxy source and subscription info
+- TUN and local bypass
+- recommended rule switches such as China direct and ad blocking
+- `chains / script / off`
+- `rule / global` for chains mode
+- residential proxy and airport group settings
 
 The most important thing here is your LAN IP.
 
@@ -186,6 +197,15 @@ sudo gateway start --simple
 ```
 
 It skips the TUI and enters a compatibility-friendly command console.
+
+The plain command mode now exposes the same core controls, for example:
+
+- `proxy source url`
+- `tun on`
+- `bypass off`
+- `rule ads off`
+- `extension chains`
+- `chain mode global`
 
 If you leave the console, you can re-enter it at any time:
 
@@ -232,6 +252,8 @@ You will see:
 | `sudo gateway start --simple` | Start gateway in plain command mode for better compatibility |
 | `sudo gateway console` | Re-enter the default workspace without restarting the gateway |
 | `sudo gateway console --simple` | Re-enter the plain command console without restarting the gateway |
+| `gateway tun on` | Enable TUN transparent proxy mode |
+| `gateway tun off` | Disable TUN transparent proxy mode |
 | `gateway status` | Show runtime and egress status |
 | `gateway chains` | Chains / residential proxy wizard |
 | `gateway switch` | Switch proxy source and extension mode |
