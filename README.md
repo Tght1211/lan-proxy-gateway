@@ -151,6 +151,8 @@ irm https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.ps
 GITHUB_MIRROR=https://hub.gitmirror.com/ bash install.sh
 ```
 
+安装脚本现在会优先快速探测可用下载源，并在持续低速时自动切换候选源；如果你所在网络环境比较特殊，手动指定镜像仍然是最稳的方式。
+
 ### 第 2 步：初始化配置
 
 ```bash

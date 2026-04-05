@@ -146,6 +146,8 @@ If GitHub is unstable from your network, you can also force a mirror:
 GITHUB_MIRROR=https://hub.gitmirror.com/ bash install.sh
 ```
 
+The install script now probes download candidates first and can switch away from a persistently slow source automatically, but forcing a mirror is still the most predictable option on restricted networks.
+
 ### Step 2: Initialize
 
 ```bash

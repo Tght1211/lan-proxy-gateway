@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented here.
 
+## v2.2.10 - 2026-04-06
+
+### Fixed
+
+- Reworked `install.sh` so release downloads no longer sit on a slow direct GitHub asset connection for minutes before trying the next source
+- Added fast candidate probing, low-speed cutover, and retry rotation across direct GitHub plus known mirrors for the Unix install script
+- Forced the Unix install script to prefer `curl --http1.1` by default, which improves release-asset download stability on affected macOS networks
+
+### Documentation
+
+- Updated the Chinese and English README install sections to explain the new automatic download-source probing and when `GITHUB_MIRROR` is still the better manual fallback
+- Updated the install success hints so `gateway start` / `gateway start --tui` match the current default simple-mode startup behavior
+
 ## v2.2.9 - 2026-04-04
 
 ### Changed

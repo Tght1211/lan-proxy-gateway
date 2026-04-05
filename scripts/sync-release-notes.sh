@@ -22,9 +22,10 @@ declare -A TITLES=(
   [v2.2.7]="v2.2.7 · Windows 兼容性补齐与验收修复"
   [v2.2.8]="v2.2.8 · TUI Dashboard 改版"
   [v2.2.9]="v2.2.9 · 默认切回简单模式"
+  [v2.2.10]="v2.2.10 · 安装下载链路修复"
 )
 
-for tag in v1.0.0 v1.1.0 v1.1.1 v1.2.0 v1.3.0 v2.0.0 v2.1.0 v2.1.1 v2.2.0 v2.2.1 v2.2.2 v2.2.3 v2.2.4 v2.2.5 v2.2.6 v2.2.7 v2.2.8 v2.2.9; do
+for tag in v1.0.0 v1.1.0 v1.1.1 v1.2.0 v1.3.0 v2.0.0 v2.1.0 v2.1.1 v2.2.0 v2.2.1 v2.2.2 v2.2.3 v2.2.4 v2.2.5 v2.2.6 v2.2.7 v2.2.8 v2.2.9 v2.2.10; do
   notes_file="$ROOT_DIR/docs/releases/$tag.md"
   if [ ! -f "$notes_file" ]; then
     notes_file="$ROOT_DIR/docs/releases/latest.md"
