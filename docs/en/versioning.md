@@ -120,6 +120,12 @@ Focus: fix `install.sh` hanging on slow GitHub release downloads by probing cand
 Positioning: simple-mode node workbench and help cleanup.  
 Focus: center simple-mode help on daily actions, make workbench shortcuts usable, and let `nodes` show per-node latency with retest-and-sort behavior.
 
+### v2.2.12
+
+Positioning: self-update latest-version fallback fix.  
+Focus: harden `gateway update` when the GitHub API is unstable by falling back to the release page redirect, honoring a mirror override, and reporting clearer source failures.
+
+
 ## Rules for Future Versions
 
 ### Patch

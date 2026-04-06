@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -150,8 +151,21 @@ func releaseAssetName(goos, goarch string) string {
 }
 
 func fetchLatestTagWithTimeout(timeout time.Duration) (string, error) {
-	url := apiBase + "/releases/latest"
-	body, err := httpGetWithFallbackTimeout(url, timeout)
+	tag, err := fetchLatestTagFromAPI(timeout)
+	if err == nil {
+		return tag, nil
+	}
+
+	redirectTag, redirectErr := fetchLatestTagFromReleasePage(timeout)
+	if redirectErr == nil {
+		return redirectTag, nil
+	}
+
+	return "", fmt.Errorf("GitHub API 失败: %v；release 页面回退失败: %v", err, redirectErr)
+}
+
+func fetchLatestTagFromAPI(timeout time.Duration) (string, error) {
+	body, err := httpGetWithFallbackTimeout(apiBase+"/releases/latest", timeout)
 	if err != nil {
 		return "", err
 	}
@@ -167,32 +181,57 @@ func fetchLatestTagWithTimeout(timeout time.Duration) (string, error) {
 	return info.TagName, nil
 }
 
+func fetchLatestTagFromReleasePage(timeout time.Duration) (string, error) {
+	client := newGatewayHTTPClient(timeout)
+	url := "https://github.com/" + repo + "/releases/latest"
+
+	resp, err := openGatewayURLWithFallbackTimeout(client, url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	tag := extractLatestTagFromReleaseURL(resp.Request.URL.String())
+	if tag == "" {
+		return "", fmt.Errorf("未能从跳转地址识别版本号: %s", resp.Request.URL.String())
+	}
+	return tag, nil
+}
+
 func httpGetWithFallback(url string) (io.ReadCloser, error) {
 	return httpGetWithFallbackTimeout(url, 15*time.Second)
 }
 
 func httpGetWithFallbackTimeout(url string, timeout time.Duration) (io.ReadCloser, error) {
 	client := newGatewayHTTPClient(timeout)
-
-	resp, err := openGatewayURL(client, url)
-	if err == nil && resp.StatusCode == http.StatusOK {
-		return resp.Body, nil
+	resp, err := openGatewayURLWithFallbackTimeout(client, url)
+	if err != nil {
+		return nil, err
 	}
-	if resp != nil {
-		resp.Body.Close()
-	}
+	return resp.Body, nil
+}
 
-	for _, m := range mirrors {
-		resp, err = openGatewayURL(client, m+url)
+func openGatewayURLWithFallbackTimeout(client *http.Client, url string) (*http.Response, error) {
+	var failures []string
+
+	for _, candidate := range buildGatewayURLCandidates(url) {
+		resp, err := openGatewayURL(client, candidate)
 		if err == nil && resp.StatusCode == http.StatusOK {
-			return resp.Body, nil
+			return resp, nil
 		}
+
 		if resp != nil {
+			failures = append(failures, fmt.Sprintf("%s: HTTP %d", gatewayURLCandidateLabel(url, candidate), resp.StatusCode))
 			resp.Body.Close()
+		} else if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", gatewayURLCandidateLabel(url, candidate), err))
 		}
 	}
 
-	return nil, fmt.Errorf("所有下载源均失败")
+	if len(failures) == 0 {
+		return nil, fmt.Errorf("所有下载源均失败")
+	}
+	return nil, fmt.Errorf("所有下载源均失败: %s", strings.Join(failures, "; "))
 }
 
 func downloadWithFallback(url string) (string, error) {
@@ -203,10 +242,7 @@ func downloadWithFallback(url string) (string, error) {
 	tmpPath := tmpFile.Name()
 	tmpFile.Close()
 
-	urls := []string{url}
-	for _, m := range mirrors {
-		urls = append(urls, m+url)
-	}
+	urls := buildGatewayURLCandidates(url)
 
 	for i, u := range urls {
 		if i > 0 {
@@ -230,10 +266,7 @@ func downloadWithFallbackRobust(url string) (string, error) {
 	tmpPath := tmpFile.Name()
 	tmpFile.Close()
 
-	urls := []string{url}
-	for _, m := range mirrors {
-		urls = append(urls, m+url)
-	}
+	urls := buildGatewayURLCandidates(url)
 
 	var lastErr error
 	for i, u := range urls {
@@ -259,6 +292,54 @@ func updateTempPattern(goos string) string {
 		return "gateway-update-*.exe"
 	}
 	return "gateway-update-*"
+}
+
+func configuredMirrors() []string {
+	if mirror := strings.TrimSpace(os.Getenv("GITHUB_MIRROR")); mirror != "" {
+		return []string{ensureMirrorPrefix(mirror)}
+	}
+	return slices.Clone(mirrors)
+}
+
+func buildGatewayURLCandidates(url string) []string {
+	candidates := []string{url}
+	for _, mirror := range configuredMirrors() {
+		candidates = append(candidates, ensureMirrorPrefix(mirror)+url)
+	}
+	return candidates
+}
+
+func ensureMirrorPrefix(mirror string) string {
+	mirror = strings.TrimSpace(mirror)
+	if mirror == "" {
+		return ""
+	}
+	if !strings.HasSuffix(mirror, "/") {
+		mirror += "/"
+	}
+	return mirror
+}
+
+func gatewayURLCandidateLabel(originalURL, candidate string) string {
+	if candidate == originalURL {
+		return "直连"
+	}
+	return candidate
+}
+
+func extractLatestTagFromReleaseURL(raw string) string {
+	const marker = "/releases/tag/"
+
+	idx := strings.Index(raw, marker)
+	if idx < 0 {
+		return ""
+	}
+
+	tag := raw[idx+len(marker):]
+	if cut := strings.IndexAny(tag, "/?#"); cut >= 0 {
+		tag = tag[:cut]
+	}
+	return strings.TrimSpace(tag)
 }
 
 func copyFile(src, dst string) error {

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -67,5 +68,61 @@ func TestEscapeWindowsBatchValue(t *testing.T) {
 	want := `C:\Users\%%USERNAME%%\gateway.exe`
 	if got != want {
 		t.Fatalf("escapeWindowsBatchValue() = %q, want %q", got, want)
+	}
+}
+
+func TestExtractLatestTagFromReleaseURL(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want string
+	}{
+		{
+			raw:  "https://github.com/Tght1211/lan-proxy-gateway/releases/tag/v2.2.11",
+			want: "v2.2.11",
+		},
+		{
+			raw:  "https://github.com/Tght1211/lan-proxy-gateway/releases/tag/v2.2.11?expanded=true",
+			want: "v2.2.11",
+		},
+		{
+			raw:  "https://ghproxy.example/https://github.com/Tght1211/lan-proxy-gateway/releases/tag/v2.2.11",
+			want: "v2.2.11",
+		},
+		{
+			raw:  "https://github.com/Tght1211/lan-proxy-gateway/releases/latest",
+			want: "",
+		},
+	}
+
+	for _, tc := range cases {
+		if got := extractLatestTagFromReleaseURL(tc.raw); got != tc.want {
+			t.Fatalf("extractLatestTagFromReleaseURL(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+}
+
+func TestBuildGatewayURLCandidatesUsesOverrideMirror(t *testing.T) {
+	const mirror = "https://example.com/proxy"
+	old := os.Getenv("GITHUB_MIRROR")
+	if err := os.Setenv("GITHUB_MIRROR", mirror); err != nil {
+		t.Fatalf("setenv: %v", err)
+	}
+	defer func() {
+		if old == "" {
+			_ = os.Unsetenv("GITHUB_MIRROR")
+			return
+		}
+		_ = os.Setenv("GITHUB_MIRROR", old)
+	}()
+
+	candidates := buildGatewayURLCandidates("https://github.com/Tght1211/lan-proxy-gateway/releases/latest")
+	if len(candidates) != 2 {
+		t.Fatalf("len(candidates) = %d, want 2", len(candidates))
+	}
+	if candidates[0] != "https://github.com/Tght1211/lan-proxy-gateway/releases/latest" {
+		t.Fatalf("unexpected direct candidate: %q", candidates[0])
+	}
+	if candidates[1] != "https://example.com/proxy/https://github.com/Tght1211/lan-proxy-gateway/releases/latest" {
+		t.Fatalf("unexpected mirror candidate: %q", candidates[1])
 	}
 }
