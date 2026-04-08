@@ -97,8 +97,14 @@ type pickerDelayResultMsg struct {
 	delay int
 	err   error
 }
+type refreshResultMsg struct {
+	snap       snapshot
+	lastPolled time.Time
+	lastUp     int64
+	lastDown   int64
+}
 
-const refreshPulseFrames = 4
+const refreshPulseFrames = 6
 const navAlertFrames = 5
 
 type snapshot struct {
@@ -158,6 +164,7 @@ type runtimeConsoleModel struct {
 	detailTitle   string
 	refreshPulse  int
 	navAlertPulse int
+	refreshing    bool
 	pickerStatus  string
 	nodeDelays    map[string]string
 }
@@ -217,6 +224,11 @@ func (m runtimeConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case refreshPulseMsg:
+		if m.refreshing {
+			// keep cycling while async refresh is in progress
+			m.refreshPulse = (m.refreshPulse%refreshPulseFrames + 1)
+			return m, refreshPulseTickCmd()
+		}
 		if m.refreshPulse > 0 {
 			m.refreshPulse--
 			if m.refreshPulse > 0 {
@@ -224,6 +236,16 @@ func (m runtimeConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case refreshResultMsg:
+		m.refreshing = false
+		m.snapshot = msg.snap
+		m.lastPolled = msg.lastPolled
+		m.lastUp = msg.lastUp
+		m.lastDown = msg.lastDown
+		m.refreshCurrentDetail()
+		m.refreshPulse = refreshPulseFrames
+		return m, refreshPulseTickCmd()
 
 	case navAlertPulseMsg:
 		if m.navAlertPulse > 0 {
@@ -354,10 +376,12 @@ func (m runtimeConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshSelectionPreview()
 			return m, nil
 		case "r":
-			m.refreshSnapshot()
-			m.refreshCurrentDetail()
+			if m.refreshing {
+				return m, nil // ignore rapid presses during async refresh
+			}
+			m.refreshing = true
 			m.refreshPulse = refreshPulseFrames
-			return m, refreshPulseTickCmd()
+			return m, tea.Batch(m.asyncRefreshCmd(), refreshPulseTickCmd())
 		case "q":
 			m.pending = &pendingConfirm{prompt: "确认退出控制台？", action: consoleActionExit}
 			m.focus = consoleFocusInput
@@ -395,11 +419,6 @@ func (m runtimeConsoleModel) View() tea.View {
 	}
 	sections = append(sections, m.renderHeader(), m.renderMain(), m.renderFooter())
 	page := lipgloss.JoinVertical(lipgloss.Left, sections...)
-	if m.refreshPulseActive() {
-		page = lipgloss.NewStyle().
-			PaddingLeft(m.refreshPulseOffset()).
-			Render(page)
-	}
 	if overlay := m.renderOverlay(); overlay != "" {
 		page = overlay
 	}
@@ -989,16 +1008,6 @@ func (m runtimeConsoleModel) navAlertActive() bool {
 	return m.navAlertPulse > 0
 }
 
-func (m runtimeConsoleModel) refreshPulseOffset() int {
-	if !m.refreshPulseActive() {
-		return 0
-	}
-	if m.refreshPulse%2 == 0 {
-		return 2
-	}
-	return 1
-}
-
 func (m runtimeConsoleModel) refreshPulseBorderColor(defaultColor string) string {
 	if !m.refreshPulseActive() {
 		return defaultColor
@@ -1017,25 +1026,6 @@ func (m runtimeConsoleModel) refreshPulseTitleColor(defaultColor string) string 
 		return "#ecfeff"
 	}
 	return "#cffafe"
-}
-
-func (m runtimeConsoleModel) refreshPulseHintLine() string {
-	if !m.refreshPulseActive() {
-		return ""
-	}
-	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#67e8f9")).
-		Render("↻ 正在刷新当前页面")
-}
-
-func (m runtimeConsoleModel) refreshPulseBodyStyle() lipgloss.Style {
-	if !m.refreshPulseActive() {
-		return lipgloss.NewStyle()
-	}
-	if m.refreshPulse%2 == 0 {
-		return lipgloss.NewStyle().PaddingLeft(1)
-	}
-	return lipgloss.NewStyle().PaddingRight(1)
 }
 
 func (m runtimeConsoleModel) navAlertOffset() int {
@@ -1304,8 +1294,37 @@ func (m *runtimeConsoleModel) openGroupPicker() (tea.Model, tea.Cmd) {
 	return *m, nil
 }
 
-func (m *runtimeConsoleModel) refreshSnapshot() {
+// refreshSnapshotFn is the hook used by refreshSnapshot.
+// Override in tests to avoid blocking network calls.
+var refreshSnapshotFn func(*runtimeConsoleModel) = func(m *runtimeConsoleModel) {
 	m.refreshDashboardSnapshot()
+}
+
+func (m *runtimeConsoleModel) refreshSnapshot() {
+	refreshSnapshotFn(m)
+}
+
+// asyncRefreshCmd runs refreshDashboardSnapshot in a background goroutine.
+// It captures necessary state from the current model and returns the result
+// as a refreshResultMsg, avoiding blocking the BubbleTea event loop.
+func (m *runtimeConsoleModel) asyncRefreshCmd() tea.Cmd {
+	copy := cloneRuntimeConsoleModelForRefresh(*m)
+	return func() tea.Msg {
+		copy.refreshDashboardSnapshot()
+		return refreshResultMsg{
+			snap:       copy.snapshot,
+			lastPolled: copy.lastPolled,
+			lastUp:     copy.lastUp,
+			lastDown:   copy.lastDown,
+		}
+	}
+}
+
+func cloneRuntimeConsoleModelForRefresh(m runtimeConsoleModel) runtimeConsoleModel {
+	copy := m
+	copy.snapshot.traffic.UploadTrend = append([]int64(nil), m.snapshot.traffic.UploadTrend...)
+	copy.snapshot.traffic.DownloadTrend = append([]int64(nil), m.snapshot.traffic.DownloadTrend...)
+	return copy
 }
 
 func (m *runtimeConsoleModel) resize() {
@@ -1387,28 +1406,45 @@ func (m runtimeConsoleModel) renderDetailPane(width int) string {
 	} else if m.focus == consoleFocusDetail {
 		border = "#38bdf8"
 	}
+
+	shakeOffset := 0
 	if m.refreshPulseActive() && m.picker == pickerModeNone {
 		border = m.refreshPulseBorderColor("#22d3ee")
 		headerColor = lipgloss.Color(m.refreshPulseTitleColor("#e2e8f0"))
+		if m.refreshPulse%2 == 0 {
+			shakeOffset = 1
+		}
+		if m.refreshing {
+			title = title + "  ↻"
+		}
+	}
+
+	boxWidth := width - shakeOffset
+	if boxWidth < 24 {
+		boxWidth = width
+		shakeOffset = 0
 	}
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(border)).
 		Padding(0, 1).
-		Width(width)
+		Width(boxWidth)
 
 	header := lipgloss.NewStyle().Bold(true).Foreground(headerColor).Render(title)
 	bodyHeight := max(3, m.mainHeight-4)
 	body := lipgloss.NewStyle().
-		MaxWidth(width - 4).
+		MaxWidth(boxWidth - 4).
 		Height(bodyHeight).
 		MaxHeight(bodyHeight).
 		Render(content)
-	if m.refreshPulseActive() && m.picker == pickerModeNone {
-		body = m.refreshPulseBodyStyle().Render(body)
-	}
 
-	return box.Render(lipgloss.JoinVertical(lipgloss.Left, header, "", body))
+	rendered := box.Render(lipgloss.JoinVertical(lipgloss.Left, header, "", body))
+	if shakeOffset > 0 {
+		return lipgloss.NewStyle().
+			Width(width).
+			Render(lipgloss.NewStyle().PaddingLeft(shakeOffset).Render(rendered))
+	}
+	return rendered
 }
 
 func (m runtimeConsoleModel) renderNavigationCard(width int) string {
@@ -1483,7 +1519,6 @@ func (m runtimeConsoleModel) renderCard(width int, title string, lines []string,
 
 	return box.Render(lipgloss.JoinVertical(lipgloss.Left, titleStyle.Render(title), "", strings.Join(renderedLines, "\n")))
 }
-
 
 func (m runtimeConsoleModel) renderAlertBanner() string {
 	if len(m.snapshot.alerts) == 0 {
@@ -1614,7 +1649,6 @@ func (m runtimeConsoleModel) renderMenuLines() []string {
 	lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#94a3b8")).Render("Enter 打开右侧页  ·  Ctrl+P 切节点"))
 	return lines
 }
-
 
 func (m runtimeConsoleModel) renderHeaderSummary() string {
 	parts := []string{
@@ -1849,6 +1883,10 @@ func (m *runtimeConsoleModel) refreshCurrentDetail() {
 		m.setDetail("连接与流量", renderTrafficDetailLines(m.snapshot))
 	case "IP 与延迟":
 		m.setDetail("IP 与延迟", renderLatencyDetailLines(m.snapshot))
+	case "设备接入":
+		m.setDetail("设备接入", renderDeviceSetupLines(m.ip, cfg.Runtime.Ports.API))
+	case "功能导航":
+		m.setDetail("功能导航", renderGuideDetailLines(cfg, m.logFile))
 	case "出口网络":
 		m.setDetail("出口网络", m.renderEgressStatusLines())
 	case "扩展状态":
@@ -1867,8 +1905,6 @@ func (m *runtimeConsoleModel) refreshCurrentDetail() {
 		m.setDetail(detailTitleChainWorkspace, renderChainWorkspaceLines(cfg, ""))
 	case "节点工作台":
 		m.setDetail("节点工作台", renderNodeWorkspaceLines(m.snapshot, noteLine("按回车进入节点工作台，或按 Ctrl+P 直接打开。")))
-	case "功能导航":
-		m.setDetail("功能导航", renderGuideDetailLines(cfg, m.logFile))
 	default:
 		if strings.HasPrefix(m.detailTitle, "预览 · ") {
 			m.refreshSelectionPreview()
@@ -1903,6 +1939,12 @@ func (m *runtimeConsoleModel) executeSelectedAction() (tea.Model, tea.Cmd) {
 		m.focus = consoleFocusDetail
 	case "home_latency":
 		m.setDetail("IP 与延迟", renderLatencyDetailLines(m.snapshot))
+		m.focus = consoleFocusDetail
+	case "home_devices":
+		m.setDetail("设备接入", renderDeviceSetupLines(m.ip, loadConfigOrDefault().Runtime.Ports.API))
+		m.focus = consoleFocusDetail
+	case "home_guide":
+		m.setDetail("功能导航", renderGuideDetailLines(loadConfigOrDefault(), m.logFile))
 		m.focus = consoleFocusDetail
 	case "proxy_nodes":
 		return m.openGroupPicker()
@@ -1957,6 +1999,8 @@ func menuItemsForTab(tab consoleTab) []consoleMenuItem {
 			{id: "home_dashboard", key: "01", title: "首页仪表盘", desc: "查看订阅、节点、TUN、流量、IP 和站点延迟总览", kind: consoleItemInfo, cmd: "/status", enter: "打开首页仪表盘"},
 			{id: "home_traffic", key: "02", title: "连接与流量", desc: "查看最近 10 次刷新、上下行速度、连接和内核占用", kind: consoleItemInfo, enter: "打开连接与流量详情"},
 			{id: "home_latency", key: "03", title: "IP 与延迟", desc: "查看当前 / 入口 / 出口 IP，以及常用站点延迟", kind: consoleItemInfo, enter: "打开 IP 与延迟详情"},
+			{id: "home_devices", key: "04", title: "设备接入", desc: "Switch / PS5 / Apple TV / 手机等设备的网关和 DNS 设置说明", kind: consoleItemInfo, enter: "打开设备接入说明"},
+			{id: "home_guide", key: "05", title: "功能导航", desc: "查看当前主线、常用入口和推荐命令，适合快速上手", kind: consoleItemInfo, cmd: "/guide", enter: "打开功能导航"},
 		}
 	}
 }
@@ -1986,6 +2030,17 @@ func previewLinesForItem(item consoleMenuItem, snap snapshot, cfg *config.Config
 			"  出口 IP: " + fallbackText(snap.addresses.Exit, "未获取"),
 			"  YouTube: " + fallbackText(snap.latency.Sites["YouTube"], "未测"),
 			"  GitHub: " + fallbackText(snap.latency.Sites["GitHub"], "未测"),
+		}
+	case "home_devices":
+		return []string{
+			"  网关 / DNS → 本机局域网 IP",
+			"  支持: Switch · PS5 · Apple TV · 手机 · 平板",
+			"  进入后查看接入参数和操作说明",
+		}
+	case "home_guide":
+		return []string{
+			"  当前主线、推荐入口和常用命令概览",
+			"  适合首次使用或重新熟悉功能时查阅",
 		}
 	case "proxy_runtime":
 		return []string{

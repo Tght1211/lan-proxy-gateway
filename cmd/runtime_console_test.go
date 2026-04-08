@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -8,6 +9,12 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/tght/lan-proxy-gateway/internal/config"
 )
+
+func TestMain(m *testing.M) {
+	// Skip blocking network calls in all TUI tests — mihomo isn't running.
+	refreshSnapshotFn = func(*runtimeConsoleModel) {}
+	os.Exit(m.Run())
+}
 
 func TestRenderInputLineShowsTypedValue(t *testing.T) {
 	m := runtimeConsoleModel{
@@ -378,5 +385,140 @@ func TestHandleCommandExtensionChainsUpdatesExtensionWorkspace(t *testing.T) {
 	}
 	if updated.cfg.Extension.Mode != "chains" {
 		t.Fatalf("expected extension mode to be chains, got %q", updated.cfg.Extension.Mode)
+	}
+}
+
+func TestHomeTabHasDevicesAndGuideItems(t *testing.T) {
+	items := menuItemsForTab(consoleTabOverview)
+	ids := make(map[string]bool, len(items))
+	for _, item := range items {
+		ids[item.id] = true
+	}
+	if !ids["home_devices"] {
+		t.Fatalf("expected home tab to include home_devices item, got %v", ids)
+	}
+	if !ids["home_guide"] {
+		t.Fatalf("expected home tab to include home_guide item, got %v", ids)
+	}
+}
+
+func TestEnterOnHomeDevicesOpensDeviceDetail(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+	m.tab = consoleTabOverview
+	m.focus = consoleFocusNav
+	// find home_devices item index
+	items := menuItemsForTab(consoleTabOverview)
+	for i, item := range items {
+		if item.id == "home_devices" {
+			m.cursor = i
+			break
+		}
+	}
+
+	next, _ := m.executeSelectedAction()
+	updated := next.(runtimeConsoleModel)
+
+	if updated.detailTitle != "设备接入" {
+		t.Fatalf("expected home_devices to open 设备接入, got %q", updated.detailTitle)
+	}
+	if updated.focus != consoleFocusDetail {
+		t.Fatalf("expected focus to move to detail pane, got %v", updated.focus)
+	}
+}
+
+func TestEnterOnHomeGuideOpensGuideDetail(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+	m.tab = consoleTabOverview
+	m.focus = consoleFocusNav
+	items := menuItemsForTab(consoleTabOverview)
+	for i, item := range items {
+		if item.id == "home_guide" {
+			m.cursor = i
+			break
+		}
+	}
+
+	next, _ := m.executeSelectedAction()
+	updated := next.(runtimeConsoleModel)
+
+	if updated.detailTitle != "功能导航" {
+		t.Fatalf("expected home_guide to open 功能导航, got %q", updated.detailTitle)
+	}
+}
+
+func TestRefreshCurrentDetailPreservesDevicePage(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+	m.setDetail("设备接入", []string{"old"})
+
+	m.refreshCurrentDetail()
+
+	got := plainText(m.viewport.GetContent())
+	if !strings.Contains(got, "网关") && !strings.Contains(got, "DNS") {
+		t.Fatalf("expected refreshed device page to contain gateway info, got %q", got)
+	}
+}
+
+func TestAsyncRefreshDoesNotBlockOnRKey(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+
+	// First R press should set refreshing=true and return immediately
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "r"})
+	updated := next.(runtimeConsoleModel)
+	if !updated.refreshing {
+		t.Fatalf("expected refreshing=true after R, got false")
+	}
+	if cmd == nil {
+		t.Fatalf("expected non-nil cmd after R (async refresh)")
+	}
+
+	// Second R press while refreshing should be ignored (no stacking)
+	next2, _ := updated.Update(tea.KeyPressMsg{Text: "r"})
+	updated2 := next2.(runtimeConsoleModel)
+	if updated2.refreshPulse != updated.refreshPulse {
+		t.Fatalf("expected second R while refreshing to be ignored, pulse changed from %d to %d", updated.refreshPulse, updated2.refreshPulse)
+	}
+}
+
+func TestRefreshResultMsgClearsRefreshingFlag(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+	m.refreshing = true
+
+	next, _ := m.Update(refreshResultMsg{snap: m.snapshot})
+	updated := next.(runtimeConsoleModel)
+
+	if updated.refreshing {
+		t.Fatalf("expected refreshing=false after refreshResultMsg, got true")
+	}
+	if updated.refreshPulse <= 0 {
+		t.Fatalf("expected final pulse animation after refresh, got %d", updated.refreshPulse)
+	}
+}
+
+func TestCloneRuntimeConsoleModelForRefreshCopiesTrendSlices(t *testing.T) {
+	m := newRuntimeConsoleModel("/tmp/lan-proxy-gateway.log", "192.168.12.100", "en0", "data")
+	m.snapshot.traffic.UploadTrend = []int64{1, 2, 3}
+	m.snapshot.traffic.DownloadTrend = []int64{4, 5, 6}
+
+	cloned := cloneRuntimeConsoleModelForRefresh(m)
+	cloned.snapshot.traffic.UploadTrend[0] = 99
+	cloned.snapshot.traffic.DownloadTrend[0] = 88
+
+	if m.snapshot.traffic.UploadTrend[0] != 1 {
+		t.Fatalf("expected upload trend clone to avoid aliasing, got %v", m.snapshot.traffic.UploadTrend)
+	}
+	if m.snapshot.traffic.DownloadTrend[0] != 4 {
+		t.Fatalf("expected download trend clone to avoid aliasing, got %v", m.snapshot.traffic.DownloadTrend)
+	}
+}
+
+func TestPreviewLinesForHomeDevicesAvoidsQRCodeClaim(t *testing.T) {
+	lines := previewLinesForItem(consoleMenuItem{id: "home_devices"}, snapshot{}, config.DefaultConfig(), "")
+	got := strings.Join(lines, "\n")
+
+	if strings.Contains(got, "二维码") {
+		t.Fatalf("expected home_devices preview to avoid claiming a QR code, got %q", got)
+	}
+	if !strings.Contains(got, "接入参数") {
+		t.Fatalf("expected home_devices preview to describe setup guidance, got %q", got)
 	}
 }

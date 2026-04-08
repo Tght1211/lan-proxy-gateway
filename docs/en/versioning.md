@@ -125,6 +125,11 @@ Focus: center simple-mode help on daily actions, make workbench shortcuts usable
 Positioning: self-update latest-version fallback fix.  
 Focus: harden `gateway update` when the GitHub API is unstable by falling back to the release page redirect, honoring a mirror override, and reporting clearer source failures.
 
+### v2.2.13
+
+Positioning: runtime TUI home-entry and refresh polish.  
+Focus: add device-setup and guide entries to the home tab, make refresh asynchronous so the UI stays responsive, and tighten the related preview copy plus snapshot-copy safety.
+
 
 ## Rules for Future Versions
 
