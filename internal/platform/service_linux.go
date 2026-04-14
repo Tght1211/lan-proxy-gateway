@@ -14,11 +14,16 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+# gateway start 会 fork 出 mihomo 子进程后退出，必须用 forking 类型
+# 配合 PIDFile 让 systemd 正确追踪后台子进程
+Type=forking
+PIDFile={{.DataDir}}/mihomo.pid
 ExecStart={{.BinaryPath}} start --config {{.ConfigFile}} --data-dir {{.DataDir}}
 WorkingDirectory={{.WorkDir}}
 Restart=on-failure
 RestartSec=5
+# 留足时间让 mihomo 完成 TUN 初始化
+TimeoutStartSec=30
 
 [Install]
 WantedBy=multi-user.target

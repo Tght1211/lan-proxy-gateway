@@ -26,26 +26,20 @@ func RenderTemplate(cfg *config.Config, iface, ip, outputPath string) error {
 	}
 
 	replacements := map[string]string{
-		"{{MIXED_PORT}}":        strconv.Itoa(cfg.Runtime.Ports.Mixed),
-		"{{REDIR_PORT}}":        strconv.Itoa(cfg.Runtime.Ports.Redir),
-		"{{API_PORT}}":          strconv.Itoa(cfg.Runtime.Ports.API),
-		"{{API_SECRET}}":        cfg.Runtime.APISecret,
-		"{{DNS_LISTEN_PORT}}":   strconv.Itoa(cfg.Runtime.Ports.DNS),
-		"{{SUBSCRIPTION_URL}}":  cfg.Proxy.SubscriptionURL,
-		"{{SUBSCRIPTION_NAME}}": cfg.Proxy.SubscriptionName,
-		"{{LAN_INTERFACE}}":     iface,
-		"{{LAN_IP}}":            ip,
-		"{{TUN_CONFIG}}":        tunConfig,
-		"{{RULES_BLOCK}}":       rules.Render(cfg),
+		"{{MIXED_PORT}}":      strconv.Itoa(cfg.Runtime.Ports.Mixed),
+		"{{REDIR_PORT}}":      strconv.Itoa(cfg.Runtime.Ports.Redir),
+		"{{API_PORT}}":        strconv.Itoa(cfg.Runtime.Ports.API),
+		"{{API_SECRET}}":      cfg.Runtime.APISecret,
+		"{{DNS_LISTEN_PORT}}": strconv.Itoa(cfg.Runtime.Ports.DNS),
+		"{{LAN_INTERFACE}}":   iface,
+		"{{LAN_IP}}":          ip,
+		"{{TUN_CONFIG}}":      tunConfig,
+		"{{PROXY_BLOCK}}":     renderProxyBlock(cfg),
+		"{{RULES_BLOCK}}":     rules.Render(cfg),
 	}
 
 	for placeholder, value := range replacements {
 		result = strings.ReplaceAll(result, placeholder, value)
-	}
-
-	// For file mode: patch proxy-providers from http to file type
-	if cfg.Proxy.Source == "file" {
-		result = patchForFileMode(result)
 	}
 
 	output := []byte(result)
@@ -54,6 +48,10 @@ func RenderTemplate(cfg *config.Config, iface, ip, outputPath string) error {
 	case "chains":
 		if cfg.Extension.ResidentialChain == nil {
 			return fmt.Errorf("extension.mode 为 chains 但未配置 extension.residential_chain")
+		}
+		// chains 模式不支持 proxy 直接代理来源
+		if cfg.Proxy.Source == "proxy" {
+			return fmt.Errorf("chains 链式代理模式需要订阅链接或本地配置文件作为出口节点来源，不支持直接代理模式")
 		}
 		modified, err := script.ApplyChains(cfg.Extension.ResidentialChain, output)
 		if err != nil {
@@ -74,28 +72,113 @@ func RenderTemplate(cfg *config.Config, iface, ip, outputPath string) error {
 	return os.WriteFile(outputPath, output, 0644)
 }
 
-// patchForFileMode modifies the generated config to use local file
-// instead of HTTP subscription.
-func patchForFileMode(content string) string {
-	lines := strings.Split(content, "\n")
-	var result []string
+// renderProxyBlock 根据代理来源类型生成对应的 proxy-providers/proxies + proxy-groups 配置块
+func renderProxyBlock(cfg *config.Config) string {
+	switch cfg.Proxy.Source {
+	case "proxy":
+		return renderDirectProxyBlock(cfg.Proxy.DirectProxy)
+	case "file":
+		return renderSubscriptionProxyBlock(cfg.Proxy.SubscriptionName, cfg.Proxy.SubscriptionURL, true)
+	default:
+		return renderSubscriptionProxyBlock(cfg.Proxy.SubscriptionName, cfg.Proxy.SubscriptionURL, false)
+	}
+}
 
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		// Change type: http to type: file
-		if trimmed == "type: http" {
-			line = strings.Replace(line, "type: http", "type: file", 1)
-		}
-		// Remove url: line within proxy-providers
-		if strings.HasPrefix(trimmed, "url: \"") {
-			continue
-		}
-		// Remove interval: 3600 line
-		if trimmed == "interval: 3600" {
-			continue
-		}
-		result = append(result, line)
+// renderSubscriptionProxyBlock 生成订阅/文件模式的代理配置块
+func renderSubscriptionProxyBlock(name, url string, fileMode bool) string {
+	var sb strings.Builder
+
+	if fileMode {
+		sb.WriteString("proxy-providers:\n")
+		sb.WriteString("  " + name + ":\n")
+		sb.WriteString("    type: file\n")
+		sb.WriteString("    path: ./proxy_provider/" + name + ".yaml\n")
+		sb.WriteString("    health-check:\n")
+		sb.WriteString("      enable: true\n")
+		sb.WriteString("      interval: 120\n")
+		sb.WriteString("      url: http://www.gstatic.com/generate_204\n")
+	} else {
+		sb.WriteString("proxy-providers:\n")
+		sb.WriteString("  " + name + ":\n")
+		sb.WriteString("    type: http\n")
+		sb.WriteString("    url: \"" + url + "\"\n")
+		sb.WriteString("    interval: 1800\n")
+		sb.WriteString("    path: ./proxy_provider/" + name + ".yaml\n")
+		sb.WriteString("    health-check:\n")
+		sb.WriteString("      enable: true\n")
+		sb.WriteString("      interval: 120\n")
+		sb.WriteString("      url: http://www.gstatic.com/generate_204\n")
 	}
 
-	return strings.Join(result, "\n")
+	sb.WriteString("\nproxy-groups:\n")
+	sb.WriteString("  - name: Proxy\n")
+	sb.WriteString("    type: select\n")
+	sb.WriteString("    use:\n")
+	sb.WriteString("      - " + name + "\n")
+	sb.WriteString("    proxies:\n")
+	sb.WriteString("      - Auto\n")
+	sb.WriteString("      - Fallback\n")
+	sb.WriteString("      - DIRECT\n")
+	sb.WriteString("\n  - name: Auto\n")
+	sb.WriteString("    type: url-test\n")
+	sb.WriteString("    use:\n")
+	sb.WriteString("      - " + name + "\n")
+	sb.WriteString("    url: http://www.gstatic.com/generate_204\n")
+	sb.WriteString("    interval: 120\n")
+	sb.WriteString("    tolerance: 100\n")
+	sb.WriteString("\n  - name: Fallback\n")
+	sb.WriteString("    type: fallback\n")
+	sb.WriteString("    use:\n")
+	sb.WriteString("      - " + name + "\n")
+	sb.WriteString("    url: http://www.gstatic.com/generate_204\n")
+	sb.WriteString("    interval: 120\n")
+
+	return sb.String()
+}
+
+// renderDirectProxyBlock 生成直接代理服务器模式的代理配置块
+func renderDirectProxyBlock(dp *config.DirectProxyConfig) string {
+	if dp == nil || strings.TrimSpace(dp.Server) == "" || dp.Port <= 0 {
+		// 配置不完整时生成一个占位配置，避免 mihomo 启动失败
+		return "proxies: []\n\nproxy-groups:\n  - name: Proxy\n    type: select\n    proxies:\n      - DIRECT\n\n  - name: Auto\n    type: select\n    proxies:\n      - DIRECT\n\n  - name: Fallback\n    type: select\n    proxies:\n      - DIRECT\n"
+	}
+
+	name := strings.TrimSpace(dp.Name)
+	if name == "" {
+		name = "MyProxy"
+	}
+	proxyType := strings.ToLower(strings.TrimSpace(dp.Type))
+	if proxyType != "http" {
+		proxyType = "socks5"
+	}
+
+	var sb strings.Builder
+	sb.WriteString("proxies:\n")
+	sb.WriteString(fmt.Sprintf("  - name: \"%s\"\n", name))
+	sb.WriteString(fmt.Sprintf("    type: %s\n", proxyType))
+	sb.WriteString(fmt.Sprintf("    server: %s\n", dp.Server))
+	sb.WriteString(fmt.Sprintf("    port: %d\n", dp.Port))
+	if strings.TrimSpace(dp.Username) != "" {
+		sb.WriteString(fmt.Sprintf("    username: \"%s\"\n", dp.Username))
+		sb.WriteString(fmt.Sprintf("    password: \"%s\"\n", dp.Password))
+	}
+
+	sb.WriteString("\nproxy-groups:\n")
+	sb.WriteString("  - name: Proxy\n")
+	sb.WriteString("    type: select\n")
+	sb.WriteString("    proxies:\n")
+	sb.WriteString(fmt.Sprintf("      - \"%s\"\n", name))
+	sb.WriteString("      - DIRECT\n")
+	sb.WriteString("\n  - name: Auto\n")
+	sb.WriteString("    type: select\n")
+	sb.WriteString("    proxies:\n")
+	sb.WriteString(fmt.Sprintf("      - \"%s\"\n", name))
+	sb.WriteString("      - DIRECT\n")
+	sb.WriteString("\n  - name: Fallback\n")
+	sb.WriteString("    type: select\n")
+	sb.WriteString("    proxies:\n")
+	sb.WriteString(fmt.Sprintf("      - \"%s\"\n", name))
+	sb.WriteString("      - DIRECT\n")
+
+	return sb.String()
 }

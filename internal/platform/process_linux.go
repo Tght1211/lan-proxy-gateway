@@ -48,6 +48,11 @@ func (p *impl) IsRunning() (bool, int, error) {
 	return true, pid, nil
 }
 
+// pidFilePath 返回 mihomo PID 文件路径，供 systemd PIDFile= 指令使用
+func pidFilePath(dataDir string) string {
+	return dataDir + "/mihomo.pid"
+}
+
 func (p *impl) StartProcess(binary, dataDir, logFile string) (int, error) {
 	rotateLog(logFile)
 
@@ -69,6 +74,10 @@ func (p *impl) StartProcess(binary, dataDir, logFile string) (int, error) {
 	pid := cmd.Process.Pid
 	cmd.Process.Release()
 	logF.Close()
+
+	// 写入 PID 文件，供 systemd Type=forking + PIDFile= 追踪进程用
+	pidFile := pidFilePath(dataDir)
+	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(pid)+"\n"), 0644)
 
 	return pid, nil
 }

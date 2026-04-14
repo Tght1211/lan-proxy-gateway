@@ -75,10 +75,11 @@ func runStartWithMode(simpleMode bool, cmd *cobra.Command, args []string) {
 	iface, _ := p.DetectDefaultInterface()
 	ip, _ := p.DetectInterfaceIP(iface)
 
-	// If file mode, extract proxies first
-	if cfg.Proxy.Source == "file" {
+	// 代理来源前置处理
+	switch cfg.Proxy.Source {
+	case "file":
 		if cfg.Proxy.ConfigFile == "" {
-			ui.Error("配置文件路径未设置，请检查 gateway.yaml")
+			ui.Error("配置文件路径未设置，请运行 gateway config 配置")
 			os.Exit(1)
 		}
 		providerFile := filepath.Join(dDir, "proxy_provider", cfg.Proxy.SubscriptionName+".yaml")
@@ -88,6 +89,18 @@ func runStartWithMode(simpleMode bool, cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 		ui.Success("已从配置文件中提取 %d 个代理节点", count)
+	case "proxy":
+		dp := cfg.Proxy.DirectProxy
+		if dp == nil || strings.TrimSpace(dp.Server) == "" || dp.Port <= 0 {
+			ui.Error("直接代理服务器未完整配置，请运行 gateway config 填写服务器地址和端口")
+			os.Exit(1)
+		}
+		ui.Success("直接代理模式: %s %s:%d", dp.Type, dp.Server, dp.Port)
+	case "url":
+		if strings.TrimSpace(cfg.Proxy.SubscriptionURL) == "" {
+			ui.Error("订阅链接未设置，请运行 gateway config 配置")
+			os.Exit(1)
+		}
 	}
 
 	configPath := filepath.Join(dDir, "config.yaml")

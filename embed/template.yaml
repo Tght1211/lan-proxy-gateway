@@ -42,45 +42,12 @@ dns:
     geoip-code: CN
 
 # ============================================
-# 代理节点 - 通过 proxy-providers 远程拉取
-# 不在此文件中硬编码任何节点信息
+# 代理节点与代理组
+# 由 internal/template 包根据 proxy.source 动态生成：
+#   url/file  → proxy-providers 订阅/文件模式
+#   proxy     → proxies 直接代理服务器模式
 # ============================================
-proxy-providers:
-  {{SUBSCRIPTION_NAME}}:
-    type: http
-    url: "{{SUBSCRIPTION_URL}}"
-    interval: 1800
-    path: ./proxy_provider/{{SUBSCRIPTION_NAME}}.yaml
-    health-check:
-      enable: true
-      interval: 120
-      url: http://www.gstatic.com/generate_204
-
-# 代理组 - 使用 proxy-providers 中的节点
-proxy-groups:
-  - name: Proxy
-    type: select
-    use:
-      - {{SUBSCRIPTION_NAME}}
-    proxies:
-      - Auto
-      - Fallback
-      - DIRECT
-
-  - name: Auto
-    type: url-test
-    use:
-      - {{SUBSCRIPTION_NAME}}
-    url: http://www.gstatic.com/generate_204
-    interval: 120
-    tolerance: 100
-
-  - name: Fallback
-    type: fallback
-    use:
-      - {{SUBSCRIPTION_NAME}}
-    url: http://www.gstatic.com/generate_204
-    interval: 120
+{{PROXY_BLOCK}}
 
 # ============================================
 # 分流规则

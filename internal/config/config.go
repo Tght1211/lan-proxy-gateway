@@ -16,13 +16,25 @@ type Config struct {
 }
 
 type ProxyConfig struct {
-	// Source: url = 使用订阅链接 | file = 使用本地 Clash/mihomo 配置文件
-	Source           string         `yaml:"source"`
-	SubscriptionURL  string         `yaml:"subscription_url,omitempty"`
-	ConfigFile       string         `yaml:"config_file,omitempty"`
-	SubscriptionName string         `yaml:"subscription_name"`
-	CurrentProfile   string         `yaml:"current_profile,omitempty"`
-	Profiles         []ProxyProfile `yaml:"profiles,omitempty"`
+	// Source: url = 使用订阅链接 | file = 使用本地 Clash/mihomo 配置文件 | proxy = 直接配置代理服务器
+	Source           string              `yaml:"source"`
+	SubscriptionURL  string              `yaml:"subscription_url,omitempty"`
+	ConfigFile       string              `yaml:"config_file,omitempty"`
+	SubscriptionName string              `yaml:"subscription_name"`
+	CurrentProfile   string              `yaml:"current_profile,omitempty"`
+	Profiles         []ProxyProfile      `yaml:"profiles,omitempty"`
+	DirectProxy      *DirectProxyConfig  `yaml:"direct_proxy,omitempty"`
+}
+
+// DirectProxyConfig 直接配置代理服务器模式（无需订阅链接或本地配置文件）
+// 通过 proxy.source: proxy 启用，适合手头有 SOCKS5/HTTP 代理但没有机场订阅的场景
+type DirectProxyConfig struct {
+	Name     string `yaml:"name,omitempty"`    // 节点显示名称，默认 "MyProxy"
+	Type     string `yaml:"type"`              // 协议类型：socks5 / http
+	Server   string `yaml:"server"`            // 代理服务器地址
+	Port     int    `yaml:"port"`              // 代理服务器端口
+	Username string `yaml:"username,omitempty"` // 认证用户名（可选）
+	Password string `yaml:"password,omitempty"` // 认证密码（可选）
 }
 
 type ProxyProfile struct {
@@ -157,9 +169,9 @@ type diskConfig struct {
 	LegacyAPISecret  string      `yaml:"api_secret,omitempty"`
 	LegacyTunEnabled bool        `yaml:"tun_enabled,omitempty"`
 
-	LegacyExtensionMode    string            `yaml:"extension_mode,omitempty"`
-	LegacyScriptPath       string            `yaml:"script_path,omitempty"`
-	LegacyResidentialChain *ResidentialChain `yaml:"residential_chain,omitempty"`
+	LegacyExtensionMode    string             `yaml:"extension_mode,omitempty"`
+	LegacyScriptPath       string             `yaml:"script_path,omitempty"`
+	LegacyResidentialChain *ResidentialChain  `yaml:"residential_chain,omitempty"`
 }
 
 func newDiskConfig(cfg *Config) *diskConfig {
@@ -232,6 +244,16 @@ func sanitizeProxy(proxy ProxyConfig) *ProxyConfig {
 	if sanitized.Source == "" {
 		sanitized.Source = "url"
 	}
+	// proxy 模式：直接代理服务器，不需要订阅档案管理
+	if sanitized.Source == "proxy" {
+		if sanitized.SubscriptionName == "" {
+			sanitized.SubscriptionName = "direct"
+		}
+		sanitized.CurrentProfile = sanitized.SubscriptionName
+		sanitized.DirectProxy = sanitizeDirectProxy(sanitized.DirectProxy)
+		return &sanitized
+	}
+
 	if sanitized.SubscriptionName == "" {
 		sanitized.SubscriptionName = "subscription"
 	}
@@ -277,6 +299,28 @@ func sanitizeProxy(proxy ProxyConfig) *ProxyConfig {
 	return &sanitized
 }
 
+func sanitizeDirectProxy(dp *DirectProxyConfig) *DirectProxyConfig {
+	if dp == nil {
+		return &DirectProxyConfig{
+			Name: "MyProxy",
+			Type: "socks5",
+		}
+	}
+	sanitized := *dp
+	sanitized.Name = strings.TrimSpace(sanitized.Name)
+	if sanitized.Name == "" {
+		sanitized.Name = "MyProxy"
+	}
+	sanitized.Type = strings.ToLower(strings.TrimSpace(sanitized.Type))
+	if sanitized.Type != "http" {
+		sanitized.Type = "socks5"
+	}
+	sanitized.Server = strings.TrimSpace(sanitized.Server)
+	sanitized.Username = strings.TrimSpace(sanitized.Username)
+	sanitized.Password = strings.TrimSpace(sanitized.Password)
+	return &sanitized
+}
+
 func sanitizeRuntime(runtime RuntimeConfig) *RuntimeConfig {
 	sanitized := runtime
 	defaults := DefaultConfig().Runtime.Ports
@@ -300,6 +344,10 @@ func sanitizeProxyProfile(profile ProxyProfile) ProxyProfile {
 	sanitized.Name = strings.TrimSpace(sanitized.Name)
 	sanitized.Source = strings.ToLower(strings.TrimSpace(sanitized.Source))
 	if sanitized.Source == "" {
+		sanitized.Source = "url"
+	}
+	// 支持三种来源模式
+	if sanitized.Source != "url" && sanitized.Source != "file" && sanitized.Source != "proxy" {
 		sanitized.Source = "url"
 	}
 	if sanitized.Name == "" {
@@ -338,6 +386,25 @@ func indexOfProfile(profiles []ProxyProfile, name string) int {
 		}
 	}
 	return -1
+}
+
+// IsDirectProxy 返回当前是否使用直接代理服务器模式
+func (p ProxyConfig) IsDirectProxy() bool {
+	return p.Source == "proxy"
+}
+
+// IsConfigured 返回当前代理来源是否已完整配置
+func (p ProxyConfig) IsConfigured() bool {
+	switch p.Source {
+	case "url":
+		return strings.TrimSpace(p.SubscriptionURL) != ""
+	case "file":
+		return strings.TrimSpace(p.ConfigFile) != ""
+	case "proxy":
+		dp := p.DirectProxy
+		return dp != nil && strings.TrimSpace(dp.Server) != "" && dp.Port > 0
+	}
+	return false
 }
 
 func (p ProxyConfig) ActiveProfile() ProxyProfile {

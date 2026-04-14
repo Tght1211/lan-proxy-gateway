@@ -15,6 +15,7 @@ const (
 	simpleWorkspaceNone         simpleWorkspace = ""
 	simpleWorkspaceSubscription simpleWorkspace = "subscription"
 	simpleWorkspaceProxy        simpleWorkspace = "proxy"
+	simpleWorkspaceDirect       simpleWorkspace = "direct"
 	simpleWorkspaceRuntime      simpleWorkspace = "runtime"
 	simpleWorkspaceRules        simpleWorkspace = "rules"
 	simpleWorkspaceExtension    simpleWorkspace = "extension"
@@ -93,12 +94,35 @@ func expandSimpleWorkspaceShortcut(workspace simpleWorkspace, raw string, cfg *c
 			expanded = "proxy source url"
 		case "2":
 			expanded = "proxy source file"
+		case "3":
+			expanded = "proxy source proxy"
 		case "u":
 			expanded = "proxy url"
 		case "f":
 			expanded = "proxy file"
 		case "n":
 			expanded = "proxy name"
+		case "d":
+			expanded = "direct"
+		}
+	case simpleWorkspaceDirect:
+		switch key {
+		case "s":
+			expanded = "direct server"
+		case "o":
+			expanded = "direct port"
+		case "t":
+			nextType := "http"
+			if cfg != nil && cfg.Proxy.DirectProxy != nil && strings.EqualFold(cfg.Proxy.DirectProxy.Type, "http") {
+				nextType = "socks5"
+			}
+			expanded = "direct type " + nextType
+		case "u":
+			expanded = "direct user"
+		case "p":
+			expanded = "direct password"
+		case "n":
+			expanded = "direct name"
 		}
 	case simpleWorkspaceRuntime:
 		switch key {
@@ -257,7 +281,7 @@ func handleSimpleConfigCommand(reader *bufio.Reader, workspace *simpleWorkspace,
 		switch strings.ToLower(args[0]) {
 		case "source":
 			if len(args) < 2 {
-				printSimpleDetail("代理来源工作台", renderProxyWorkspaceLines(loadConfigOrDefault(), errorLine("用法: proxy source url|file")))
+				printSimpleDetail("代理来源工作台", renderProxyWorkspaceLines(loadConfigOrDefault(), errorLine("用法: proxy source url|file|proxy")))
 				return consoleActionNone, true
 			}
 			source, err := normalizeProxySource(args[1])
@@ -265,12 +289,12 @@ func handleSimpleConfigCommand(reader *bufio.Reader, workspace *simpleWorkspace,
 				printSimpleDetail("代理来源工作台", renderProxyWorkspaceLines(loadConfigOrDefault(), errorLine(err.Error())))
 				return consoleActionNone, true
 			}
-			cfg, err := updateProxySource(source)
+			nextCfg, err := updateProxySource(source)
 			if err != nil {
 				printSimpleDetail("代理来源工作台", renderProxyWorkspaceLines(loadConfigOrDefault(), errorLine(err.Error())))
 				return consoleActionNone, true
 			}
-			printSimpleDetail("代理来源工作台", renderProxyWorkspaceLines(cfg, successLine("代理来源已切换为 "+source)))
+			printSimpleDetail("代理来源工作台", renderProxyWorkspaceLines(nextCfg, successLine("代理来源已切换为 "+source)))
 			return consoleActionNone, true
 		case "url":
 			if len(args) < 2 {
@@ -280,12 +304,12 @@ func handleSimpleConfigCommand(reader *bufio.Reader, workspace *simpleWorkspace,
 				}
 				args = append(args, prompt)
 			}
-			cfg, err := updateSubscriptionURL(strings.Join(args[1:], " "))
+			nextCfg, err := updateSubscriptionURL(strings.Join(args[1:], " "))
 			if err != nil {
 				printSimpleDetail("代理来源工作台", renderProxyWorkspaceLines(loadConfigOrDefault(), errorLine(err.Error())))
 				return consoleActionNone, true
 			}
-			printSimpleDetail("代理来源工作台", renderProxyWorkspaceLines(cfg, successLine("订阅链接已更新")))
+			printSimpleDetail("代理来源工作台", renderProxyWorkspaceLines(nextCfg, successLine("订阅链接已更新")))
 			return consoleActionNone, true
 		case "file":
 			if len(args) < 2 {
@@ -295,12 +319,12 @@ func handleSimpleConfigCommand(reader *bufio.Reader, workspace *simpleWorkspace,
 				}
 				args = append(args, prompt)
 			}
-			cfg, err := updateProxyConfigFile(strings.Join(args[1:], " "))
+			nextCfg, err := updateProxyConfigFile(strings.Join(args[1:], " "))
 			if err != nil {
 				printSimpleDetail("代理来源工作台", renderProxyWorkspaceLines(loadConfigOrDefault(), errorLine(err.Error())))
 				return consoleActionNone, true
 			}
-			printSimpleDetail("代理来源工作台", renderProxyWorkspaceLines(cfg, successLine("本地配置文件路径已更新")))
+			printSimpleDetail("代理来源工作台", renderProxyWorkspaceLines(nextCfg, successLine("本地配置文件路径已更新")))
 			return consoleActionNone, true
 		case "name":
 			if len(args) < 2 {
@@ -310,12 +334,125 @@ func handleSimpleConfigCommand(reader *bufio.Reader, workspace *simpleWorkspace,
 				}
 				args = append(args, prompt)
 			}
-			cfg, err := updateSubscriptionName(strings.Join(args[1:], " "))
+			nextCfg, err := updateSubscriptionName(strings.Join(args[1:], " "))
 			if err != nil {
 				printSimpleDetail("代理来源工作台", renderProxyWorkspaceLines(loadConfigOrDefault(), errorLine(err.Error())))
 				return consoleActionNone, true
 			}
-			printSimpleDetail("代理来源工作台", renderProxyWorkspaceLines(cfg, successLine("订阅名称已更新")))
+			printSimpleDetail("代理来源工作台", renderProxyWorkspaceLines(nextCfg, successLine("订阅名称已更新")))
+			return consoleActionNone, true
+		}
+	case "direct":
+		if workspace != nil {
+			*workspace = simpleWorkspaceDirect
+		}
+		if len(args) == 0 {
+			printSimpleDetail("直接代理工作台", renderDirectProxyWorkspaceLines(cfg, ""))
+			return consoleActionNone, true
+		}
+		switch strings.ToLower(args[0]) {
+		case "server":
+			if len(args) < 2 {
+				current := ""
+				if cfg.Proxy.DirectProxy != nil {
+					current = cfg.Proxy.DirectProxy.Server
+				}
+				prompt, ok := promptSimpleValue(reader, "输入代理服务器地址", current, false)
+				if !ok {
+					return consoleActionNone, true
+				}
+				args = append(args, prompt)
+			}
+			nextCfg, err := updateDirectProxyServer(strings.Join(args[1:], " "))
+			if err != nil {
+				printSimpleDetail("直接代理工作台", renderDirectProxyWorkspaceLines(loadConfigOrDefault(), errorLine(err.Error())))
+				return consoleActionNone, true
+			}
+			printSimpleDetail("直接代理工作台", renderDirectProxyWorkspaceLines(nextCfg, successLine("代理服务器已更新")))
+			return consoleActionNone, true
+		case "port":
+			if len(args) < 2 {
+				current := ""
+				if cfg.Proxy.DirectProxy != nil && cfg.Proxy.DirectProxy.Port > 0 {
+					current = fmt.Sprintf("%d", cfg.Proxy.DirectProxy.Port)
+				}
+				prompt, ok := promptSimpleValue(reader, "输入代理端口", current, false)
+				if !ok {
+					return consoleActionNone, true
+				}
+				args = append(args, prompt)
+			}
+			nextCfg, err := updateDirectProxyPort(args[1])
+			if err != nil {
+				printSimpleDetail("直接代理工作台", renderDirectProxyWorkspaceLines(loadConfigOrDefault(), errorLine(err.Error())))
+				return consoleActionNone, true
+			}
+			printSimpleDetail("直接代理工作台", renderDirectProxyWorkspaceLines(nextCfg, successLine("代理端口已更新")))
+			return consoleActionNone, true
+		case "type":
+			if len(args) < 2 {
+				printSimpleDetail("直接代理工作台", renderDirectProxyWorkspaceLines(loadConfigOrDefault(), errorLine("用法: direct type socks5|http")))
+				return consoleActionNone, true
+			}
+			nextCfg, err := updateDirectProxyType(args[1])
+			if err != nil {
+				printSimpleDetail("直接代理工作台", renderDirectProxyWorkspaceLines(loadConfigOrDefault(), errorLine(err.Error())))
+				return consoleActionNone, true
+			}
+			printSimpleDetail("直接代理工作台", renderDirectProxyWorkspaceLines(nextCfg, successLine("协议类型已更新")))
+			return consoleActionNone, true
+		case "user":
+			if len(args) < 2 {
+				current := ""
+				if cfg.Proxy.DirectProxy != nil {
+					current = cfg.Proxy.DirectProxy.Username
+				}
+				prompt, ok := promptSimpleValue(reader, "输入用户名（清空输入 -）", current, true)
+				if !ok {
+					return consoleActionNone, true
+				}
+				args = append(args, prompt)
+			}
+			nextCfg, err := updateDirectProxyUsername(strings.Join(args[1:], " "))
+			if err != nil {
+				printSimpleDetail("直接代理工作台", renderDirectProxyWorkspaceLines(loadConfigOrDefault(), errorLine(err.Error())))
+				return consoleActionNone, true
+			}
+			printSimpleDetail("直接代理工作台", renderDirectProxyWorkspaceLines(nextCfg, successLine("用户名已更新")))
+			return consoleActionNone, true
+		case "password", "pass":
+			if len(args) < 2 {
+				prompt, ok := promptSimpleValue(reader, "输入密码（清空输入 -）", "", true)
+				if !ok {
+					return consoleActionNone, true
+				}
+				args = append(args, prompt)
+			}
+			nextCfg, err := updateDirectProxyPassword(strings.Join(args[1:], " "))
+			if err != nil {
+				printSimpleDetail("直接代理工作台", renderDirectProxyWorkspaceLines(loadConfigOrDefault(), errorLine(err.Error())))
+				return consoleActionNone, true
+			}
+			printSimpleDetail("直接代理工作台", renderDirectProxyWorkspaceLines(nextCfg, successLine("密码已更新")))
+			return consoleActionNone, true
+		case "name":
+			if len(args) < 2 {
+				current := "MyProxy"
+				if cfg.Proxy.DirectProxy != nil {
+					current = cfg.Proxy.DirectProxy.Name
+				}
+				prompt, ok := promptSimpleValue(reader, "输入节点名称", current, false)
+				if !ok {
+					return consoleActionNone, true
+				}
+				args = append(args, prompt)
+			}
+			nextCfg, err := updateDirectProxyName(strings.Join(args[1:], " "))
+			if err != nil {
+				printSimpleDetail("直接代理工作台", renderDirectProxyWorkspaceLines(loadConfigOrDefault(), errorLine(err.Error())))
+				return consoleActionNone, true
+			}
+			printSimpleDetail("直接代理工作台", renderDirectProxyWorkspaceLines(nextCfg, successLine("节点名称已更新")))
 			return consoleActionNone, true
 		}
 	case "source":

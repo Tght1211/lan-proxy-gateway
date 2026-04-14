@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -37,6 +39,9 @@ func runStop(cmd *cobra.Command, args []string) {
 	} else {
 		ui.Info("mihomo 未在运行")
 	}
+	// 清理 PID 文件（供 systemd Type=forking 模式使用）
+	dDir := ensureDataDir()
+	_ = os.Remove(filepath.Join(dDir, "mihomo.pid"))
 
 	// Step 2: Clear firewall
 	ui.Step(2, 3, "清除防火墙规则...")

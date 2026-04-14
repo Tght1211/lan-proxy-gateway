@@ -288,17 +288,23 @@ func runInstall(cmd *cobra.Command, args []string) {
 
 	// Check existing config
 	if _, err := os.Stat(cfgPath); err == nil && cfgPath != ".secret" {
-		if cfg.Proxy.Source == "url" && cfg.Proxy.SubscriptionURL != "" {
+		switch {
+		case cfg.Proxy.Source == "url" && cfg.Proxy.SubscriptionURL != "":
 			ui.Info("已有配置 [订阅链接模式]")
 			url := cfg.Proxy.SubscriptionURL
-			if len(url) > 40 {
-				url = url[:40] + "..."
+			if len(url) > 50 {
+				url = url[:50] + "..."
 			}
 			fmt.Printf("  当前订阅: %s\n", url)
 			needConfig = false
-		} else if cfg.Proxy.Source == "file" && cfg.Proxy.ConfigFile != "" {
+		case cfg.Proxy.Source == "file" && cfg.Proxy.ConfigFile != "":
 			ui.Info("已有配置 [配置文件模式]")
 			fmt.Printf("  配置文件: %s\n", cfg.Proxy.ConfigFile)
+			needConfig = false
+		case cfg.Proxy.Source == "proxy" && cfg.Proxy.DirectProxy != nil && cfg.Proxy.DirectProxy.Server != "":
+			dp := cfg.Proxy.DirectProxy
+			ui.Info("已有配置 [直接代理模式]")
+			fmt.Printf("  代理服务器: %s %s:%d\n", dp.Type, dp.Server, dp.Port)
 			needConfig = false
 		}
 		if !needConfig {
@@ -314,10 +320,11 @@ func runInstall(cmd *cobra.Command, args []string) {
 	if needConfig {
 		fmt.Println()
 		color.New(color.Bold).Println("请选择代理来源:")
-		fmt.Println("  1) 订阅链接（机场提供的 Clash/mihomo 订阅 URL）")
-		fmt.Println("  2) 配置文件（本地 Clash/mihomo YAML 配置文件）")
+		fmt.Println("  1) 订阅链接   — 机场提供的 Clash/mihomo 订阅 URL")
+		fmt.Println("  2) 配置文件   — 本地 Clash/mihomo YAML 配置文件")
+		fmt.Println("  3) 直接代理   — 手动填写 SOCKS5/HTTP 代理服务器（无需订阅）")
 		fmt.Println()
-		fmt.Print("请选择 [1/2]: ")
+		fmt.Print("请选择 [1/2/3]: ")
 		choice, _ := reader.ReadString('\n')
 		choice = strings.TrimSpace(choice)
 
@@ -347,6 +354,68 @@ func runInstall(cmd *cobra.Command, args []string) {
 			if name != "" {
 				cfg.Proxy.SubscriptionName = name
 			}
+
+		case "3":
+			// Direct proxy mode
+			fmt.Println()
+			color.New(color.Bold).Println("直接代理服务器配置")
+			fmt.Printf("  %s\n", color.New(color.Faint).Sprint("适合手头已有 SOCKS5/HTTP 代理，不需要订阅链接"))
+			fmt.Println()
+
+			dp := &config.DirectProxyConfig{}
+
+			fmt.Print("代理服务器地址（域名或 IP）: ")
+			server, _ := reader.ReadString('\n')
+			server = strings.TrimSpace(server)
+			if server == "" {
+				ui.Error("代理服务器地址不能为空")
+				os.Exit(1)
+			}
+			dp.Server = server
+
+			fmt.Print("端口: ")
+			portStr, _ := reader.ReadString('\n')
+			portStr = strings.TrimSpace(portStr)
+			var port int
+			if _, err := fmt.Sscanf(portStr, "%d", &port); err != nil || port <= 0 || port > 65535 {
+				ui.Error("端口无效，请输入 1-65535 之间的整数")
+				os.Exit(1)
+			}
+			dp.Port = port
+
+			fmt.Print("协议类型 [socks5/http，默认 socks5]: ")
+			proxyType, _ := reader.ReadString('\n')
+			proxyType = strings.ToLower(strings.TrimSpace(proxyType))
+			if proxyType == "http" {
+				dp.Type = "http"
+			} else {
+				dp.Type = "socks5"
+			}
+
+			fmt.Print("用户名（无需认证直接回车）: ")
+			username, _ := reader.ReadString('\n')
+			username = strings.TrimSpace(username)
+			if username != "" {
+				dp.Username = username
+				fmt.Print("密码: ")
+				password, _ := reader.ReadString('\n')
+				dp.Password = strings.TrimSpace(password)
+			}
+
+			fmt.Print("节点名称 [MyProxy]: ")
+			nodeName, _ := reader.ReadString('\n')
+			nodeName = strings.TrimSpace(nodeName)
+			if nodeName != "" {
+				dp.Name = nodeName
+			} else {
+				dp.Name = "MyProxy"
+			}
+
+			cfg.Proxy.Source = "proxy"
+			cfg.Proxy.SubscriptionName = "direct"
+			cfg.Proxy.DirectProxy = dp
+
+			ui.Success("直接代理配置完成: %s %s:%d", dp.Type, dp.Server, dp.Port)
 
 		default:
 			// URL mode

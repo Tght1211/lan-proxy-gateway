@@ -116,8 +116,10 @@ func normalizeProxySource(value string) (string, error) {
 		return "url", nil
 	case "file":
 		return "file", nil
+	case "proxy", "direct":
+		return "proxy", nil
 	default:
-		return "", fmt.Errorf("代理来源仅支持 url 或 file")
+		return "", fmt.Errorf("代理来源仅支持 url、file 或 proxy")
 	}
 }
 
@@ -211,14 +213,25 @@ func updateProxySource(source string) (*config.Config, error) {
 		switch source {
 		case "url":
 			if strings.TrimSpace(cfg.Proxy.SubscriptionURL) == "" {
-				return fmt.Errorf("当前还没有订阅链接，先填写订阅链接再切到 url")
+				return fmt.Errorf("还没有设置订阅链接，先用 proxy url <链接> 填写再切换")
 			}
 		case "file":
 			if strings.TrimSpace(cfg.Proxy.ConfigFile) == "" {
-				return fmt.Errorf("当前还没有本地配置文件路径，先填写路径再切到 file")
+				return fmt.Errorf("还没有设置本地配置文件路径，先用 proxy file <路径> 填写再切换")
 			}
+		case "proxy":
+			// proxy 模式下 DirectProxy 为空时也允许切换，启动时会再次校验
+			cfg.Proxy.Source = source
+			cfg.Proxy.SubscriptionName = "direct"
+			if cfg.Proxy.DirectProxy == nil {
+				cfg.Proxy.DirectProxy = &config.DirectProxyConfig{
+					Name: "MyProxy",
+					Type: "socks5",
+				}
+			}
+			return nil
 		default:
-			return fmt.Errorf("代理来源仅支持 url 或 file")
+			return fmt.Errorf("代理来源仅支持 url、file 或 proxy")
 		}
 		cfg.Proxy.Source = source
 		upsertProxyProfile(cfg, activeProxyProfile(cfg), true)
@@ -519,16 +532,27 @@ func renderSubscriptionWorkspaceLines(cfg *config.Config, status string) []strin
 }
 
 func renderProxyWorkspaceLines(cfg *config.Config, status string) []string {
-	profile := activeProxyProfile(cfg)
 	lines := []string{
 		renderSectionTitle("当前代理来源"),
-		"  来源: " + profile.Source,
-		"  订阅名称: " + fallbackText(profile.Name, "subscription"),
+		"  来源模式: " + proxySourceSummary(cfg),
 	}
-	if profile.Source == "url" {
+	switch cfg.Proxy.Source {
+	case "url":
+		profile := activeProxyProfile(cfg)
+		lines = append(lines, "  订阅名称: "+fallbackText(profile.Name, "subscription"))
 		lines = append(lines, "  订阅链接: "+shortText(profile.SubscriptionURL, 72))
-	} else {
+	case "file":
+		profile := activeProxyProfile(cfg)
+		lines = append(lines, "  订阅名称: "+fallbackText(profile.Name, "subscription"))
 		lines = append(lines, "  本地配置: "+fallbackText(profile.ConfigFile, "未设置"))
+	case "proxy":
+		if dp := cfg.Proxy.DirectProxy; dp != nil {
+			lines = append(lines, "  代理服务器: "+fallbackText(dp.Server, "未设置"))
+			if dp.Port > 0 {
+				lines = append(lines, fmt.Sprintf("  端口: %d", dp.Port))
+			}
+			lines = append(lines, "  协议: "+fallbackText(dp.Type, "socks5"))
+		}
 	}
 	if status != "" {
 		lines = append(lines, "", status)
@@ -538,13 +562,30 @@ func renderProxyWorkspaceLines(cfg *config.Config, status string) []string {
 		renderSectionTitle("工作台操作"),
 		"  1 切到订阅链接模式",
 		"  2 切到本地文件模式",
+		"  3 切到直接代理模式",
 		"  U 编辑订阅链接",
 		"  F 编辑本地配置文件路径",
 		"  N 编辑订阅名称",
+		"  D 配置直接代理服务器",
 		"",
 		noteLine("修改会写入 gateway.yaml，重启网关后生效。"),
 	)
 	return lines
+}
+
+func proxySourceSummary(cfg *config.Config) string {
+	switch cfg.Proxy.Source {
+	case "url":
+		return "订阅链接 (url)"
+	case "file":
+		return "本地文件 (file)"
+	case "proxy":
+		if dp := cfg.Proxy.DirectProxy; dp != nil && dp.Server != "" {
+			return fmt.Sprintf("直接代理 (proxy) — %s %s:%d", dp.Type, dp.Server, dp.Port)
+		}
+		return "直接代理 (proxy) — 未完整配置"
+	}
+	return cfg.Proxy.Source
 }
 
 func renderRuntimeWorkspaceLines(cfg *config.Config, status string) []string {
@@ -655,4 +696,125 @@ func maskedSecret(value string) string {
 		return "未设置"
 	}
 	return "已设置"
+}
+
+// ============================================================
+// 直接代理服务器（source: proxy）管理
+// ============================================================
+
+func ensureDirectProxy(cfg *config.Config) *config.DirectProxyConfig {
+	if cfg.Proxy.DirectProxy == nil {
+		cfg.Proxy.DirectProxy = &config.DirectProxyConfig{
+			Name: "MyProxy",
+			Type: "socks5",
+		}
+	}
+	if cfg.Proxy.DirectProxy.Type == "" {
+		cfg.Proxy.DirectProxy.Type = "socks5"
+	}
+	if cfg.Proxy.DirectProxy.Name == "" {
+		cfg.Proxy.DirectProxy.Name = "MyProxy"
+	}
+	return cfg.Proxy.DirectProxy
+}
+
+func updateDirectProxyServer(server string) (*config.Config, error) {
+	return updateConsoleConfig(func(cfg *config.Config) error {
+		server = strings.TrimSpace(server)
+		if server == "" {
+			return fmt.Errorf("代理服务器地址不能为空")
+		}
+		dp := ensureDirectProxy(cfg)
+		dp.Server = server
+		cfg.Proxy.Source = "proxy"
+		return nil
+	})
+}
+
+func updateDirectProxyPort(value string) (*config.Config, error) {
+	return updateConsoleConfig(func(cfg *config.Config) error {
+		value = strings.TrimSpace(value)
+		var port int
+		if _, err := fmt.Sscanf(value, "%d", &port); err != nil || port <= 0 || port > 65535 {
+			return fmt.Errorf("端口必须是 1-65535 之间的整数")
+		}
+		dp := ensureDirectProxy(cfg)
+		dp.Port = port
+		cfg.Proxy.Source = "proxy"
+		return nil
+	})
+}
+
+func updateDirectProxyType(value string) (*config.Config, error) {
+	return updateConsoleConfig(func(cfg *config.Config) error {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value != "socks5" && value != "http" {
+			return fmt.Errorf("协议类型仅支持 socks5 或 http")
+		}
+		dp := ensureDirectProxy(cfg)
+		dp.Type = value
+		cfg.Proxy.Source = "proxy"
+		return nil
+	})
+}
+
+func updateDirectProxyUsername(name string) (*config.Config, error) {
+	return updateConsoleConfig(func(cfg *config.Config) error {
+		dp := ensureDirectProxy(cfg)
+		dp.Username = strings.TrimSpace(name)
+		return nil
+	})
+}
+
+func updateDirectProxyPassword(password string) (*config.Config, error) {
+	return updateConsoleConfig(func(cfg *config.Config) error {
+		dp := ensureDirectProxy(cfg)
+		dp.Password = strings.TrimSpace(password)
+		return nil
+	})
+}
+
+func updateDirectProxyName(name string) (*config.Config, error) {
+	return updateConsoleConfig(func(cfg *config.Config) error {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("节点名称不能为空")
+		}
+		dp := ensureDirectProxy(cfg)
+		dp.Name = name
+		return nil
+	})
+}
+
+func renderDirectProxyWorkspaceLines(cfg *config.Config, status string) []string {
+	dp := ensureDirectProxy(cfg)
+	portStr := "未设置"
+	if dp.Port > 0 {
+		portStr = fmt.Sprintf("%d", dp.Port)
+	}
+	lines := []string{
+		renderSectionTitle("直接代理服务器"),
+		"  节点名称: " + fallbackText(dp.Name, "MyProxy"),
+		"  服务器:   " + fallbackText(dp.Server, "未设置"),
+		"  端口:     " + portStr,
+		"  协议:     " + fallbackText(dp.Type, "socks5"),
+		"  用户名:   " + fallbackText(dp.Username, "未设置（无认证）"),
+		"  密码:     " + maskedSecret(dp.Password),
+	}
+	if status != "" {
+		lines = append(lines, "", status)
+	}
+	lines = append(lines,
+		"",
+		renderSectionTitle("工作台操作"),
+		"  S 编辑代理服务器地址",
+		"  O 编辑代理端口",
+		"  T 切换协议 socks5 / http",
+		"  U 编辑用户名",
+		"  P 编辑密码",
+		"  N 编辑节点名称",
+		"",
+		noteLine("填好服务器和端口后，运行 "+elevatedCmd("restart")+" 即可让局域网设备蹭代理。"),
+	)
+	return lines
 }

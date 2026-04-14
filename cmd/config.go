@@ -92,20 +92,63 @@ func configureProxyMenu(reader *bufio.Reader, cfg *config.Config) {
 	ui.Separator()
 	color.New(color.Bold).Println("代理来源")
 	fmt.Println()
-	color.New(color.Faint).Println("  决定网关从哪里拿节点：机场订阅，或本地 Clash/mihomo 配置文件")
+	color.New(color.Faint).Println("  决定网关从哪里拿节点：")
+	color.New(color.Faint).Println("    url   — 机场提供的订阅链接（推荐）")
+	color.New(color.Faint).Println("    file  — 本地 Clash/mihomo YAML 配置文件")
+	color.New(color.Faint).Println("    proxy — 直接填写 SOCKS5/HTTP 代理服务器（无需订阅）")
 	fmt.Println()
 
-	cfg.Proxy.Source = promptChoice(reader, "代理来源", cfg.Proxy.Source, "url", []string{"url", "file"})
+	cfg.Proxy.Source = promptChoice(reader, "代理来源", cfg.Proxy.Source, "url", []string{"url", "file", "proxy"})
 	switch cfg.Proxy.Source {
 	case "url":
 		cfg.Proxy.SubscriptionURL = prompt(reader, "订阅链接", cfg.Proxy.SubscriptionURL, true)
+		cfg.Proxy.SubscriptionName = prompt(reader, "订阅名称", cfg.Proxy.SubscriptionName, true)
 	case "file":
 		cfg.Proxy.ConfigFile = prompt(reader, "本地配置文件路径", cfg.Proxy.ConfigFile, true)
+		cfg.Proxy.SubscriptionName = prompt(reader, "订阅名称", cfg.Proxy.SubscriptionName, true)
+	case "proxy":
+		configureDirectProxyMenu(reader, cfg)
+		return
 	}
-	cfg.Proxy.SubscriptionName = prompt(reader, "订阅名称", cfg.Proxy.SubscriptionName, true)
 
 	fmt.Println()
 	ui.Success("代理来源配置已更新")
+	waitEnter(reader)
+}
+
+func configureDirectProxyMenu(reader *bufio.Reader, cfg *config.Config) {
+	fmt.Println()
+	color.New(color.Bold).Println("● 直接代理服务器配置")
+	fmt.Println()
+
+	if cfg.Proxy.DirectProxy == nil {
+		cfg.Proxy.DirectProxy = &config.DirectProxyConfig{
+			Name: "MyProxy",
+			Type: "socks5",
+		}
+	}
+	dp := cfg.Proxy.DirectProxy
+
+	dp.Server = prompt(reader, "代理服务器地址", dp.Server, true)
+	portStr := prompt(reader, "端口", fmt.Sprintf("%d", dp.Port), true)
+	var port int
+	fmt.Sscanf(portStr, "%d", &port)
+	if port > 0 {
+		dp.Port = port
+	}
+	dp.Type = promptChoice(reader, "协议类型", dp.Type, "socks5", []string{"socks5", "http"})
+	dp.Username = prompt(reader, "用户名（无认证留空）", dp.Username, false)
+	if dp.Username != "" {
+		dp.Password = prompt(reader, "密码", dp.Password, false)
+	}
+	dp.Name = prompt(reader, "节点名称", dp.Name, true)
+	if dp.Name == "" {
+		dp.Name = "MyProxy"
+	}
+	cfg.Proxy.SubscriptionName = "direct"
+
+	fmt.Println()
+	ui.Success("直接代理配置已更新")
 	waitEnter(reader)
 }
 
@@ -234,12 +277,7 @@ func printCompactConfigSummary(cfg *config.Config) {
 	color.New(color.Bold).Println("  当前配置")
 	fmt.Println()
 	fmt.Printf("  配置文件: %s\n", displayConfigPath())
-	fmt.Printf("  代理来源: %s\n", cfg.Proxy.Source)
-	if cfg.Proxy.Source == "url" {
-		fmt.Printf("  订阅名称: %s\n", cfg.Proxy.SubscriptionName)
-	} else {
-		fmt.Printf("  本地配置: %s\n", cfg.Proxy.ConfigFile)
-	}
+	fmt.Printf("  代理来源: %s\n", proxySourceLabel(cfg))
 	fmt.Printf("  TUN: %s\n", onOff(cfg.Runtime.Tun.Enabled))
 	if cfg.Runtime.Tun.Enabled {
 		fmt.Printf("  本机绕过: %s\n", onOff(cfg.Runtime.Tun.BypassLocal))
@@ -248,6 +286,21 @@ func printCompactConfigSummary(cfg *config.Config) {
 	fmt.Printf("  国内直连: %s\n", enabledText(cfg.Rules.ChinaDirectEnabled()))
 	fmt.Printf("  广告拦截: %s\n", enabledText(cfg.Rules.AdsRejectEnabled()))
 	fmt.Println()
+}
+
+func proxySourceLabel(cfg *config.Config) string {
+	switch cfg.Proxy.Source {
+	case "url":
+		return fmt.Sprintf("订阅链接 (%s)", cfg.Proxy.SubscriptionName)
+	case "file":
+		return fmt.Sprintf("本地文件 (%s)", cfg.Proxy.SubscriptionName)
+	case "proxy":
+		if dp := cfg.Proxy.DirectProxy; dp != nil && dp.Server != "" {
+			return fmt.Sprintf("直接代理 (%s %s:%d)", dp.Type, dp.Server, dp.Port)
+		}
+		return "直接代理 (未配置)"
+	}
+	return cfg.Proxy.Source
 }
 
 func printConfigSummary(cfg *config.Config) {
@@ -259,12 +312,25 @@ func printConfigSummary(cfg *config.Config) {
 	color.New(color.Bold).Println("  配置来源")
 	fmt.Println()
 	fmt.Printf("  配置文件: %s\n", displayConfigPath())
-	fmt.Printf("  代理来源: %s\n", cfg.Proxy.Source)
-	fmt.Printf("  订阅名称: %s\n", cfg.Proxy.SubscriptionName)
-	if cfg.Proxy.Source == "url" {
+	fmt.Printf("  代理来源: %s\n", proxySourceLabel(cfg))
+	switch cfg.Proxy.Source {
+	case "url":
+		fmt.Printf("  订阅名称: %s\n", cfg.Proxy.SubscriptionName)
 		fmt.Printf("  订阅链接: %s\n", shortText(cfg.Proxy.SubscriptionURL, 72))
-	} else {
+	case "file":
+		fmt.Printf("  订阅名称: %s\n", cfg.Proxy.SubscriptionName)
 		fmt.Printf("  本地配置: %s\n", cfg.Proxy.ConfigFile)
+	case "proxy":
+		if dp := cfg.Proxy.DirectProxy; dp != nil {
+			fmt.Printf("  节点名称: %s\n", dp.Name)
+			fmt.Printf("  服务器:   %s\n", dp.Server)
+			fmt.Printf("  端口:     %d\n", dp.Port)
+			fmt.Printf("  协议:     %s\n", dp.Type)
+			if dp.Username != "" {
+				fmt.Printf("  用户名:   %s\n", dp.Username)
+				fmt.Printf("  密码:     %s\n", maskedSecret(dp.Password))
+			}
+		}
 	}
 	fmt.Println()
 

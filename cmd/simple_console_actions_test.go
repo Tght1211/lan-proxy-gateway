@@ -96,7 +96,7 @@ func TestRenderSimpleHelpLinesDefaultIsGrouped(t *testing.T) {
 	if !strings.Contains(got, "日常最常用") || !strings.Contains(got, "工作台提示") || !strings.Contains(got, "补充常用") {
 		t.Fatalf("expected grouped help sections, got %q", got)
 	}
-	if !strings.Contains(got, "nodes") || !strings.Contains(got, "chain mode") || !strings.Contains(got, "subscription") {
+	if !strings.Contains(got, "nodes") || !strings.Contains(got, "proxy") || !strings.Contains(got, "subscription") {
 		t.Fatalf("expected default help to focus on common operations, got %q", got)
 	}
 	if !strings.Contains(got, "help all") {
@@ -111,7 +111,7 @@ func TestRenderSimpleHelpLinesAllIncludesDirectCommands(t *testing.T) {
 	lines := renderSimpleHelpLines(true)
 	got := strings.Join(outputBlock(strings.Join(lines, "\n")), "\n")
 
-	if !strings.Contains(got, "完整命令") || !strings.Contains(got, "直接修改") {
+	if !strings.Contains(got, "完整命令") || !strings.Contains(got, "代理来源") {
 		t.Fatalf("expected detailed help to include direct commands, got %q", got)
 	}
 	if !strings.Contains(got, "subscription add url|file") || !strings.Contains(got, "rule <lan|china|apple|nintendo|global|ads>") || !strings.Contains(got, "chain server|port|type|airport|user|password") {
