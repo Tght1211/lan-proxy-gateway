@@ -165,9 +165,11 @@ func runStartWithMode(simpleMode bool, cmd *cobra.Command, args []string) {
 			runStartWithMode(simpleMode, cmd, args)
 		})
 		return
-	} else {
-		printCompactStartSummary(cfg, dDir, ip, iface)
 	}
+
+	// 非交互模式（systemd / 脚本调用）：只打印基础信息后退出，不做任何网络请求
+	// 网络探测（egress/update）放在交互模式里做，避免 systemd 启动超时
+	printDaemonStartSummary(cfg, ip, iface)
 }
 
 func runInteractiveConsoleLoop(simple bool, logFile, ip, iface, dDir string, restartFn func()) {
@@ -199,6 +201,22 @@ func runInteractiveConsoleLoop(simple bool, logFile, ip, iface, dDir string, res
 			return
 		}
 	}
+}
+
+// printDaemonStartSummary 用于非交互（systemd/脚本）启动时的输出
+// 不做任何网络请求，保证快速退出，避免 systemd TimeoutStartSec 超时
+func printDaemonStartSummary(cfg *config.Config, ip, iface string) {
+	ui.Separator()
+	color.New(color.FgGreen, color.Bold).Println("  Gateway Started")
+	ui.Separator()
+	fmt.Println()
+	fmt.Printf("  共享入口: 网关 / DNS -> %s\n", color.CyanString(ip))
+	fmt.Printf("  运行模式: %s\n", compactModeSummary(cfg))
+	fmt.Printf("  API 面板: http://%s:%d/ui\n", ip, cfg.Runtime.Ports.API)
+	if iface != "" {
+		fmt.Printf("  网络接口: %s\n", iface)
+	}
+	fmt.Println()
 }
 
 func printCompactStartSummary(cfg *config.Config, dDir, ip, iface string) {

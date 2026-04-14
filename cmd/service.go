@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/tght/lan-proxy-gateway/internal/platform"
 	"github.com/tght/lan-proxy-gateway/internal/ui"
@@ -71,6 +72,10 @@ func runServiceInstall(cmd *cobra.Command, args []string) {
 		fmt.Println("  已安装开机自启任务；Windows 启动后会自动拉起网关。")
 	} else {
 		fmt.Println("  服务将在开机时自动启动，崩溃时自动重启。")
+		fmt.Printf("  数据目录: %s\n", dDir)
+		fmt.Println()
+		color.New(color.Faint).Println("  如已安装旧版服务导致自启动失败，请重新安装：")
+		color.New(color.Faint).Println("    sudo gateway service uninstall && sudo gateway service install")
 	}
 	fmt.Println()
 }
