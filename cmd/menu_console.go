@@ -42,6 +42,9 @@ var (
 func runMenuRuntimeConsole(logFile, ip string) consoleAction {
 	reader := bufio.NewReader(os.Stdin)
 
+	// 首次渲染前预热节点缓存，避免显示静态"加载中..."
+	prewarmConsoleNodeCacheWithSpinner(loadConfigOrDefault())
+
 	for {
 		clearInteractiveScreen()
 
@@ -178,6 +181,59 @@ func currentConsoleNodeCached(cfg *config.Config) string {
 	runtimeNodeCache.mu.Unlock()
 	go refreshCurrentConsoleNode(cfg)
 	return "加载中..."
+}
+
+// prewarmConsoleNodeCacheWithSpinner 在首次渲染前同步等待节点信息，显示 spinner 动画。
+// 超过 2.5 秒则跳过，避免长时间阻塞。
+func prewarmConsoleNodeCacheWithSpinner(cfg *config.Config) {
+	runtimeNodeCache.mu.Lock()
+	if runtimeNodeCache.hasValue {
+		runtimeNodeCache.mu.Unlock()
+		return
+	}
+	if !runtimeNodeCache.fetching {
+		runtimeNodeCache.fetching = true
+		runtimeNodeCache.mu.Unlock()
+	} else {
+		runtimeNodeCache.mu.Unlock()
+	}
+
+	done := make(chan string, 1)
+	go func() {
+		done <- currentConsoleNode(cfg)
+	}()
+
+	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	ticker := time.NewTicker(80 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.After(2500 * time.Millisecond)
+
+	i := 0
+	fmt.Printf("\r  %s 正在连接网关...", frames[0])
+	for {
+		select {
+		case value := <-done:
+			fmt.Print("\r\033[K")
+			storeCurrentConsoleNode(value)
+			return
+		case <-timeout:
+			fmt.Print("\r\033[K")
+			// 超时：不覆盖 fetching 状态，让已有 goroutine 继续；
+			// 下次刷新时缓存自然更新。
+			runtimeNodeCache.mu.Lock()
+			if !runtimeNodeCache.hasValue {
+				runtimeNodeCache.value = "未获取"
+				runtimeNodeCache.hasValue = true
+				runtimeNodeCache.updatedAt = time.Now()
+				runtimeNodeCache.fetching = false
+			}
+			runtimeNodeCache.mu.Unlock()
+			return
+		case <-ticker.C:
+			i++
+			fmt.Printf("\r  %s 正在连接网关...", frames[i%len(frames)])
+		}
+	}
 }
 
 func refreshCurrentConsoleNode(cfg *config.Config) {
