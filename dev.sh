@@ -84,7 +84,7 @@ run_core_tests() {
   ensure_go
   prepare_dirs
   info "运行核心包测试..."
-  "$GO_BIN" test ./cmd ./internal/config ./internal/egress ./internal/platform ./internal/rules ./internal/template
+  "$GO_BIN" test ./internal/config/... ./internal/traffic/... ./internal/source/... ./internal/engine/...
 }
 
 run_binary() {
@@ -137,8 +137,19 @@ case "$cmd" in
     fi
     run_binary "$@"
     ;;
-  start|console|stop|restart)
+  start|stop)
     run_with_sudo_if_needed "$cmd" "$@"
+    ;;
+  console)
+    # v2: 直接运行二进制（不带子命令）即进入菜单。
+    build_binary
+    if [ "$(uname -s)" = "Darwin" ] || [ "$(uname -s)" = "Linux" ]; then
+      if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+        warn "进入菜单需要管理员权限，将使用 sudo。"
+        exec sudo "$BINARY_PATH"
+      fi
+    fi
+    exec "$BINARY_PATH"
     ;;
   status)
     run_binary status "$@"

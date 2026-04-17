@@ -1,57 +1,48 @@
-# lan-proxy-gateway - mihomo 配置模板
-# 所有 {{变量}} 会在运行时被替换为实际值
-# 敏感信息（订阅链接）存放在 .secret 文件中，不会进入 Git
-
+# mihomo skeleton rendered by lan-proxy-gateway v2.
+# {{TOKENS}} are replaced at runtime by internal/engine/render.go.
 mixed-port: {{MIXED_PORT}}
 redir-port: {{REDIR_PORT}}
+tproxy-port: 0
 allow-lan: true
-bind-address: '*'
-mode: rule
-log-level: warning
-external-controller: 0.0.0.0:{{API_PORT}}
-external-ui: ui
+bind-address: "*"
+mode: {{MIHOMO_MODE}}
+log-level: {{LOG_LEVEL}}
 ipv6: false
+unified-delay: true
 
-# TUN 模式（gateway tun on/off 控制，默认关闭）
+external-controller: 0.0.0.0:{{API_PORT}}
+external-controller-cors:
+  allow-origins:
+    - "*"
+  allow-private-network: true
+
 {{TUN_CONFIG}}
 
-tcp-concurrent: true
-
-# DNS 设置
 dns:
-  enable: true
-  listen: 0.0.0.0:{{DNS_LISTEN_PORT}}
+  enable: {{DNS_ENABLED}}
+  listen: 0.0.0.0:{{DNS_PORT}}
   ipv6: false
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
   fake-ip-filter:
-    - '*.lan'
-    - '*.local'
-    - '*.localhost'
-  default-nameserver:
-    - 223.5.5.5
-    - 119.29.29.29
+    - "*.lan"
+    - "*.local"
+    - "localhost.ptlogin2.qq.com"
   nameserver:
     - 223.5.5.5
     - 119.29.29.29
+    - https://dns.alidns.com/dns-query
   fallback:
-    - 8.8.8.8
-    - 1.1.1.1
+    - https://1.1.1.1/dns-query
+    - https://8.8.8.8/dns-query
   fallback-filter:
     geoip: true
     geoip-code: CN
 
-# ============================================
-# 代理节点与代理组
-# 由 internal/template 包根据 proxy.source 动态生成：
-#   url/file  → proxy-providers 订阅/文件模式
-#   proxy     → proxies 直接代理服务器模式
-#   degraded  → DIRECT 降级模式
-# ============================================
+profile:
+  store-selected: true
+  store-fake-ip: true
+
 {{PROXY_BLOCK}}
 
-# ============================================
-# 分流规则
-# 由 internal/rules 包按配置动态生成
-# ============================================
 {{RULES_BLOCK}}

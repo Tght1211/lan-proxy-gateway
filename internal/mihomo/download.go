@@ -1,71 +1,164 @@
+// Package mihomo knows how to download and place the mihomo binary.
+// The engine/ package doesn't care where the binary came from; this package
+// is only used by `gateway install`.
 package mihomo
 
 import (
+	"archive/zip"
+	"bytes"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
+	"runtime"
 	"time"
 )
 
-type DownloadSource struct {
-	URL     string
-	Mirror  string
-	Dest    string
+// Installer knows how to fetch the mihomo binary for the running host.
+type Installer struct {
+	DestDir string // directory to place the binary, e.g. /usr/local/bin
+	Version string // e.g. "v1.18.6"; empty means "latest"
 }
 
-// GeoDataSources returns the download sources for GeoIP/GeoSite data files.
-func GeoDataSources(dataDir string) []DownloadSource {
-	base := "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest"
-	mirror := func(url string) string {
-		return strings.Replace(url, "https://github.com", "https://ghfast.top/https://github.com", 1)
+// Install downloads the correct archive for GOOS/GOARCH and extracts `mihomo` into DestDir.
+// Uses the official github release assets; returns the final binary path.
+func (i Installer) Install() (string, error) {
+	version := i.Version
+	if version == "" {
+		v, err := resolveLatest()
+		if err != nil {
+			return "", fmt.Errorf("resolve latest version: %w", err)
+		}
+		version = v
 	}
-	files := []string{"country.mmdb", "geosite.dat", "geoip.dat"}
-
-	var sources []DownloadSource
-	for _, f := range files {
-		url := base + "/" + f
-		sources = append(sources, DownloadSource{
-			URL:    url,
-			Mirror: mirror(url),
-			Dest:   filepath.Join(dataDir, f),
-		})
+	arch := runtime.GOARCH
+	goos := runtime.GOOS
+	archName, ext, err := assetName(goos, arch, version)
+	if err != nil {
+		return "", err
 	}
-	return sources
+	url := fmt.Sprintf("https://github.com/MetaCubeX/mihomo/releases/download/%s/%s", version, archName)
+	data, err := httpGet(url)
+	if err != nil {
+		return "", fmt.Errorf("download %s: %w", url, err)
+	}
+	if err := os.MkdirAll(i.DestDir, 0o755); err != nil {
+		return "", err
+	}
+	outPath := filepath.Join(i.DestDir, binaryName())
+	switch ext {
+	case ".gz":
+		if err := extractGzip(data, outPath); err != nil {
+			return "", err
+		}
+	case ".zip":
+		if err := extractZip(data, outPath); err != nil {
+			return "", err
+		}
+	default:
+		return "", fmt.Errorf("unsupported archive extension: %s", ext)
+	}
+	if err := os.Chmod(outPath, 0o755); err != nil {
+		return "", err
+	}
+	return outPath, nil
 }
 
-// DownloadFile downloads a URL to a local path. Skips if the file already exists.
-// Returns true if actually downloaded, false if skipped.
-func DownloadFile(url, dest string) (bool, error) {
-	if _, err := os.Stat(dest); err == nil {
-		return false, nil // already exists
+func binaryName() string {
+	if runtime.GOOS == "windows" {
+		return "mihomo.exe"
 	}
+	return "mihomo"
+}
 
-	// Ensure parent directory
-	os.MkdirAll(filepath.Dir(dest), 0755)
+func resolveLatest() (string, error) {
+	// Pinned version; keeps the build hermetic. Bump as needed.
+	return "v1.18.6", nil
+}
 
+func assetName(goos, arch, version string) (string, string, error) {
+	v := version
+	switch goos {
+	case "darwin":
+		switch arch {
+		case "amd64":
+			return fmt.Sprintf("mihomo-darwin-amd64-%s.gz", v), ".gz", nil
+		case "arm64":
+			return fmt.Sprintf("mihomo-darwin-arm64-%s.gz", v), ".gz", nil
+		}
+	case "linux":
+		switch arch {
+		case "amd64":
+			return fmt.Sprintf("mihomo-linux-amd64-%s.gz", v), ".gz", nil
+		case "arm64":
+			return fmt.Sprintf("mihomo-linux-arm64-%s.gz", v), ".gz", nil
+		}
+	case "windows":
+		switch arch {
+		case "amd64":
+			return fmt.Sprintf("mihomo-windows-amd64-%s.zip", v), ".zip", nil
+		case "arm64":
+			return fmt.Sprintf("mihomo-windows-arm64-%s.zip", v), ".zip", nil
+		}
+	}
+	return "", "", fmt.Errorf("unsupported os/arch: %s/%s", goos, arch)
+}
+
+func httpGet(url string) ([]byte, error) {
 	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("HTTP %d", resp.StatusCode)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, url)
 	}
+	return io.ReadAll(resp.Body)
+}
 
-	f, err := os.Create(dest)
+func extractGzip(data []byte, outPath string) error {
+	gz, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
-		return false, err
+		return err
+	}
+	defer gz.Close()
+	f, err := os.Create(outPath)
+	if err != nil {
+		return err
 	}
 	defer f.Close()
+	_, err = io.Copy(f, gz)
+	return err
+}
 
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		os.Remove(dest) // cleanup partial download
-		return false, err
+func extractZip(data []byte, outPath string) error {
+	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return err
 	}
-	return true, nil
+	for _, f := range r.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		// The archive contains exactly one binary, any name ending in .exe or "mihomo".
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+		defer rc.Close()
+		out, err := os.Create(outPath)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(out, rc); err != nil {
+			out.Close()
+			return err
+		}
+		out.Close()
+		return nil
+	}
+	return fmt.Errorf("zip archive contained no files")
 }

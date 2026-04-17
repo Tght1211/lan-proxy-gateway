@@ -1,8 +1,9 @@
-package template
+// Package embed exposes the baked-in mihomo skeleton template and rule data.
+package embed
 
 import (
 	_ "embed"
 )
 
 //go:embed template.yaml
-var TemplateContent string
+var Template string

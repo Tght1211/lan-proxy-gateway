@@ -1,67 +1,84 @@
-# lan-proxy-gateway 配置文件
-# 此文件包含敏感信息，请勿提交到 Git
+# lan-proxy-gateway v2 配置文件
+# 所在目录: ~/.config/lan-proxy-gateway/gateway.yaml
+# 首次运行 `gateway` 会自动走 3 步向导生成本文件，通常无需手动编辑。
 
-proxy:
-  # url: 使用订阅链接 | file: 使用本地 Clash/mihomo 配置文件
-  source: url
-  subscription_url: "https://your-subscription-url-here"
-  config_file: /path/to/your/clash-config.yaml
-  subscription_name: subscription
+version: 2
 
+# ========== 【主功能】局域网网关 ==========
+gateway:
+  enabled: true
+  tun:
+    # ⚠ 【必开】TUN 是让 Switch/PS5/Apple TV 改网关后真正走代理的关键。
+    # 关掉后设备改网关只是让流量被【普通路由转发】，照样被墙。
+    # 只在仅给手机/电脑用、且手动填代理服务器=本机IP:7890 的场景才能关。
+    enabled: true
+    bypass_local: false    # true = 本机绕过 TUN（局域网设备仍走网关）
+  dns:
+    # 开 = LAN 设备可以直接把 DNS 指向本机 IP，最省事（推荐）。
+    # 关 = LAN 设备 DNS 要单独设能用的地址（如 114.114.114.114 或路由器）。
+    # 端口 53 已被其它进程（Clash Verge 等）占用时，把这里关掉让对方接管。
+    # TUN 模式下关 DNS 会让 fake-ip 机制失效，劫持可能不完整。
+    enabled: true
+    port: 53
+
+# ========== 【副功能】流量控制 ==========
+traffic:
+  mode: rule               # rule | global | direct
+  adblock: true            # 任何模式下都生效
+  extras:
+    direct:                # 命中时走直连
+      - "DOMAIN-SUFFIX,corp.example.com"
+    proxy:                 # 命中时走代理
+      - "DOMAIN-SUFFIX,example-overseas.com"
+    reject:                # 命中时拦截
+      - "DOMAIN-SUFFIX,annoying-ads.example"
+  rulesets:
+    china_direct: true
+    apple: true
+    nintendo: true
+    global: true
+    lan_direct: true
+
+# ========== 【拓展功能】代理源 ==========
+source:
+  # 五选一:
+  #   external     本机已有代理端口（最简单，推荐已经在跑 Clash Verge 的用户）
+  #   subscription 机场订阅 URL
+  #   file         本地 Clash 配置文件
+  #   remote       远程单点 socks5/http 代理
+  #   none         不配置，所有流量走直连
+  type: external
+
+  external:
+    name: "本机已有代理"
+    server: 127.0.0.1
+    port: 7890
+    kind: http             # http / socks5
+
+  subscription:
+    url: "https://your-subscription-url-here"
+    name: subscription
+
+  file:
+    path: /path/to/clash-config.yaml
+
+  remote:
+    name: MyProxy
+    kind: socks5
+    server: "1.2.3.4"
+    port: 443
+    username: ""
+    password: ""
+
+  script_path: ""          # 可选：goja 后处理脚本
+  profiles: []             # 可选：命名档案切换（M3）
+  current: ""
+
+# ========== Runtime（通常不用改）==========
 runtime:
   ports:
-    mixed: 7890
+    mixed: 7890            # mihomo 监听的混合代理端口
     redir: 7892
-    api: 9090
-    dns: 53
+    api: 9090              # mihomo REST API 端口
   api_secret: ""
-  tun:
-    enabled: false
-    bypass_local: false  # true = 仅局域网设备走网关，本机当前这台电脑尽量保持直连
-
-rules:
-  # 以下开关默认都为 true；只有你需要关闭某一类内置规则时再显式写 false
-  lan_direct: true
-  china_direct: true
-  apple_rules: true
-  nintendo_proxy: true
-  global_proxy: true
-  ads_reject: true
-  extra_direct_rules:
-    - "DOMAIN-SUFFIX,corp.example.com,DIRECT"
-  extra_proxy_rules:
-    - "DOMAIN-SUFFIX,example-overseas.com,Proxy"
-  extra_reject_rules:
-    - "DOMAIN-SUFFIX,annoying-ads.example,REJECT"
-
-# 扩展模式：把相关配置收在一起
-extension:
-  # chains = 内置链式代理 | script = JS 扩展脚本 | 留空 = 不启用扩展
-  mode: ""
-
-  # 扩展脚本（可选，高级用法）
-  # 兼容 Clash Verge Rev 格式，须导出 function main(config)
-  # 只有 mode: script 时才会生效
-  #   ./script-demo.js 是项目自带示例，可参考其结构自行扩展
-  script_path: ./script-demo.js
-
-  # 链式代理：设备 → 机场节点 → 住宅代理 → 目标网站
-  # 配置后 Claude / ChatGPT / Cursor 以纯净住宅 IP 出口，防账号风控
-  # 只有 mode: chains 时才会生效
-  # 运行 gateway chains 进入向导自动填写，或运行 gateway switch extension chains 启用
-  residential_chain:
-    mode: rule              # rule: 仅 AI 服务走住宅代理 | global: 全部流量走住宅代理
-    proxy_server: "1.2.3.4"
-    proxy_port: 443
-    proxy_type: socks5      # socks5 / http
-    proxy_username: "your-username"
-    proxy_password: "your-password"
-    airport_group: Auto     # 机场延迟测速组名，常见: Auto、自动选择、⚡️最低延迟
-    extra_direct_rules:
-      - "DOMAIN-SUFFIX,corp.example.com,DIRECT"
-      - "PROCESS-NAME,DingTalk,DIRECT"
-      - "IP-CIDR,192.168.0.0/16,DIRECT"
-    extra_proxy_rules:
-      - "DOMAIN-SUFFIX,x.com,AI Only"
-      - "DOMAIN-SUFFIX,github.com,AI Only"
-      - "PROCESS-NAME,Telegram,AI Only"
+  log_level: warning

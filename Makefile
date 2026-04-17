@@ -4,10 +4,16 @@ BINARY = gateway
 INSTALL_PATH = /usr/local/bin/$(BINARY)
 DIST_DIR = dist
 
-.PHONY: build install uninstall build-all clean
+.PHONY: build install uninstall build-all clean test test-core
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
+
+test:
+	go test ./...
+
+test-core:
+	go test ./internal/config/... ./internal/traffic/... ./internal/source/... ./internal/engine/...
 
 install: build
 	@echo "安装 $(BINARY) 到 $(INSTALL_PATH)（需要 sudo 密码）..."
@@ -30,11 +36,10 @@ build-all: clean
 	tar -C $(DIST_DIR) -czf $(DIST_DIR)/$(BINARY)-linux-amd64.tar.gz $(BINARY)-linux-amd64
 	tar -C $(DIST_DIR) -czf $(DIST_DIR)/$(BINARY)-linux-arm64.tar.gz $(BINARY)-linux-arm64
 	cd $(DIST_DIR) && zip -q $(BINARY)-windows-amd64.zip $(BINARY)-windows-amd64.exe
-	cp docs/releases/latest.md $(DIST_DIR)/release-notes.md
 	if command -v shasum >/dev/null 2>&1; then \
-		cd $(DIST_DIR) && shasum -a 256 gateway-* release-notes.md > SHA256SUMS; \
+		cd $(DIST_DIR) && shasum -a 256 gateway-* > SHA256SUMS; \
 	else \
-		cd $(DIST_DIR) && sha256sum gateway-* release-notes.md > SHA256SUMS; \
+		cd $(DIST_DIR) && sha256sum gateway-* > SHA256SUMS; \
 	fi
 	@echo "Build complete. Assets in $(DIST_DIR)/"
 

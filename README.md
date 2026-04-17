@@ -1,328 +1,219 @@
-# LAN Proxy Gateway
+# LAN Proxy Gateway v2
 
-[English](README_EN.md)
-
-[![Release](https://img.shields.io/github/v/release/Tght1211/lan-proxy-gateway)](https://github.com/Tght1211/lan-proxy-gateway/releases)
-[![Stars](https://img.shields.io/github/stars/Tght1211/lan-proxy-gateway?style=social)](https://github.com/Tght1211/lan-proxy-gateway/stargazers)
-[![License](https://img.shields.io/github/license/Tght1211/lan-proxy-gateway)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev/)
+[![License](https://img.shields.io/github/license/Tght1211/lan-proxy-gateway)](LICENSE)
 
-把你的电脑变成一台局域网透明代理网关。  
-不刷路由器、不买软路由，`Switch / PS5 / Apple TV / 智能电视 / 手机` 改个网关和 DNS 就能用。
+**把电脑变成局域网代理网关** —— 让不方便装代理 App 的设备（Switch / PS5 / Apple TV / 智能电视 / 手机）改个 "网关 + DNS" 就能科学上网。
 
-这个项目基于 `mihomo`，重点做两件事：
+面向**非编程玩家**：一键安装、3 步配置向导、全程中文菜单。
 
-- `局域网共享`：让不能装代理 App 的设备也能走透明代理
-- `链式代理`：让 Claude / ChatGPT / Codex / Cursor 更适合走住宅出口
+---
 
-> 完全开源，中文优先，主要用于网络与代理技术学习、家庭网关实践和菜单式 CLI 交互探索。
+## 一图看懂
 
-```mermaid
-graph TD
-    Internet(("🌐 互联网"))
-    Router["🔲 路由器<br/>192.168.x.1"]
-    Mac["🖥 网关电脑<br/>运行 mihomo · 192.168.x.2"]
-    Switch["🎮 Switch<br/>YouTube · eShop"]
-    ATV["📺 Apple TV<br/>Netflix · Disney+"]
-    PS5["🕹 PS5 / Xbox<br/>PSN · 联机加速"]
-    TV["📡 智能电视<br/>流媒体"]
-    Phone["📱 手机 / 电脑<br/>正常上网"]
-
-    Internet <--> Router
-    Router <--> Mac
-    Router <--> Phone
-    Mac -- "网关 + DNS 指向网关 IP" --> Switch
-    Mac -- "网关 + DNS 指向网关 IP" --> ATV
-    Mac -- "网关 + DNS 指向网关 IP" --> PS5
-    Mac -- "网关 + DNS 指向网关 IP" --> TV
-
-    style Mac fill:#2d9e2d,color:#fff,stroke:#1a7a1a
-    style Internet fill:#4a90d9,color:#fff,stroke:#2a6ab9
-    style Router fill:#f5a623,color:#fff,stroke:#d4891a
-    style Switch fill:#e60012,color:#fff,stroke:#b8000e
-    style ATV fill:#555,color:#fff,stroke:#333
-    style PS5 fill:#006fcd,color:#fff,stroke:#0055a0
-    style TV fill:#8e44ad,color:#fff,stroke:#6c3483
-    style Phone fill:#95a5a6,color:#fff,stroke:#7f8c8d
+```
+ Switch / PS5 / Apple TV / 智能电视 / 手机
+                  │
+                  │  把网关和 DNS 都改成这台电脑的 IP
+                  ▼
+          🖥  运行 gateway 的电脑
+                  │
+                  │  mihomo（规则 / 广告拦截 / TUN / DNS）
+                  ▼
+          ┌───────────┬───────────┬─────────┐
+          ▼           ▼           ▼         ▼
+       本机代理   订阅节点   Clash 文件   远程代理
+       (7890)    (机场)      (.yaml)     (socks5)
 ```
 
-## 核心能力
+电脑只要能科学上网（比如已经在跑 Clash Verge / Shadowrocket），把它变成网关就能让整屋设备一起享受。
 
-### 1. 局域网透明共享
+---
 
-- 设备改网关和 DNS 即可接入
-- 支持 `Switch / PS5 / Apple TV / 智能电视 / 手机 / 平板`
-- 支持 `TUN` 模式和 `本机绕过代理`
+## 三大能力
 
-### 2. Chains 链式代理
+| 层级 | 能力 | 配置键 |
+|---|---|---|
+| **主功能** | LAN 网关（IP 转发 + TUN + DNS） | `gateway.*` |
+| **副功能** | 流量控制（规则 / 全局 / 直连 + 广告拦截） | `traffic.*` |
+| **拓展** | 代理端口（本机已有 / 订阅 / 文件 / 远程 / 无） | `source.*` |
 
-```text
-你的设备 -> 机场节点 -> 住宅代理 -> Claude / ChatGPT / Codex / Cursor
-```
+---
 
-适合：
+## 安装（3 条命令）
 
-- Claude / ChatGPT 注册和使用
-- Codex / Cursor 等 AI 编程工具
-- 日常流量走机场，AI 流量走住宅出口
-
-### 3. 运行中控制台
-
-默认执行 `gateway start` 会直接进入菜单式 CLI 控制台。启动后就是首页菜单，不需要再像 MySQL 一样先进去再记一堆命令。
-
-菜单里现在可以直接完成这些高频操作：
-
-- 查看运行状态和当前配置摘要
-- 切换策略组与节点，并支持重新测速排序
-- 管理订阅、代理来源和订阅名称
-- 切换 TUN、本机绕过代理和推荐规则
-- 管理 `chains / script / off` 和住宅代理参数
-- 打开完整配置中心
-- 查看设备接入说明、日志和升级提示
-
-交互方式：
-
-- 启动后直接显示首页菜单，按编号进入子菜单
-- 每个工作台都带当前摘要和固定菜单，不依赖隐藏命令
-- `gateway console` 可以随时重新进入同一套菜单控制台
-- 旧版 `--tui` 入口已移除，传入时会直接提示改用默认控制台
-
-### 4. 规则系统
-
-默认内置：
-
-- 局域网和保留地址直连
-- 国内常见服务直连
-- Apple / Nintendo 相关规则
-- 广告与跟踪域名拦截
-- 国外网站和 AI 服务代理
-
-## 3 分钟快速开始
-
-### 第 1 步：安装
-
-先把 `gateway` 装到本机。中国大陆网络优先用 CDN 入口。
-
-#### macOS / Linux
-
-推荐：
+### 编译
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/Tght1211/lan-proxy-gateway@main/install.sh | bash
+git clone https://github.com/Tght1211/lan-proxy-gateway
+cd lan-proxy-gateway
+make install                 # Mac/Linux：需要 sudo
 ```
 
-备用：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.sh | bash
-```
-
-#### Windows PowerShell
-
-推荐：
+Windows：
 
 ```powershell
-irm https://cdn.jsdelivr.net/gh/Tght1211/lan-proxy-gateway@main/install.ps1 | iex
+go build -ldflags "-s -w" -o gateway.exe .
+# 把 gateway.exe 放到 PATH 下
 ```
 
-备用：
-
-```powershell
-irm https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.ps1 | iex
-```
-
-如果你所在网络直连 GitHub 不稳定，也可以手动指定镜像：
+### 首次运行
 
 ```bash
-GITHUB_MIRROR=https://hub.gitmirror.com/ bash install.sh
+sudo gateway install         # 下载 mihomo + 打开 3 步向导
 ```
 
-安装脚本现在会优先快速探测可用下载源，并在持续低速时自动切换候选源；如果你所在网络环境比较特殊，手动指定镜像仍然是最稳的方式。
+向导会依次问你：
 
-### 第 2 步：初始化配置
+```
+步骤 1 / 3  局域网网关
+  启用 LAN 共享网关？(Y/n)
+  启用 TUN？           (Y/n)
+  启用 DNS 代理？      (Y/n)
+
+步骤 2 / 3  流量控制模式
+  1) 规则模式 (推荐)    国内直连 + 国外代理
+  2) 全局模式
+  3) 直连模式
+  开启广告拦截？ (Y/n)
+
+步骤 3 / 3  代理端口来源
+  1) 本机已有代理端口   ← 已经在跑 Clash Verge 的用户选这个
+  2) 订阅链接
+  3) Clash 配置文件
+  4) 远程单点代理
+  5) 暂不配置
+```
+
+向导结束会把配置写到 `~/.config/lan-proxy-gateway/gateway.yaml`（Windows: `%APPDATA%\lan-proxy-gateway\gateway.yaml`），并打印出设备接入指引。
+
+### 启动
 
 ```bash
-gateway install
+sudo gateway                 # 进入主菜单
+sudo gateway start           # 后台启动（供开机自启用）
+sudo gateway stop
+sudo gateway status
 ```
 
-安装向导会依次完成：
-
-1. 自动下载官方 `mihomo` 内核（Windows x86_64 会下载官方 zip 并安装为本地 `mihomo.exe`）
-2. 录入订阅链接或本地配置文件
-3. 生成 `gateway.yaml`
-
-如果你只想最快跑起来，按提示填完这三个信息就够了：
-
-- 代理来源
-- 订阅链接或本地配置文件
-- 订阅名称
-
-### 第 3 步：启动网关
-
-**macOS / Linux：**
-
-```bash
-sudo gateway start
-```
-
-**Windows（需以管理员身份运行终端）：**
-
-```powershell
-gateway start
-```
-
-补充说明：
-
-- `gateway update` 在 Windows 下会走后台替换流程，当前 `.exe` 退出后自动完成更新并重新启动网关
-- `gateway service install` 在 Windows 下会安装开机自启任务，不需要把 CLI 伪装成 `sc.exe` 服务
-
-默认模式下，启动成功后会直接进入菜单式 CLI 控制台，终端会显示：
-
-- 当前节点、代理来源、TUN 和扩展模式摘要
-- 节点 / 订阅 / 网络 / 规则 / 扩展 / 配置中心等菜单入口
-- 日志、设备接入说明和升级提示入口
-
-这套控制台优先解决“直接选菜单就能改配置”，而不是要求你记住一批运行中命令。
-
-这一步里最重要的是记住你的局域网 IP。
-
-如果你退出了控制台，之后可以随时重新进入：
-
-```bash
-# macOS / Linux
-sudo gateway console
-
-# Windows（管理员终端）
-gateway console
-```
-
-### 第 4 步：让其他设备接入
+### 让其他设备接入
 
 把设备的：
 
-- `网关 (Gateway)` 改成你电脑的局域网 IP
-- `DNS` 改成同一个 IP
+- `网关 (Gateway)` 改成 **运行 gateway 的电脑的局域网 IP**
+- `DNS 服务器` 改成 **同一个 IP**
 
-如果你只想先验证一次，优先拿这几类设备测试：
+保存后重连网络即可。
 
-- [iPhone / Android](docs/phone-setup.md)
-- [Nintendo Switch](docs/switch-setup.md)
-- [PS5](docs/ps5-setup.md)
-- [Apple TV](docs/appletv-setup.md)
-- [智能电视](docs/tv-setup.md)
+> **⚠ 前提一：本机 TUN 必须开启**
+>
+> 光改网关让流量"流经电脑"还不够 —— 电脑默认只做**普通路由转发**，
+> Switch/PS5 照样被墙。**TUN 才是劫持并让流量走代理的关键**。
+>
+> 因此本项目 TUN 默认开启，不建议关闭。
+> 只有当你**仅给手机/电脑用、并愿意手动填代理服务器 = 本机IP:7890**
+> 时才能关 TUN —— 这种场景下 Switch/PS5 是接入不了代理的。
+>
+> **⚠ 前提二：DNS 代理的处理**
+>
+> | 场景 | 设备的 DNS 设置 |
+> |---|---|
+> | 本机 DNS 代理【开】（默认） | 指向本机 IP（省事） |
+> | 本机 DNS 代理【关】（比如 Clash Verge 已占 :53） | 可继续指向本机 IP（由占用方回答），或改成 `114.114.114.114` |
+> | 本机 DNS 代理关 **且** 本机 :53 没人接管 | 设备必须单独设一个能用的 DNS，否则**完全断网** |
+>
+> TUN 模式下关 DNS 还会让 fake-ip 机制失效，劫持可能不完整。如不确定就保持默认开着。
 
-### 第 5 步：确认是否成功
+---
 
-```bash
-gateway status
-```
+## 完整命令
 
-你会看到：
+所有操作都可以在**主菜单**里完成，不用记命令。下面是无人值守场景用的 cobra 命令：
 
-- 当前节点
-- 入口节点
-- 普通出口
-- 住宅出口（如果开启了 chains）
-
-## 常用命令
-
-> Windows 用户：以下带 `sudo` 的命令需在**管理员终端**中去掉 `sudo` 运行，例如 `sudo gateway start` → `gateway start`。
-
-| 命令 | 说明 |
+| 命令 | 作用 |
 |---|---|
-| `gateway install` | 初始化向导 |
-| `gateway config` | 交互式配置中心 |
-| `sudo gateway start` | 启动网关并进入菜单式 CLI 控制台 |
-| `sudo gateway console` | 不重启网关，重新进入菜单式 CLI 控制台 |
-| `gateway tun on` | 开启 TUN 透明代理 |
-| `gateway tun off` | 关闭 TUN 透明代理 |
-| `gateway status` | 查看运行状态和出口网络 |
-| `gateway chains` | 链式代理向导 |
-| `gateway switch` | 切换代理来源和扩展模式 |
-| `gateway skill` | 查看 AI skill 信息 |
-| `gateway permission install` | 安装免密控制权限（仅 macOS/Linux） |
-| `sudo gateway service install` | 安装开机自启（Windows 下底层使用计划任务） |
-| `sudo gateway update` | 升级到最新版 |
+| `gateway` | 进入主菜单（或 3 步向导） |
+| `gateway install` | 下载 mihomo + 首次向导 |
+| `gateway start` | 非交互启动（供系统服务调用） |
+| `gateway stop` | 停止 |
+| `gateway status` | 一次性输出当前状态 |
+| `gateway service install` | 安装为开机自启（launchd / systemd / schtasks） |
+| `gateway service uninstall` | 卸载系统服务 |
+| `gateway service status` | 查看服务状态 |
 
-完整命令见 [docs/commands.md](docs/commands.md)。
+---
 
-## 本地开发
+## 跨平台支持
 
-仓库根目录现在带了一个本地开发脚本 `dev.sh`，用来统一处理编译、测试和本地运行。
-适合 `macOS / Linux` 终端环境：
+- **macOS** (主要测试平台): `sysctl` 开启 IP 转发，launchd 服务。
+- **Linux**: `/proc/sys/net/ipv4/ip_forward` + iptables MASQUERADE，systemd 单元。
+- **Windows**: 注册表 `IPEnableRouter` + 计划任务开机自启。`mihomo` 的 TUN 模式会创建 `Mihomo` 虚拟网卡接管路由。
+
+三平台代码都能编译通过。目前**仅在 macOS 做过完整功能测试**；Linux / Windows 通过了编译和单元测试，但建议先在小规模局域网验证再推广，遇到问题请开 issue。
+
+---
+
+## 配置文件
+
+完整示例见 [`gateway.example.yaml`](gateway.example.yaml)。最小示例：
+
+```yaml
+version: 2
+gateway:
+  enabled: true
+  tun: { enabled: true, bypass_local: false }
+  dns: { enabled: true, port: 53 }
+traffic:
+  mode: rule
+  adblock: true
+  rulesets:
+    china_direct: true
+    apple: true
+    nintendo: true
+    global: true
+    lan_direct: true
+source:
+  type: external
+  external:
+    server: 127.0.0.1
+    port: 7890
+    kind: http
+runtime:
+  ports: { mixed: 7890, redir: 7892, api: 9090 }
+```
+
+v1 配置会在首次加载时自动升级到 v2 并打印迁移报告。
+
+---
+
+## 开发
 
 ```bash
-./dev.sh build
-./dev.sh test
-./dev.sh test-core
-./dev.sh run -- --version
-./dev.sh start
+make build        # 编译当前平台
+make test         # 跑全部单元测试
+make test-core    # 仅跑核心包测试（更快）
+make build-all    # darwin/linux/windows 交叉编译
 ```
 
-说明：
+目录结构（v2）：
 
-- `build` 会把开发二进制编译到 `.tmp/gateway-dev`
-- `test` 跑 `go test ./...`
-- `test-core` 只跑这次日常最常用的一组核心包
-- `run -- <参数>` 会先编译，再把参数原样传给本地二进制
-- `start / console / stop / restart` 会先本地编译，再在运行阶段按需使用 `sudo`
-- Go build cache 默认放在仓库内 `.cache/go-build`，避免本机全局缓存权限把开发流程卡住
-
-## 工作原理
-
-```mermaid
-flowchart LR
-    Device["📱 LAN 设备"] --> Mac["🖥 网关电脑<br/>IP 转发"]
-    Mac --> TUN["mihomo<br/>TUN 虚拟网卡"]
-    TUN --> Rules{"智能分流"}
-    Rules -- "国内流量" --> Direct["🇨🇳 直连"]
-    Rules -- "国外流量" --> Proxy["🌐 代理节点"]
-    Rules -- "广告" --> Block["🚫 拦截"]
-
-    style Mac fill:#2d9e2d,color:#fff,stroke:#1a7a1a
-    style TUN fill:#3498db,color:#fff,stroke:#2980b9
-    style Rules fill:#f39c12,color:#fff,stroke:#d68910
-    style Direct fill:#27ae60,color:#fff,stroke:#1e8449
-    style Proxy fill:#8e44ad,color:#fff,stroke:#6c3483
-    style Block fill:#e74c3c,color:#fff,stroke:#c0392b
+```
+cmd/              cobra 入口（5 个命令）
+internal/
+  app/            统一门面：console + cobra 都调这里
+  gateway/        【主】LAN 网关
+  traffic/        【副】流量控制 + 内置规则集
+  source/         【拓展】代理源（external/subscription/file/remote/none）
+  engine/         mihomo 进程 + 渲染 + REST API
+  config/         v2 schema + v1 迁移
+  platform/       跨平台（darwin/linux/windows）
+  console/        菜单式交互
+  mihomo/         下载 mihomo 内核
+embed/            mihomo yaml 模板
+legacy/v1/        v1 源码留档（不参与编译）
 ```
 
-1. 电脑开启 IP 转发，充当局域网网关
-2. `mihomo` 以 TUN 模式接管流量
-3. 规则系统决定直连、代理或拦截
-4. chains 模式下，AI 流量还能继续接到住宅出口
-
-## 文档导航
-
-- [命令总览](docs/commands.md)
-- [进阶配置](docs/advanced.md)
-- [常见问题](docs/faq.md)
-- [版本规划](docs/versioning.md)
-- [Switch 配置](docs/switch-setup.md)
-- [PS5 配置](docs/ps5-setup.md)
-- [Apple TV 配置](docs/appletv-setup.md)
-- [手机配置](docs/phone-setup.md)
-
-## 和 Clash Verge 的“允许局域网连接”有什么区别
-
-| 对比项 | Clash Verge 局域网代理 | LAN Proxy Gateway |
-|---|---|---|
-| 代理层级 | 应用层代理 | 网络层透明代理 |
-| 设备配置方式 | 填代理服务器地址 | 改网关和 DNS |
-| Switch / Apple TV / PS5 | 部分场景受限 | 更适合整机透明接管 |
-| App 是否感知代理 | 往往能感知 | 更接近真实网关 |
-| 典型使用方式 | 单设备代理 | 全屋设备共享 |
-
-## 开源说明
-
-本项目完全开源，主要用于：
-
-- 网络与代理技术学习
-- 家庭局域网网关实践
-- TUN / 透明代理 / 分流规则研究
-- AI 客户端与菜单式 CLI 交互设计探索
-
-请在你所在地区法律法规允许的前提下使用。
+---
 
 ## License
 
