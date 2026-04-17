@@ -104,7 +104,8 @@ $Release = Invoke-RestMethod -Uri $ApiUrl -Headers $RequestHeaders
 $Tag = $Release.tag_name
 Write-Info "Latest release: $Tag"
 
-$Asset = "gateway-windows-amd64.exe"
+# v3.0.0 起资产名：gateway-<tag>-windows-amd64.zip（压缩包里含 gateway-<tag>-windows-amd64.exe）
+$Asset = "gateway-$Tag-windows-amd64.zip"
 $Url = "${GHMirror}https://github.com/$Repo/releases/download/$Tag/$Asset"
 $AssetUrls = @($Url)
 if (-not $GHMirror) {
@@ -120,9 +121,28 @@ if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
 
-$Target = Join-Path $InstallDir $Binary
-Write-Info "Downloading $Asset..."
-Download-WithFallback -Urls $AssetUrls -OutFile $Target
+$TmpDir = Join-Path $env:TEMP ("gateway-install-" + [Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $TmpDir -Force | Out-Null
+$ZipPath = Join-Path $TmpDir $Asset
+
+try {
+    Write-Info "Downloading $Asset..."
+    Download-WithFallback -Urls $AssetUrls -OutFile $ZipPath
+
+    Write-Info "Extracting..."
+    Expand-Archive -Path $ZipPath -DestinationPath $TmpDir -Force
+    $ExtractedExe = Join-Path $TmpDir "gateway-$Tag-windows-amd64.exe"
+    if (-not (Test-Path $ExtractedExe)) {
+        throw "Extracted binary not found: $ExtractedExe"
+    }
+
+    $Target = Join-Path $InstallDir $Binary
+    Move-Item -Path $ExtractedExe -Destination $Target -Force
+} finally {
+    if (Test-Path $TmpDir) {
+        Remove-Item -Recurse -Force $TmpDir -ErrorAction SilentlyContinue
+    }
+}
 
 $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if (-not $UserPath) {
@@ -141,8 +161,10 @@ Write-Host ""
 Write-Info "Install complete."
 Write-Info "Installed to: $Target"
 Write-Host ""
-Write-Info "You can run these commands in this same PowerShell window:"
-Write-Host "  gateway install    # run the setup wizard"
-Write-Host "  gateway config     # open the config center"
-Write-Host "  gateway start      # start the gateway (run PowerShell as Administrator)"
-Write-Host "  gateway status     # inspect status and egress network"
+Write-Info "下一步（管理员 PowerShell）:"
+Write-Host "  gateway install    # 下载 mihomo 内核 + 配置向导 + 启动"
+Write-Host "  gateway            # 以后进主菜单"
+Write-Host "  gateway status     # 非交互查看状态"
+Write-Host ""
+Write-Info "开机自启:"
+Write-Host "  gateway service install   # 注册为计划任务"

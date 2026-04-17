@@ -148,8 +148,6 @@ else
   fi
 fi
 
-ASSET="${BINARY}-${OS}-${ARCH}"
-
 info "检测到系统: ${OS}/${ARCH}"
 info "安装目录: ${INSTALL_DIR}"
 info "正在获取最新版本..."
@@ -164,22 +162,30 @@ rm -f "$API_TMPFILE"
 
 info "最新版本: ${TAG}"
 
-# --- download binary ---
-TMPFILE=$(mktemp)
-trap 'rm -f "$TMPFILE"' EXIT
+# --- 资产名：v3.0.0 起统一使用 gateway-<tag>-<os>-<arch>.tar.gz（含版本号 + 压缩包）---
+ASSET="${BINARY}-${TAG}-${OS}-${ARCH}.tar.gz"
+
+# --- download tarball ---
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+TARBALL="$TMPDIR/$ASSET"
 
 info "下载 ${ASSET}..."
-download_with_candidates "https://github.com/${REPO}/releases/download/${TAG}/${ASSET}" "$TMPFILE" --progress
+download_with_candidates "https://github.com/${REPO}/releases/download/${TAG}/${ASSET}" "$TARBALL" --progress
 
-chmod +x "$TMPFILE"
+info "解压..."
+tar -C "$TMPDIR" -xzf "$TARBALL"
+EXTRACTED="$TMPDIR/${BINARY}-${TAG}-${OS}-${ARCH}"
+[ -f "$EXTRACTED" ] || error "解压后找不到二进制：$EXTRACTED"
+chmod +x "$EXTRACTED"
 
 # --- install ---
 TARGET="${INSTALL_DIR}/${BINARY}"
 if [ -w "$INSTALL_DIR" ]; then
-  mv "$TMPFILE" "$TARGET"
+  mv "$EXTRACTED" "$TARGET"
 else
   info "需要 sudo 权限安装到 ${INSTALL_DIR}"
-  sudo mv "$TMPFILE" "$TARGET"
+  sudo mv "$EXTRACTED" "$TARGET"
 fi
 
 # --- check PATH ---
@@ -196,10 +202,10 @@ info ""
 info "安装成功! 🎉"
 info "版本: $("$TARGET" --version 2>/dev/null || echo "${TAG}")"
 info ""
-info "快速开始:"
-info "  gateway install             # 安装向导"
-info "  gateway config              # 打开配置中心"
-info "  sudo gateway start          # 启动网关并进入默认 simple 模式"
-info "  sudo gateway start --tui    # 显式进入 TUI 工作台"
-info "  gateway status              # 查看状态和出口网络"
-info "  sudo gateway permission install  # 可选: 配置免密控制"
+info "下一步:"
+info "  sudo gateway install     # 下载 mihomo 内核 + 配置向导 + 自动启动"
+info "  sudo gateway             # 以后进主菜单（状态 / 切换模式 / 换代理源）"
+info "  gateway status           # 非交互查看状态"
+info ""
+info "开机自启:"
+info "  sudo gateway service install    # launchd (mac) / systemd (linux)"
