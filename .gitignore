@@ -28,6 +28,8 @@ cache.db
 # 日志
 *.log
 /tmp/
+.tmp/
+.cache/
 
 # macOS
 .DS_Store
