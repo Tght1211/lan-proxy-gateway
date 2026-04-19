@@ -104,8 +104,8 @@ $Release = Invoke-RestMethod -Uri $ApiUrl -Headers $RequestHeaders
 $Tag = $Release.tag_name
 Write-Info "Latest release: $Tag"
 
-# v3.0.0 起资产名：gateway-<tag>-windows-amd64.zip（压缩包里含 gateway-<tag>-windows-amd64.exe）
-$Asset = "gateway-$Tag-windows-amd64.zip"
+# 资产名：与 Makefile build-all 输出一致：gateway-windows-amd64.zip（压缩包里含 gateway-windows-amd64.exe）
+$Asset = "gateway-windows-amd64.zip"
 $Url = "${GHMirror}https://github.com/$Repo/releases/download/$Tag/$Asset"
 $AssetUrls = @($Url)
 if (-not $GHMirror) {
@@ -131,7 +131,7 @@ try {
 
     Write-Info "Extracting..."
     Expand-Archive -Path $ZipPath -DestinationPath $TmpDir -Force
-    $ExtractedExe = Join-Path $TmpDir "gateway-$Tag-windows-amd64.exe"
+    $ExtractedExe = Join-Path $TmpDir "gateway-windows-amd64.exe"
     if (-not (Test-Path $ExtractedExe)) {
         throw "Extracted binary not found: $ExtractedExe"
     }

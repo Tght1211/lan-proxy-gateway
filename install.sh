@@ -162,8 +162,8 @@ rm -f "$API_TMPFILE"
 
 info "最新版本: ${TAG}"
 
-# --- 资产名：v3.0.0 起统一使用 gateway-<tag>-<os>-<arch>.tar.gz（含版本号 + 压缩包）---
-ASSET="${BINARY}-${TAG}-${OS}-${ARCH}.tar.gz"
+# --- 资产名：与 Makefile build-all 输出一致：gateway-<os>-<arch>.tar.gz ---
+ASSET="${BINARY}-${OS}-${ARCH}.tar.gz"
 
 # --- download tarball ---
 TMPDIR=$(mktemp -d)
@@ -175,7 +175,7 @@ download_with_candidates "https://github.com/${REPO}/releases/download/${TAG}/${
 
 info "解压..."
 tar -C "$TMPDIR" -xzf "$TARBALL"
-EXTRACTED="$TMPDIR/${BINARY}-${TAG}-${OS}-${ARCH}"
+EXTRACTED="$TMPDIR/${BINARY}-${OS}-${ARCH}"
 [ -f "$EXTRACTED" ] || error "解压后找不到二进制：$EXTRACTED"
 chmod +x "$EXTRACTED"
 
