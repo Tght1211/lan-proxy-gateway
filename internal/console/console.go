@@ -37,14 +37,17 @@ import (
 // Run is the entry point. It blocks until the user exits.
 func Run(ctx context.Context, a *app.App) error {
 	c := newConsole(a, os.Stdin, os.Stdout)
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	c.startInputLoop(runCtx)
 	if !a.Configured() {
-		if err := c.onboard(ctx); err != nil {
+		if err := c.onboard(runCtx); err != nil {
 			return err
 		}
 	}
 	// 拉起代理源健康 supervisor：mihomo 在跑时自动体检，挂了切 direct 保命。
-	a.StartSupervisor(ctx)
-	return c.main(ctx)
+	a.StartSupervisor(runCtx)
+	return c.main(runCtx)
 }
 
 // RunOnboarding runs only the 3-step wizard (no main menu). Used by `install`
@@ -58,10 +61,51 @@ type consoleUI struct {
 	app *app.App
 	in  *bufio.Reader
 	out io.Writer
+
+	// inputCh 是 stdin 的异步 channel：一个后台 goroutine 长期 ReadString 推这里。
+	// 打开后所有交互（prompt/ask/yesNo/pause/tail）都从 channel 读，不再直接碰
+	// c.in。这样主菜单可以 select ticker + inputCh，实现「后台告警变化立即重绘」。
+	//
+	// inputCh 在 Run 入口启动，console 退出时 close。没启动的场景（测试等）
+	// 会 fallback 回 c.in.ReadString 同步读。
+	inputCh chan string
 }
 
 func newConsole(a *app.App, in io.Reader, out io.Writer) *consoleUI {
 	return &consoleUI{app: a, in: bufio.NewReader(in), out: out}
+}
+
+// startInputLoop 启一个后台 goroutine 把 stdin 每行喂给 c.inputCh。
+// ctx 取消时关 channel 让读取方退出。
+func (c *consoleUI) startInputLoop(ctx context.Context) {
+	c.inputCh = make(chan string, 1)
+	go func() {
+		defer close(c.inputCh)
+		for {
+			line, err := c.in.ReadString('\n')
+			if err != nil {
+				return
+			}
+			select {
+			case c.inputCh <- strings.TrimRight(line, "\r\n"):
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
+// readLine 从 inputCh 读一行；inputCh 没开的话回退到同步读 c.in。
+func (c *consoleUI) readLine() string {
+	if c.inputCh != nil {
+		line, ok := <-c.inputCh
+		if !ok {
+			return ""
+		}
+		return strings.TrimSpace(line)
+	}
+	line, _ := c.in.ReadString('\n')
+	return strings.TrimSpace(line)
 }
 
 // --- Rendering helpers ---
@@ -84,8 +128,7 @@ func (c *consoleUI) banner(title string) {
 
 func (c *consoleUI) prompt(label string) string {
 	fmt.Fprintf(c.out, "%s", label)
-	line, _ := c.in.ReadString('\n')
-	return strings.TrimSpace(line)
+	return c.readLine()
 }
 
 func (c *consoleUI) ask(label, def string) string {
@@ -94,8 +137,7 @@ func (c *consoleUI) ask(label, def string) string {
 	} else {
 		fmt.Fprintf(c.out, "%s: ", label)
 	}
-	line, _ := c.in.ReadString('\n')
-	line = strings.TrimSpace(line)
+	line := c.readLine()
 	if line == "" {
 		return def
 	}
@@ -259,39 +301,84 @@ func (c *consoleUI) configureFile() {
 // --- Main menu ---
 
 func (c *consoleUI) main(ctx context.Context) error {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
 	for {
-		c.banner("LAN 代理网关")
-		c.printStatus()
-		fmt.Fprintln(c.out)
-		fmt.Fprintln(c.out, "  1  设备接入指引        Switch / PS5 / 手机怎么连到这里")
-		fmt.Fprintln(c.out, "  2  流量控制            模式 / TUN / 广告拦截 / 高级")
-		fmt.Fprintln(c.out, "  3  换代理源")
-		fmt.Fprintln(c.out, "  4  启动 / 重启 / 停止")
-		fmt.Fprintln(c.out, "  5  看日志")
-		fmt.Fprintln(c.out, "  6  关闭 gateway 并退出（停 mihomo）")
-		fmt.Fprintln(c.out, "  Q  退出控制台（mihomo 留在后台继续跑）")
-		choice := strings.ToLower(c.prompt("\n请选择：> "))
-		switch choice {
-		case "1":
-			c.screenGateway()
-		case "2":
-			c.screenTraffic(ctx)
-		case "3":
-			c.screenSource(ctx)
-		case "4":
-			c.screenLifecycle(ctx)
-		case "5":
-			c.screenLogs()
-		case "6":
-			if c.shutdownGateway() {
+		c.drawMainMenu()
+		// 记录当前告警态；后台 supervisor 改变它时要触发重绘。
+		lastFallback := c.app.Health().FallbackActive
+		lastErr := c.app.Health().LastError
+
+	waitInput:
+		for {
+			select {
+			case line, ok := <-c.inputCh:
+				if !ok {
+					return nil // stdin 断了（EOF / Ctrl-D）
+				}
+				choice := strings.ToLower(strings.TrimSpace(line))
+				switch choice {
+				case "":
+					// 用户直接回车：主动刷新主菜单
+					break waitInput
+				case "1":
+					c.screenGateway()
+					break waitInput
+				case "2":
+					c.screenTraffic(ctx)
+					break waitInput
+				case "3":
+					c.screenSource(ctx)
+					break waitInput
+				case "4":
+					c.screenLifecycle(ctx)
+					break waitInput
+				case "5":
+					c.screenLogs()
+					break waitInput
+				case "6":
+					if c.shutdownGateway() {
+						return nil
+					}
+					break waitInput
+				case "q", "exit", "quit":
+					return nil
+				default:
+					warnC.Fprintln(c.out, "无效选项（回车刷新，数字=子菜单，Q=退出）。")
+					fmt.Fprint(c.out, "请选择：> ")
+				}
+
+			case <-ticker.C:
+				// 后台 health 发生变化 → 主菜单立即重绘，
+				// 告警能在首页第一时间被看到。
+				h := c.app.Health()
+				if h.FallbackActive != lastFallback || h.LastError != lastErr {
+					fmt.Fprintln(c.out)
+					dimC.Fprintln(c.out, "  （检测到代理源状态变化，刷新主菜单）")
+					break waitInput
+				}
+
+			case <-ctx.Done():
 				return nil
 			}
-		case "q", "exit", "quit":
-			return nil
-		default:
-			warnC.Fprintln(c.out, "无效选项。")
 		}
 	}
+}
+
+// drawMainMenu 画一次主菜单屏。main loop 里的每次进入/重绘都用它。
+func (c *consoleUI) drawMainMenu() {
+	c.banner("LAN 代理网关")
+	c.printStatus()
+	fmt.Fprintln(c.out)
+	fmt.Fprintln(c.out, "  1  设备接入指引        Switch / PS5 / 手机怎么连到这里")
+	fmt.Fprintln(c.out, "  2  流量控制            模式 / TUN / 广告拦截 / 高级")
+	fmt.Fprintln(c.out, "  3  换代理源")
+	fmt.Fprintln(c.out, "  4  启动 / 重启 / 停止")
+	fmt.Fprintln(c.out, "  5  看日志")
+	fmt.Fprintln(c.out, "  6  关闭 gateway 并退出（停 mihomo）")
+	fmt.Fprintln(c.out, "  Q  退出控制台（mihomo 留在后台继续跑）")
+	fmt.Fprint(c.out, "\n请选择：> ")
 }
 
 // printStatus 在主菜单顶部显示 3 件最关键的信息：
@@ -997,11 +1084,11 @@ func (c *consoleUI) tailFollow(path string, n int, rawMode bool) {
 	}
 	dimC.Fprintln(c.out, "\n（实时跟踪中，按回车退出）")
 
-	// 用独立 goroutine 等一个回车；主循环按 tick 读增量。
-	// 这期间 c.in 被 goroutine 独占 —— 外层 screenLogs 要等本函数返回后才会再读。
+	// 等一个回车退出 tail。从 inputCh 读一行（已在后台持续接收），
+	// 这样就不会和 startInputLoop 的 reader 争 c.in。
 	done := make(chan struct{})
 	go func() {
-		_, _ = c.in.ReadString('\n')
+		_ = c.readLine()
 		close(done)
 	}()
 
@@ -1060,7 +1147,7 @@ func (c *consoleUI) tailFollow(path string, n int, rawMode bool) {
 
 func (c *consoleUI) pause() {
 	dimC.Fprintln(c.out, "\n按回车返回…")
-	_, _ = c.in.ReadString('\n')
+	_ = c.readLine()
 }
 
 // --- util ---
