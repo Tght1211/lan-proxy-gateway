@@ -669,12 +669,17 @@ func (c *consoleUI) cleanupStaleMihomo() {
 func (c *consoleUI) screenLogs() {
 	path := c.app.Engine.LogPath()
 	tailN := 30
+	rawMode := false // 默认走易读视图；r 切换回原始 mihomo 行
 	for {
-		c.banner(fmt.Sprintf("日志 · 末尾 %d 行 · %s", tailN, path))
-		if err := c.renderTail(path, tailN); err != nil {
+		view := "易读视图"
+		if rawMode {
+			view = "原始视图"
+		}
+		c.banner(fmt.Sprintf("日志（%s）· 末尾 %d 行 · %s", view, tailN, path))
+		if err := c.renderTail(path, tailN, rawMode); err != nil {
 			warnC.Fprintf(c.out, "%v\n", err)
 		}
-		dimC.Fprintln(c.out, "\n  [回车] 刷新   [t] tail 跟随   [数字] 改行数   [q] 返回")
+		dimC.Fprintln(c.out, "\n  [回车] 刷新   [t] tail 跟随   [r] 切换原始/易读   [数字] 改行数   [q] 返回")
 		input := c.prompt("> ")
 		switch {
 		case input == "":
@@ -682,12 +687,14 @@ func (c *consoleUI) screenLogs() {
 		case strings.EqualFold(input, "q") || strings.EqualFold(input, "quit"):
 			return
 		case strings.EqualFold(input, "t") || strings.EqualFold(input, "tail"):
-			c.tailFollow(path, tailN)
+			c.tailFollow(path, tailN, rawMode)
+		case strings.EqualFold(input, "r") || strings.EqualFold(input, "raw"):
+			rawMode = !rawMode
 		default:
 			if n, err := strconv.Atoi(input); err == nil && n > 0 {
 				tailN = n
 			} else {
-				warnC.Fprintln(c.out, "无效输入（回车=刷新，t=tail，数字=改行数，q=返回）")
+				warnC.Fprintln(c.out, "无效输入（回车=刷新，t=tail，r=切视图，数字=改行数，q=返回）")
 				c.pause()
 			}
 		}
@@ -695,7 +702,8 @@ func (c *consoleUI) screenLogs() {
 }
 
 // renderTail 把日志文件的末尾 n 行打到输出。文件不存在时返回友好错误。
-func (c *consoleUI) renderTail(path string, n int) error {
+// rawMode=false 时每行走 humanizeMihomoLine 翻译成中文简要。
+func (c *consoleUI) renderTail(path string, n int, rawMode bool) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("暂无日志 (%s)", path)
@@ -706,16 +714,21 @@ func (c *consoleUI) renderTail(path string, n int) error {
 		start = len(lines) - n
 	}
 	for _, l := range lines[start:] {
-		fmt.Fprintln(c.out, l)
+		if rawMode {
+			fmt.Fprintln(c.out, l)
+		} else {
+			fmt.Fprintln(c.out, humanizeMihomoLine(l))
+		}
 	}
 	return nil
 }
 
 // tailFollow 进入实时跟随模式：先打印末尾 n 行做上下文，然后轮询文件 size 把
 // 新增字节流写到终端，按回车退出。文件被截断（mihomo rotate/重启）时重置 offset。
-func (c *consoleUI) tailFollow(path string, n int) {
+// rawMode=false 时按行缓冲并逐行 humanize。
+func (c *consoleUI) tailFollow(path string, n int, rawMode bool) {
 	c.banner("日志 tail · " + path)
-	_ = c.renderTail(path, n)
+	_ = c.renderTail(path, n, rawMode)
 
 	f, err := os.Open(path)
 	if err != nil {
@@ -747,6 +760,7 @@ func (c *consoleUI) tailFollow(path string, n int) {
 		lastSize = info.Size()
 	}
 	buf := make([]byte, 8192)
+	var pending strings.Builder // 易读模式下用来攒半行
 	for {
 		select {
 		case <-done:
@@ -760,11 +774,27 @@ func (c *consoleUI) tailFollow(path string, n int) {
 				// 文件被截断（rotate / mihomo 重启），从头读
 				_, _ = f.Seek(0, io.SeekStart)
 				lastSize = 0
+				pending.Reset()
 			}
 			for {
 				rn, rerr := f.Read(buf)
 				if rn > 0 {
-					_, _ = c.out.Write(buf[:rn])
+					if rawMode {
+						_, _ = c.out.Write(buf[:rn])
+					} else {
+						pending.Write(buf[:rn])
+						// 逐行切出来翻译。最后半行留给下一轮。
+						for {
+							s := pending.String()
+							nl := strings.IndexByte(s, '\n')
+							if nl < 0 {
+								break
+							}
+							fmt.Fprintln(c.out, humanizeMihomoLine(s[:nl]))
+							pending.Reset()
+							pending.WriteString(s[nl+1:])
+						}
+					}
 				}
 				if rerr != nil {
 					break
