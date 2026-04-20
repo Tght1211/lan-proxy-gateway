@@ -148,7 +148,7 @@ func (darwinPlatform) InstallService(binPath string) error {
 <dict>
   <key>Label</key><string>%s</string>
   <key>ProgramArguments</key>
-  <array><string>%s</string><string>start</string></array>
+  <array><string>%s</string><string>start</string><string>--foreground</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>/var/log/lan-proxy-gateway.out.log</string>

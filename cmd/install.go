@@ -26,7 +26,7 @@ var installCmd = &cobra.Command{
 		plat := platform.Current()
 
 		// Step 1: mihomo 内核
-		color.Cyan("[1/4] 检查 mihomo 内核…")
+		color.Cyan("[1/5] 检查 mihomo 内核…")
 		if _, err := plat.ResolveMihomoPath(""); err != nil {
 			color.Yellow("  未检测到 mihomo，开始下载…")
 			dest := defaultInstallDir()
@@ -41,7 +41,7 @@ var installCmd = &cobra.Command{
 		}
 
 		// Step 2: 配置（走向导或加载已有）
-		color.Cyan("\n[2/4] 配置代理网关…")
+		color.Cyan("\n[2/5] 配置代理网关…")
 		paths, err := config.ResolvePaths()
 		if err != nil {
 			return err
@@ -62,7 +62,7 @@ var installCmd = &cobra.Command{
 		// Step 3: 预下载 GeoIP/GeoSite（避免 mihomo 启动时卡在下载）
 		// 先查用户 cache 目录，再查 mihomo workdir，都没命中才下载；下载后存到 cache，
 		// 这样下次 rm -rf ~/.config 再装也不会重新下载。
-		color.Cyan("\n[3/4] 准备 GeoIP / GeoSite 数据文件…")
+		color.Cyan("\n[3/5] 准备 GeoIP / GeoSite 数据文件…")
 		upstream := localUpstreamURL(a.Cfg)
 		if err := mihomopkg.EnsureGeodata(a.Paths.MihomoDir, a.Paths.CacheDir, upstream, func(format string, args ...any) {
 			fmt.Printf("  "+format+"\n", args...)
@@ -73,7 +73,7 @@ var installCmd = &cobra.Command{
 		config.ReclaimToSudoUser(a.Paths.CacheDir)
 
 		// Step 4: 启动
-		color.Cyan("\n[4/4] 启动网关…")
+		color.Cyan("\n[4/5] 启动网关…")
 		startErr := a.Start(cmd.Context())
 		if startErr != nil {
 			color.Red("  ✗ 启动失败:")
@@ -87,18 +87,58 @@ var installCmd = &cobra.Command{
 			return console.Run(cmd.Context(), a)
 		}
 		color.Green("  ✓ 网关已启动")
+
+		// Step 5: 开机自启（可选，默认 y）
+		fmt.Println()
+		color.Cyan("[5/5] 开机自启")
+		fmt.Println("  装上后，开机 / 重启会自动拉起 mihomo，不用再手动 sudo gateway。")
+		if askYesNo("  要装开机自启吗？", true) {
+			if binPath, err := os.Executable(); err != nil {
+				color.Yellow("  ⚠ 无法定位当前可执行文件: %v（可稍后手动 sudo gateway service install）", err)
+			} else if err := plat.InstallService(binPath); err != nil {
+				color.Yellow("  ⚠ 安装服务失败: %v（可稍后手动 sudo gateway service install）", err)
+			} else {
+				color.Green("  ✓ 开机自启已启用")
+			}
+		} else {
+			color.New(color.Faint).Println("  跳过。以后想装：sudo gateway service install")
+		}
+
+		// 装完直接退出，mihomo 作为孤儿在后台跑。"可用就行了"。
 		fmt.Println()
 		color.Cyan("设备接入指引：")
 		fmt.Println("  把其它设备（Switch / PS5 / Apple TV / 手机）的")
 		fmt.Printf("    网关 + DNS → %s\n", a.Status().Gateway.LocalIP)
 		fmt.Println("  保存并重连 Wi-Fi 即可。")
 		fmt.Println()
-		color.New(color.Faint).Printf("日志 %s\n", a.Engine.LogPath())
-		color.New(color.Faint).Println("接下来进入主菜单；Q 退出时网关会留在后台继续跑（停网关用菜单里的 4，或 sudo gateway stop）。")
-
-		// 和失败路径、默认 `gateway` 一致：装完直接进主菜单，用户可以就地查状态、换源、装 service。
-		return console.Run(cmd.Context(), a)
+		color.New(color.Faint).Printf("日志          %s\n", a.Engine.LogPath())
+		color.New(color.Faint).Println("调整配置      sudo gateway            （主菜单：换源、切模式、广告拦截、端口…）")
+		color.New(color.Faint).Println("停止 mihomo   sudo gateway stop")
+		return nil
 	},
+}
+
+// askYesNo 读一行 y/n，空回车走默认。失败 fallback 到默认（non-TTY 下也不卡）。
+func askYesNo(label string, def bool) bool {
+	hint := "(Y/n)"
+	if !def {
+		hint = "(y/N)"
+	}
+	fmt.Printf("%s %s ", label, hint)
+	var line string
+	if _, err := fmt.Scanln(&line); err != nil {
+		return def
+	}
+	switch line {
+	case "":
+		return def
+	case "y", "Y", "yes", "YES":
+		return true
+	case "n", "N", "no", "NO":
+		return false
+	default:
+		return def
+	}
 }
 
 func indent(prefix, s string) string {

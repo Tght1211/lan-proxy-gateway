@@ -138,7 +138,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=%s start
+ExecStart=%s start --foreground
 Restart=on-failure
 RestartSec=5
 

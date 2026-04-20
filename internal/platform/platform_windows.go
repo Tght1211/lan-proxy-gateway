@@ -107,7 +107,7 @@ func (windowsPlatform) InstallService(binPath string) error {
 		binPath = p
 	}
 	_, err := run("schtasks", "/Create", "/TN", "LanProxyGateway",
-		"/TR", fmt.Sprintf(`"%s" start`, binPath),
+		"/TR", fmt.Sprintf(`"%s" start --foreground`, binPath),
 		"/SC", "ONSTART", "/RU", "SYSTEM", "/RL", "HIGHEST", "/F")
 	return err
 }

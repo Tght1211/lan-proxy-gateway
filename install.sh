@@ -199,13 +199,19 @@ case ":$PATH:" in
 esac
 
 info ""
-info "安装成功! 🎉"
-info "版本: $("$TARGET" --version 2>/dev/null || echo "${TAG}")"
+info "✔ gateway 二进制已安装（版本 $("$TARGET" --version 2>/dev/null || echo "${TAG}")）"
 info ""
+
+# 只要当前 shell 有可用终端（即使 stdin 是 pipe，比如 curl|bash），就顺势进入配置向导。
+# 用 < /dev/tty 把终端显式绑给 sudo/gateway install，保证它能读交互输入。
+if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+  info "接下来进入配置向导（会请求 sudo 密码；向导里会问开机自启）"
+  info ""
+  exec sudo "$TARGET" install < /dev/tty
+fi
+
+# 非交互场景（CI / 无终端自动化）：只打印提示
 info "下一步:"
-info "  sudo gateway install     # 下载 mihomo 内核 + 配置向导 + 自动启动"
-info "  sudo gateway             # 以后进主菜单（状态 / 切换模式 / 换代理源）"
+info "  sudo gateway install     # 配置 + 启动 + 开机自启（一条龙）"
+info "  sudo gateway             # 之后进主菜单（换源 / 切模式 / 看日志）"
 info "  gateway status           # 非交互查看状态"
-info ""
-info "开机自启:"
-info "  sudo gateway service install    # launchd (mac) / systemd (linux)"
