@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -31,7 +32,7 @@ func Materialize(ctx context.Context, src config.SourceConfig, workDir string) (
 	case config.SourceTypeSubscription:
 		return materializeSubscription(ctx, src.Subscription, workDir)
 	case config.SourceTypeFile:
-		return materializeFile(src.File)
+		return materializeFile(src.File, workDir)
 	case config.SourceTypeRemote:
 		return materializeRemote(src.Remote), nil
 	case config.SourceTypeNone:
@@ -147,17 +148,33 @@ func materializeSubscription(ctx context.Context, s config.SubscriptionSource, w
 }
 
 // --- file: load local Clash config ---
-
-func materializeFile(f config.FileSource) (Fragment, error) {
+//
+// mihomo 出于安全要求，proxy-provider 的 path 必须是 mihomo workdir 的子路径
+// （否则报 "path is not subpath of home directory or SAFE_PATHS"）。用户填的
+// 本地 yaml 几乎都在 workdir 外面（比如 ~/Documents/xxx.yaml），所以这里先
+// 复制到 workdir/subscription.yaml，再让 render 出来的 proxy-provider 指向
+// 这个副本。和 subscription 的落盘策略对齐。
+func materializeFile(f config.FileSource, workDir string) (Fragment, error) {
 	info, err := os.Stat(f.Path)
 	if err != nil {
-		return Fragment{}, fmt.Errorf("file source %s: %w", f.Path, err)
+		return Fragment{}, fmt.Errorf("本地配置文件 %s: %w", f.Path, err)
 	}
 	if info.IsDir() {
-		return Fragment{}, fmt.Errorf("file source must be a file: %s", f.Path)
+		return Fragment{}, fmt.Errorf("本地配置文件必须是文件，不是目录: %s", f.Path)
+	}
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		return Fragment{}, fmt.Errorf("创建 workdir: %w", err)
+	}
+	data, err := os.ReadFile(f.Path)
+	if err != nil {
+		return Fragment{}, fmt.Errorf("读不了 %s: %w", f.Path, err)
+	}
+	dst := filepath.Join(workDir, "subscription.yaml")
+	if err := os.WriteFile(dst, data, 0o600); err != nil {
+		return Fragment{}, fmt.Errorf("写入 %s: %w", dst, err)
 	}
 	return Fragment{
-		YAML:    renderProviderBlock(f.Path, "file", ""),
+		YAML:    renderProviderBlock(dst, "file", ""),
 		Summary: fmt.Sprintf("本地文件 · %s", f.Path),
 	}, nil
 }
