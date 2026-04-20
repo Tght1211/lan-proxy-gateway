@@ -237,16 +237,16 @@ func (c *consoleUI) configureRemote() {
 
 func (c *consoleUI) main(ctx context.Context) error {
 	for {
-		c.banner("lan-proxy-gateway · 主菜单")
+		c.banner("LAN 代理网关")
 		c.printStatus()
 		fmt.Fprintln(c.out)
-		fmt.Fprintln(c.out, "  1  网关状态 / 设备接入指引")
-		fmt.Fprintln(c.out, "  2  流量控制（模式 / 广告拦截 / 规则）")
-		fmt.Fprintln(c.out, "  3  代理端口来源")
+		fmt.Fprintln(c.out, "  1  设备接入指引        Switch / PS5 / 手机怎么连到这里")
+		fmt.Fprintln(c.out, "  2  流量控制            模式 / TUN / 广告拦截 / 高级")
+		fmt.Fprintln(c.out, "  3  换代理源")
 		fmt.Fprintln(c.out, "  4  启动 / 重启 / 停止")
-		fmt.Fprintln(c.out, "  5  日志 (查看 / tail 跟随)")
+		fmt.Fprintln(c.out, "  5  看日志")
 		fmt.Fprintln(c.out, "  6  关闭 gateway 并退出（停 mihomo）")
-		fmt.Fprintln(c.out, "  Q  退出控制台（mihomo 保留在后台）")
+		fmt.Fprintln(c.out, "  Q  退出控制台（mihomo 留在后台继续跑）")
 		choice := strings.ToLower(c.prompt("\n请选择：> "))
 		switch choice {
 		case "1":
@@ -271,47 +271,54 @@ func (c *consoleUI) main(ctx context.Context) error {
 	}
 }
 
+// printStatus 在主菜单顶部显示 3 件最关键的信息：
+//   - 运行状态（● 运行中 / ○ 未启动）
+//   - 本机 IP（LAN 设备要填这个做网关）
+//   - 代理源（用中文描述代替 external/subscription 黑话）
+//
+// 模式 / 广告 / TUN / DNS 这些细节进「2 流量控制」看；这里只保留必要时的
+// ⚠ 警告（TUN 关 / DNS 关），正常状态下不出现。
 func (c *consoleUI) printStatus() {
 	s := c.app.Status()
-	running := "未启动"
-	runStyle := dimC
 	if s.Running {
-		running = "运行中"
-		runStyle = okC
+		okC.Fprint(c.out, "  ● 运行中")
+	} else {
+		dimC.Fprint(c.out, "  ○ 未启动")
 	}
+	ip := s.Gateway.LocalIP
+	if ip == "" {
+		ip = "<未检测到>"
+	}
+	fmt.Fprintf(c.out, "    本机 IP: %s\n", ip)
+	fmt.Fprintf(c.out, "  代理源: %s\n", sourceLabel(s.Source))
+
 	admin, _ := c.app.Plat.IsAdmin()
 	if !admin {
-		dimC.Fprintln(c.out, "  （当前未用 sudo；看状态、改配置都不需要；启动时才需要）")
+		dimC.Fprintln(c.out, "  （未用 sudo；看状态、改配置都不需要；启动时才需要）")
 	}
-	mode := s.Mode
-	if mode == "" {
-		mode = "?"
-	}
-	adblock := "关"
-	if s.Adblock {
-		adblock = "开"
-	}
-	tun := "关"
-	if s.TUN {
-		tun = "开"
-	}
-	tunDisplay := tun
-	if !s.TUN {
-		tunDisplay = badC.Sprint("关 ⚠")
-	}
-	dnsDisplay := "开"
-	if !c.app.Cfg.Gateway.DNS.Enabled {
-		dnsDisplay = warnC.Sprint("关")
-	}
-	fmt.Fprintf(c.out, "  状态: %s   模式: %s   广告拦截: %s   TUN: %s   DNS: %s\n",
-		runStyle.Sprint(running), mode, adblock, tunDisplay, dnsDisplay)
-	fmt.Fprintf(c.out, "  源  : %s\n", s.Source)
-	fmt.Fprintf(c.out, "  本机: %s  网关: %s\n", s.Gateway.LocalIP, s.Gateway.Router)
-	if !s.TUN {
-		warnC.Fprintln(c.out, "  ⚠ TUN 关闭中：Switch/PS5 等改了网关的设备不会走代理！")
+	if s.Running && !s.TUN {
+		warnC.Fprintln(c.out, "  ⚠ TUN 已关：Switch / PS5 等就算把网关指到本机，流量也不会走代理")
 	}
 	if !c.app.Cfg.Gateway.DNS.Enabled {
-		warnC.Fprintln(c.out, "  ⚠ DNS 代理关闭中：LAN 设备 DNS 不能再指向本机 IP，要单独设能用的 DNS！")
+		warnC.Fprintln(c.out, "  ⚠ DNS 代理已关：LAN 设备 DNS 不能指向本机 IP，需另设能用的 DNS")
+	}
+}
+
+// sourceLabel 把 config.SourceType 映射成小白能看懂的中文标签。
+func sourceLabel(s string) string {
+	switch s {
+	case config.SourceTypeExternal:
+		return "本机已有代理（external）"
+	case config.SourceTypeSubscription:
+		return "机场订阅（subscription）"
+	case config.SourceTypeFile:
+		return "本地 Clash 配置文件（file）"
+	case config.SourceTypeRemote:
+		return "远程单点代理（remote）"
+	case config.SourceTypeNone, "":
+		return "未配置 · 全部直连"
+	default:
+		return s
 	}
 }
 
