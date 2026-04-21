@@ -39,6 +39,13 @@ type Platform interface {
 	InstallService(binPath string) error
 	UninstallService() error
 	ServiceStatus() (string, error)
+
+	// 本机系统 DNS：把跑 gateway 这台电脑的系统 DNS 切到 127.0.0.1，
+	// 好让本机浏览器 / App 的域名查询走 mihomo（否则 DomainSuffix 规则对本机无效）。
+	// 返回错误或 ErrNotSupported。
+	SetLocalDNSToLoopback() error
+	RestoreLocalDNS() error
+	LocalDNSIsLoopback() (bool, error) // 查看当前是否已经指向 127.0.0.1
 }
 
 // Current returns the Platform for the running OS.

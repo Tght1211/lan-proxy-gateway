@@ -182,6 +182,84 @@ func (darwinPlatform) UninstallService() error {
 	return nil
 }
 
+// --- 本机系统 DNS 切换（macOS）---
+//
+// 通过 networksetup 改**当前所有活跃服务**的 DNS。活跃服务指在 `networksetup
+// -listnetworkserviceorder` 结果中、有设备名且不是 "disabled" 的那些
+// （Wi-Fi / Ethernet 等）。用户如果连多个接口（比如笔记本插网线又开 Wi-Fi）
+// 两个都会改到，保证一定能走到 mihomo。
+
+func activeNetworkServices() ([]string, error) {
+	out, err := exec.Command("networksetup", "-listallnetworkservices").Output()
+	if err != nil {
+		return nil, err
+	}
+	var services []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		// 跳过头部提示 + 带星号（disabled）的服务
+		if line == "" || strings.HasPrefix(line, "*") || strings.HasPrefix(line, "An asterisk") {
+			continue
+		}
+		services = append(services, line)
+	}
+	return services, nil
+}
+
+func (darwinPlatform) SetLocalDNSToLoopback() error {
+	services, err := activeNetworkServices()
+	if err != nil {
+		return fmt.Errorf("列网络服务: %w", err)
+	}
+	if len(services) == 0 {
+		return fmt.Errorf("没有活跃网络服务")
+	}
+	var firstErr error
+	for _, svc := range services {
+		if _, err := run("networksetup", "-setdnsservers", svc, "127.0.0.1"); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	// 清 DNS 缓存立即生效（非致命，失败忽略）
+	_, _ = run("dscacheutil", "-flushcache")
+	_, _ = run("killall", "-HUP", "mDNSResponder")
+	return firstErr
+}
+
+func (darwinPlatform) RestoreLocalDNS() error {
+	services, err := activeNetworkServices()
+	if err != nil {
+		return fmt.Errorf("列网络服务: %w", err)
+	}
+	var firstErr error
+	for _, svc := range services {
+		// "empty" 让服务恢复成由 DHCP 提供的 DNS
+		if _, err := run("networksetup", "-setdnsservers", svc, "empty"); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	_, _ = run("dscacheutil", "-flushcache")
+	_, _ = run("killall", "-HUP", "mDNSResponder")
+	return firstErr
+}
+
+func (darwinPlatform) LocalDNSIsLoopback() (bool, error) {
+	services, err := activeNetworkServices()
+	if err != nil {
+		return false, err
+	}
+	for _, svc := range services {
+		out, err := exec.Command("networksetup", "-getdnsservers", svc).Output()
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(out), "127.0.0.1") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (darwinPlatform) ServiceStatus() (string, error) {
 	out, err := exec.Command("launchctl", "print", "system/"+launchdLabel).CombinedOutput()
 	if err != nil {

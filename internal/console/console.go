@@ -33,6 +33,7 @@ import (
 	"github.com/tght/lan-proxy-gateway/internal/config"
 	"github.com/tght/lan-proxy-gateway/internal/engine"
 	"github.com/tght/lan-proxy-gateway/internal/gateway"
+	"github.com/tght/lan-proxy-gateway/internal/platform"
 	"github.com/tght/lan-proxy-gateway/internal/source"
 )
 
@@ -558,10 +559,50 @@ func sourceLabel(s string) string {
 // --- Screens ---
 
 func (c *consoleUI) screenGateway() {
-	c.banner("设备接入指引")
-	_ = c.app.Gateway.Detect()
-	fmt.Fprintln(c.out, gateway.DeviceGuide(c.app.Status().Gateway, c.app.Cfg.Runtime.Ports.Mixed))
-	c.pause()
+	for {
+		c.banner("设备接入指引")
+		_ = c.app.Gateway.Detect()
+		fmt.Fprint(c.out, gateway.DeviceGuide(c.app.Status().Gateway, c.app.Cfg.Runtime.Ports.Mixed))
+
+		// 方式 3 的状态灯 + 一键开关（macOS 实打实切；其它系统显示命令提示）
+		isLoopback, _ := c.app.Plat.LocalDNSIsLoopback()
+		if isLoopback {
+			okC.Fprintln(c.out, "\n  ● 本机 DNS 已指向 127.0.0.1（方式 3 已生效）")
+		} else {
+			dimC.Fprintln(c.out, "\n  ○ 本机 DNS 未指向 127.0.0.1（方式 3 未生效）")
+		}
+		fmt.Fprintln(c.out)
+		titleC.Fprintln(c.out, "  ── 操作 ── L 本机 DNS 切到 127.0.0.1   R 恢复默认   0 返回")
+
+		switch strings.ToLower(strings.TrimSpace(c.prompt("选择：> "))) {
+		case "l":
+			if err := c.app.Plat.SetLocalDNSToLoopback(); err != nil {
+				if errors.Is(err, platform.ErrNotSupported) {
+					warnC.Fprintln(c.out, "  当前系统不支持一键切换，请照上面命令手动改")
+					c.pause()
+				} else {
+					badC.Fprintf(c.out, "  切换失败: %v\n", err)
+				}
+			} else {
+				okC.Fprintln(c.out, "  ✓ 已把本机 DNS 切到 127.0.0.1")
+			}
+		case "r":
+			if err := c.app.Plat.RestoreLocalDNS(); err != nil {
+				if errors.Is(err, platform.ErrNotSupported) {
+					warnC.Fprintln(c.out, "  当前系统不支持一键恢复")
+					c.pause()
+				} else {
+					badC.Fprintf(c.out, "  恢复失败: %v\n", err)
+				}
+			} else {
+				okC.Fprintln(c.out, "  ✓ 已恢复系统默认 DNS")
+			}
+		case "", "0", "q":
+			return
+		default:
+			warnC.Fprintln(c.out, "无效选项")
+		}
+	}
 }
 
 func (c *consoleUI) screenTraffic(ctx context.Context) {
@@ -905,13 +946,14 @@ func (c *consoleUI) screenSource(ctx context.Context) {
 	for {
 		c.banner("代理 & 订阅  ·  当前: " + sourceLabel(c.app.Cfg.Source.Type))
 
-		// 代理源选项：编号 / 图标 / 标签 / 值 四列对齐
+		// 代理源选项：编号 / 标签 / 图标 / 值 四列对齐（按显示宽度，不是字节）
 		renderRow := func(num, label string, p sourceSlot) {
 			iconStr := p.icon()
 			if iconStr == "" {
 				iconStr = dimC.Sprint("·")
 			}
-			fmt.Fprintf(c.out, "    %s  %-12s  %s  %s\n", num, label, iconStr, p.value)
+			fmt.Fprintf(c.out, "    %s  %s  %s  %s\n",
+				num, padRightWide(label, 14), iconStr, p.value)
 		}
 		renderRow("1", "单点代理", probes.single)
 		renderRow("2", "机场订阅", probes.subscription)
@@ -1172,13 +1214,48 @@ func truncate(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
-// padRight 把字符串右填空格到指定宽度。ANSI 色码让 fmt 的 %-Ns 宽度失准，
-// 所以自己算。这里不考虑已含 ANSI（probe 摘要都是纯文本），没问题。
+// padRight 把字符串右填空格到指定宽度（按字节，仅 ASCII 用）。
 func padRight(s string, n int) string {
 	if len(s) >= n {
 		return s
 	}
 	return s + strings.Repeat(" ", n-len(s))
+}
+
+// displayWidth 按等宽终端显示列数算字符串宽度。
+// CJK / 日韩 / 全角 / Emoji 一律 2 列，ASCII / 普通符号 1 列。
+// fmt 的 %-Ns 按字节，中文一字 3 字节占 2 列，导致对齐错位，这个函数补正。
+func displayWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		switch {
+		case r < 0x80:
+			w++
+		case r >= 0x1100 && r <= 0x115F, // Hangul jamo
+			r >= 0x2E80 && r <= 0x303E,  // CJK 符号 / 部首
+			r >= 0x3041 && r <= 0x33FF,  // Hiragana / Katakana
+			r >= 0x3400 && r <= 0x9FFF,  // CJK Unified Ideographs
+			r >= 0xAC00 && r <= 0xD7A3,  // Hangul
+			r >= 0xF900 && r <= 0xFAFF,  // CJK compat
+			r >= 0xFE30 && r <= 0xFE4F,  // CJK compat forms
+			r >= 0xFF00 && r <= 0xFF60,  // 全角
+			r >= 0xFFE0 && r <= 0xFFE6,  // 全角符号
+			r >= 0x1F000 && r <= 0x1FFFF: // Emoji / supplementary
+			w += 2
+		default:
+			w++
+		}
+	}
+	return w
+}
+
+// padRightWide 按显示宽度右填空格。
+func padRightWide(s string, cols int) string {
+	need := cols - displayWidth(s)
+	if need <= 0 {
+		return s
+	}
+	return s + strings.Repeat(" ", need)
 }
 
 // screenSwitchNode 让用户在 mihomo 当前加载的 proxy-groups 里挑分组、挑节点。
@@ -1206,8 +1283,11 @@ func (c *consoleUI) screenSwitchNode(ctx context.Context) {
 			return
 		}
 		for i, g := range groups {
-			fmt.Fprintf(c.out, "  %2d  %-24s  当前: %-20s  (%d 节点)\n",
-				i+1, g.Name, g.Now, len(g.All))
+			fmt.Fprintf(c.out, "  %2d  %s  当前: %s  (%d 节点)\n",
+				i+1,
+				padRightWide(g.Name, 24),
+				padRightWide(g.Now, 20),
+				len(g.All))
 		}
 		fmt.Fprintln(c.out)
 		titleC.Fprintln(c.out, "  ── 操作 ── <编号> 进分组选节点   0 返回（或按 Q）")
@@ -1275,7 +1355,8 @@ func (c *consoleUI) screenSwitchNodeInGroup(ctx context.Context, g engine.ProxyG
 				mark = "✓ "
 			}
 			delayText := delayLabel(delays[n])
-			fmt.Fprintf(c.out, "  %2d  %s%-28s  %s\n", i+1, mark, n, delayText)
+			fmt.Fprintf(c.out, "  %2d  %s%s  %s\n",
+				i+1, mark, padRightWide(n, 30), delayText)
 		}
 
 		fmt.Fprintln(c.out)

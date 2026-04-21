@@ -117,6 +117,12 @@ func (windowsPlatform) UninstallService() error {
 	return nil
 }
 
+// 本机 DNS 切换 Windows 用 netsh。为避免踩到多个适配器的不同配置，
+// 这里先不实现；用户在 guide 里能看到手动命令。
+func (windowsPlatform) SetLocalDNSToLoopback() error      { return ErrNotSupported }
+func (windowsPlatform) RestoreLocalDNS() error            { return ErrNotSupported }
+func (windowsPlatform) LocalDNSIsLoopback() (bool, error) { return false, nil }
+
 func (windowsPlatform) ServiceStatus() (string, error) {
 	out, err := exec.Command("schtasks", "/Query", "/TN", "LanProxyGateway").Output()
 	if err != nil {

@@ -132,28 +132,36 @@ flowchart TB
 
 ---
 
-## 📱 让其他设备接入 · 两种方式
+## 📱 让其他设备接入 · 三种方式
 
-### 方式 1 · TUN 网关（Switch / PS5 / Apple TV / 智能电视）
+### 📺 方式 1 · 改网关（Switch / PS5 / Apple TV / 智能电视）
 
-这些设备只能填网关 + DNS，不能填代理。
+设备只能填网关 + DNS、不能填代理 → 走这个。
 
 - **网关 (Gateway)** → 电脑的局域网 IP
 - **DNS 服务器** → 同一个 IP
-- 子网掩码 → `255.255.255.0`
+- 子网掩码 `255.255.255.0`
 - 保存并重连 Wi-Fi，所有流量（YouTube / 游戏 / App）自动走代理。
 
-### 方式 2 · 局域网代理（iPhone / 电脑 App / 浏览器插件）
+### 📱 方式 2 · 填代理（iPhone / 电脑 App / 浏览器插件）
 
-这些地方可以手动填代理服务器。
+支持手动填代理服务器的场景 → 走这个。
 
 - **代理服务器** → 电脑的局域网 IP
 - **端口** → `17890`（HTTP + SOCKS5 混合）
 - 类型 HTTP / SOCKS5 任选，无需用户名密码
 
-**差异**：方式 1 劫持所有流量（哪怕 Switch 不支持代理也能走）；方式 2 只走 App 自己发到代理的流量（Switch 填了也没用）。
+只走 App 自己发到代理的流量（Switch 填这个没用，Switch 不主动交给代理）。
 
-详细接入指引可以运行 `sudo gateway` → `1 设备接入指引` 看。
+### 💻 方式 3 · 本机自己用（跑 gateway 这台电脑）
+
+本机浏览器 / App 也想按 `DomainSuffix` 规则分流（比如 `ping0.cc → 住宅 IP`）？**要把本机系统 DNS 改到 `127.0.0.1`**，否则本机 DNS 直接查 ISP 拿真 IP，mihomo 只能按 IP 匹配，`DomainSuffix` 类规则全部失效。
+
+- **macOS 一键切**：`sudo gateway` → `1 设备接入指引` → 按 `L`
+  等同执行 `sudo networksetup -setdnsservers Wi-Fi 127.0.0.1`
+- **恢复**：同菜单按 `R`，或 `sudo networksetup -setdnsservers Wi-Fi empty`
+- **Linux / Windows**：systemd-resolved / NetworkManager / netsh 风格各异，暂未做一键，参考菜单里的命令手动改
+- **验证**：`dscacheutil -q host -a name ping0.cc` 返回 `198.18.x.x`（fake-ip）= DNS 走了 mihomo
 
 ### 💡 关键背景
 

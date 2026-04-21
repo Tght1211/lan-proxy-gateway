@@ -162,6 +162,19 @@ func (linuxPlatform) UninstallService() error {
 	return nil
 }
 
+// 本机 DNS 切换：Linux 上由 systemd-resolved / NetworkManager / /etc/resolv.conf
+// 三套玩法并存，还经常有 resolvconf 这种封装，自动改容易把用户环境搞坏。
+// 暂时不做，用户自己按发行版改，gateway 在 guide 里打印命令提示。
+func (linuxPlatform) SetLocalDNSToLoopback() error { return ErrNotSupported }
+func (linuxPlatform) RestoreLocalDNS() error       { return ErrNotSupported }
+func (linuxPlatform) LocalDNSIsLoopback() (bool, error) {
+	data, err := os.ReadFile("/etc/resolv.conf")
+	if err != nil {
+		return false, nil
+	}
+	return strings.Contains(string(data), "127.0.0.1"), nil
+}
+
 func (linuxPlatform) ServiceStatus() (string, error) {
 	out, _ := exec.Command("systemctl", "is-active", systemdUnit).Output()
 	s := strings.TrimSpace(string(out))
