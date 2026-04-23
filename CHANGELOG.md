@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented here.
 
+## v3.3.0 - 2026-04-24
+
+### Added
+
+- Dashboard shows the real egress IP, location, and ISP under the 🛬 landing line by querying `https://ipinfo.io/json` through the local mixed port — gives an accurate read for chain-proxy / residential-IP setups where the flag emoji in a node name can lie
+- `ls` now renders the full node list as a Linux-style multi-column grid (column-major, fastest in the first column, CJK/emoji width-aware) and `ll` renders the detailed single-column table; terminal width adapts via `COLUMNS`
+- Log tail (readable mode) folds consecutive duplicate warnings with a `⋮ 上面那一行又重复 N 次（最近 HH:MM:SS）` summary, fixing the 15-second direct-timeout spam that used to swamp the screen
+- `gateway.yaml` gained `gateway.device_labels: {ip: name}` so the dashboard device table can show user-assigned names over reverse-DNS fallback
+- New `internal/ipinfo/`, `internal/geoip/`, and `internal/devices/` packages with unit tests
+
+### Fixed
+
+- `subscription` reload no longer self-bites under active TUN/fake-ip: `engine.Reload` fetches through the **old** mixed port before stopping and starting, avoiding `read: can't assign requested address` on 198.18.0.0/15
+- No-op edits in "代理 & 订阅" (subscription URL/name, file path, script screen) no longer trigger `Save` + `Reload` when the user just presses Enter on defaults
+- `gateway install` generates a systemd unit that includes `Environment=HOME=…` / `Environment=XDG_CONFIG_HOME=…/.config`, so Debian/Linux users who did `sudo gateway install` no longer end up with the service reading `/root/.config/…` and ignoring the real config ([issue #2](https://github.com/Tght1211/lan-proxy-gateway/issues/2))
+- macOS `SetLocalDNSToLoopback` now also turns off system HTTP / HTTPS / SOCKS proxy state, so the method-3 DNS takeover isn't bypassed by a lingering system proxy
+- Subscription / file content normalization handles UTF-8 BOM, `#!MANAGED-CONFIG` headers, and base64-encoded Clash YAML; fallback `Proxy` group is emitted as structured YAML instead of a malformed string
+
+### Changed
+
+- The "启动 / 重启 / 停止" menu now shows a calm hint when gateway is already running ("重启/停止 通常不需要 sudo") instead of the old blanket "启动/停止/清理会失败" warning — matches actual runtime behavior
+
 ## v2.2.10 - 2026-04-06
 
 ### Fixed

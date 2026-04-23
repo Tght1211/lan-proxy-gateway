@@ -1,6 +1,7 @@
 package console
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -46,5 +47,55 @@ func TestHumanizeMihomoLine_CommonCases(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLineDeduperFoldsRepeats(t *testing.T) {
+	// 三条几乎相同的超时行（时间戳不同，dst/reason 相同）+ 一条不同的 → 期望折叠成
+	// "第1行 + 摘要 + 第4行"。
+	sameA := `time="2026-04-21T02:37:57.000000000+08:00" level=warning msg="[TCP] dial DIRECT (match GeoIP/cn) 198.18.0.1:50931 --> 115.190.130.195:21114 error: connect failed: dial tcp 115.190.130.195:21114: i/o timeout"`
+	sameB := `time="2026-04-21T02:38:12.000000000+08:00" level=warning msg="[TCP] dial DIRECT (match GeoIP/cn) 198.18.0.1:50932 --> 115.190.130.195:21114 error: connect failed: dial tcp 115.190.130.195:21114: i/o timeout"`
+	sameC := `time="2026-04-21T02:38:27.000000000+08:00" level=warning msg="[TCP] dial DIRECT (match GeoIP/cn) 198.18.0.1:50933 --> 115.190.130.195:21114 error: connect failed: dial tcp 115.190.130.195:21114: i/o timeout"`
+	other := `time="2026-04-21T02:44:20.000000000+08:00" level=warning msg="[TCP] dial DIRECT (match GeoIP/cn) 198.18.0.1:60001 --> pantanal-intelli-cn.allawntech.com:443 error: connect failed: dial tcp: i/o timeout"`
+
+	var buf bytes.Buffer
+	d := newLineDeduper(&buf)
+	for _, ln := range []string{sameA, sameB, sameC, other} {
+		formatted, key, t := humanizeMihomoLineWithKey(ln)
+		d.Write(formatted, key, t)
+	}
+	d.Flush()
+
+	out := buf.String()
+	// 前 3 条只应打印第 1 条
+	if n := strings.Count(out, "115.190.130.195:21114"); n != 1 {
+		t.Fatalf("repeat lines should fold to a single printed line; got %d occurrences:\n%s", n, out)
+	}
+	if !strings.Contains(out, "又重复 2 次") {
+		t.Fatalf("expected fold summary with count=2:\n%s", out)
+	}
+	if !strings.Contains(out, "最近 02:38:27") {
+		t.Fatalf("expected latest timestamp in fold summary:\n%s", out)
+	}
+	// 后面的异型行必须独立出现
+	if !strings.Contains(out, "pantanal-intelli-cn.allawntech.com") {
+		t.Fatalf("different line should be printed separately:\n%s", out)
+	}
+}
+
+func TestLineDeduperFlushAtEnd(t *testing.T) {
+	// 两条相同行 → 最后 Flush 时应输出摘要（而不是等下一条切换触发）
+	ln := `time="2026-04-21T02:37:57.000000000+08:00" level=warning msg="[TCP] dial DIRECT (match GeoIP/cn) 198.18.0.1:1 --> 1.2.3.4:443 error: connect failed: dial tcp 1.2.3.4:443: i/o timeout"`
+
+	var buf bytes.Buffer
+	d := newLineDeduper(&buf)
+	for i := 0; i < 2; i++ {
+		formatted, key, t := humanizeMihomoLineWithKey(ln)
+		d.Write(formatted, key, t)
+	}
+	d.Flush()
+
+	if !strings.Contains(buf.String(), "又重复 1 次") {
+		t.Fatalf("Flush should emit summary for tail duplicates:\n%s", buf.String())
 	}
 }

@@ -172,6 +172,64 @@ func (c *Client) SetMode(ctx context.Context, mode string) error {
 	return nil
 }
 
+// ConnectionsSnapshot 是 /connections 端点一次拉回来的全量：累计流量、
+// 实时连接（含每条的 metadata.sourceIP，用来聚合 LAN 设备）。
+// 仪表盘两次采样做差算速率；累计字段本身就是 mihomo 进程启动起的累计。
+type ConnectionsSnapshot struct {
+	DownloadTotal int64        `json:"downloadTotal"`
+	UploadTotal   int64        `json:"uploadTotal"`
+	Connections   []Connection `json:"connections"`
+}
+
+// Connection 只投影仪表盘会用的字段。mihomo 字段很多，这里按需扩。
+type Connection struct {
+	ID       string             `json:"id"`
+	Upload   int64              `json:"upload"`
+	Download int64              `json:"download"`
+	Start    string             `json:"start"`    // RFC3339
+	Chains   []string           `json:"chains"`   // 代理链（最后一跳通常是最终出口节点名）
+	Rule     string             `json:"rule"`
+	Metadata ConnectionMetadata `json:"metadata"`
+}
+
+// ConnectionMetadata 关键字段：sourceIP 用来聚合 LAN 设备；host 给「连了什么」
+// 用；network 区分 TCP / UDP。
+type ConnectionMetadata struct {
+	Network     string `json:"network"`
+	Type        string `json:"type"`
+	SourceIP    string `json:"sourceIP"`
+	DestinationIP string `json:"destinationIP"`
+	SourcePort  string `json:"sourcePort"`
+	DestinationPort string `json:"destinationPort"`
+	Host        string `json:"host"`
+	ProcessPath string `json:"processPath"`
+}
+
+// GetConnections 一次 REST 拉回 downloadTotal/uploadTotal + 所有活跃连接。
+// 仪表盘靠这个做所有实时数据（速率、累计、连接数、设备分布）。
+func (c *Client) GetConnections(ctx context.Context) (*ConnectionsSnapshot, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/connections", nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.secret != "" {
+		req.Header.Set("Authorization", "Bearer "+c.secret)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("get connections: HTTP %d", resp.StatusCode)
+	}
+	var snap ConnectionsSnapshot
+	if err := json.NewDecoder(resp.Body).Decode(&snap); err != nil {
+		return nil, err
+	}
+	return &snap, nil
+}
+
 // ReloadConfig asks mihomo to reload its config from disk.
 func (c *Client) ReloadConfig(ctx context.Context, path string) error {
 	body := strings.NewReader(fmt.Sprintf(`{"path":%q}`, path))

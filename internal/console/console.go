@@ -21,6 +21,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -32,8 +34,10 @@ import (
 
 	"github.com/tght/lan-proxy-gateway/internal/app"
 	"github.com/tght/lan-proxy-gateway/internal/config"
+	"github.com/tght/lan-proxy-gateway/internal/devices"
 	"github.com/tght/lan-proxy-gateway/internal/engine"
 	"github.com/tght/lan-proxy-gateway/internal/gateway"
+	"github.com/tght/lan-proxy-gateway/internal/geoip"
 	"github.com/tght/lan-proxy-gateway/internal/platform"
 	"github.com/tght/lan-proxy-gateway/internal/source"
 )
@@ -43,7 +47,6 @@ func Run(ctx context.Context, a *app.App) error {
 	c := newConsole(a, os.Stdin, os.Stdout)
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	c.startInputLoop(runCtx)
 	if !a.Configured() {
 		if err := c.onboard(runCtx); err != nil {
 			return err
@@ -66,48 +69,33 @@ type consoleUI struct {
 	in  *bufio.Reader
 	out io.Writer
 
-	// inputCh 是 stdin 的异步 channel：一个后台 goroutine 长期 ReadString 推这里。
-	// 打开后所有交互（prompt/ask/yesNo/pause/tail）都从 channel 读，不再直接碰
-	// c.in。这样主菜单可以 select ticker + inputCh，实现「后台告警变化立即重绘」。
-	//
-	// inputCh 在 Run 入口启动，console 退出时 close。没启动的场景（测试等）
-	// 会 fallback 回 c.in.ReadString 同步读。
-	inputCh chan string
+	// 仪表盘相关：geo 打开失败时留 nil，Lookup 会安全返回空。
+	// resolver 总是非 nil；DeviceLabels 变化时要调 SetLabels 同步。
+	geo       *geoip.DB
+	resolver  *devices.Resolver
+	dashState dashboardState
 }
 
 func newConsole(a *app.App, in io.Reader, out io.Writer) *consoleUI {
-	return &consoleUI{app: a, in: bufio.NewReader(in), out: out}
-}
-
-// startInputLoop 启一个后台 goroutine 把 stdin 每行喂给 c.inputCh。
-// ctx 取消时关 channel 让读取方退出。
-func (c *consoleUI) startInputLoop(ctx context.Context) {
-	c.inputCh = make(chan string, 1)
-	go func() {
-		defer close(c.inputCh)
-		for {
-			line, err := c.in.ReadString('\n')
-			if err != nil {
-				return
-			}
-			select {
-			case c.inputCh <- strings.TrimRight(line, "\r\n"):
-			case <-ctx.Done():
-				return
-			}
+	c := &consoleUI{app: a, in: bufio.NewReader(in), out: out}
+	// 打 country.mmdb。文件来自 EnsureGeodata；没下来就留 nil，Lookup 安全降级。
+	if a != nil && a.Engine != nil {
+		if db, err := geoip.Open(filepath.Join(a.Engine.Workdir(), "country.mmdb")); err == nil {
+			c.geo = db
 		}
-	}()
-}
-
-// readLine 从 inputCh 读一行；inputCh 没开的话回退到同步读 c.in。
-func (c *consoleUI) readLine() string {
-	if c.inputCh != nil {
-		line, ok := <-c.inputCh
-		if !ok {
-			return ""
-		}
-		return strings.TrimSpace(line)
 	}
+	var labels map[string]string
+	if a != nil {
+		labels = a.Cfg.Gateway.DeviceLabels
+	}
+	c.resolver = devices.NewResolver(labels)
+	return c
+}
+
+// readLine 同步从 stdin 读一行。bubbletea 跑期间会接管 stdin，不要在 TUI
+// 活着时调这个函数；进 simple screen（M 菜单、切节点 etc.）时 tea 已 Run 返
+// 回，stdin 归还给我们。
+func (c *consoleUI) readLine() string {
 	line, _ := c.in.ReadString('\n')
 	return strings.TrimSpace(line)
 }
@@ -403,82 +391,127 @@ func (c *consoleUI) configureScriptCustomPath() {
 	okC.Fprintf(c.out, "  已设置自定义脚本: %s\n", path)
 }
 
-func (c *consoleUI) configureSubscription() {
+func (c *consoleUI) configureSubscription() bool {
+	oldType := c.app.Cfg.Source.Type
+	oldURL := c.app.Cfg.Source.Subscription.URL
+	oldName := c.app.Cfg.Source.Subscription.Name
+
 	c.app.Cfg.Source.Type = config.SourceTypeSubscription
 	s := &c.app.Cfg.Source.Subscription
 	s.URL = c.ask("  订阅 URL", s.URL)
 	s.Name = c.ask("  订阅名称", firstNonEmpty(s.Name, "subscription"))
+
+	return oldType != c.app.Cfg.Source.Type || oldURL != s.URL || oldName != s.Name
 }
 
-func (c *consoleUI) configureFile() {
+func (c *consoleUI) configureFile() bool {
+	oldType := c.app.Cfg.Source.Type
+	oldPath := c.app.Cfg.Source.File.Path
+
 	c.app.Cfg.Source.Type = config.SourceTypeFile
 	c.app.Cfg.Source.File.Path = c.ask("  本地配置文件绝对路径 (Clash/mihomo YAML)", c.app.Cfg.Source.File.Path)
+
+	return oldType != c.app.Cfg.Source.Type || oldPath != c.app.Cfg.Source.File.Path
 }
 
-// --- Main menu ---
+// --- Main loop: 仪表盘首页 ---
+//
+// 默认只画 dashboard（实时速率 / 累计 / 起飞落地 / 设备表），每 2 秒自动刷。
+// 旧的多级菜单藏到 [M] 键后面，避免首屏被操作项淹没。
+// 快捷键：M 菜单、N 切节点、T 重测代理源、Q 关网关退出。
 
 func (c *consoleUI) main(ctx context.Context) error {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
+	// 静态首页：画一次 dashboard，等用户输入。回车 / R 主动刷新，避免自动刷新
+	// 抢终端。想要更顺手的操作直接看首页给出的 Web 控制台地址，用浏览器做。
 	for {
-		c.drawMainMenu()
-		// 记录当前告警态；后台 supervisor 改变它时要触发重绘。
-		lastFallback := c.app.Health().FallbackActive
-		lastErr := c.app.Health().LastError
-
-	waitInput:
-		for {
-			select {
-			case line, ok := <-c.inputCh:
-				if !ok {
-					return nil // stdin 断了（EOF / Ctrl-D）
-				}
-				choice := strings.ToLower(strings.TrimSpace(line))
-				switch choice {
-				case "":
-					// 用户直接回车：主动刷新主菜单
-					break waitInput
-				case "1":
-					c.screenGateway()
-					break waitInput
-				case "2":
-					c.screenTraffic(ctx)
-					break waitInput
-				case "3":
-					c.screenSource(ctx)
-					break waitInput
-				case "4":
-					c.screenLifecycle(ctx)
-					break waitInput
-				case "5":
-					c.screenLogs()
-					break waitInput
-				case "6":
-					if c.shutdownGateway() {
-						return nil
-					}
-					break waitInput
-				case "q", "exit", "quit":
-					return nil
-				default:
-					warnC.Fprintln(c.out, "无效选项（回车刷新，数字=子菜单，Q=退出）。")
-					fmt.Fprint(c.out, "请选择：> ")
-				}
-
-			case <-ticker.C:
-				// 后台 health 发生变化 → 主菜单立即重绘，
-				// 告警能在首页第一时间被看到。
-				h := c.app.Health()
-				if h.FallbackActive != lastFallback || h.LastError != lastErr {
-					fmt.Fprintln(c.out)
-					dimC.Fprintln(c.out, "  （检测到代理源状态变化，刷新主菜单）")
-					break waitInput
-				}
-
-			case <-ctx.Done():
+		c.drawDashboardOnce(ctx)
+		choice := strings.ToLower(strings.TrimSpace(c.readLine()))
+		switch choice {
+		case "", "r":
+			// 回车 / R → 重新拉数据再画一次
+		case "m", "menu":
+			if c.screenMenu(ctx) {
 				return nil
 			}
+		case "n":
+			c.screenSwitchNode(ctx)
+		case "t":
+			c.screenSource(ctx)
+		case "q", "exit", "quit":
+			if c.shutdownGateway() {
+				return nil
+			}
+		default:
+			warnC.Fprintln(c.out, "无效选项（回车 / R 刷新 · M 菜单 · N 切节点 · T 重测 · Q 退出）")
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+	}
+}
+
+// drawDashboardOnce 拉一次数据 + 画一帧。失败路径会自己输出占位文案。
+func (c *consoleUI) drawDashboardOnce(ctx context.Context) {
+	running := c.app.Engine != nil && c.app.Engine.Running()
+	// resolver 的 labels 可能被菜单里「设备标签」页改过，每帧同步一次成本极低。
+	c.resolver.SetLabels(c.app.Cfg.Gateway.DeviceLabels)
+
+	localIP := c.app.Status().Gateway.LocalIP
+	var cli *engine.Client
+	if running {
+		cli = c.app.Engine.API()
+	}
+	snap := fetchDashboardSnapshot(ctx, cli, c.app.Cfg, localIP, c.geo, c.resolver, &c.dashState)
+
+	// 代理源异常告警（supervisor 维护的状态），叠在仪表盘顶部警示。
+	drawDashboard(c.out, snap, running)
+	if running {
+		apiPort := c.app.Cfg.Runtime.Ports.API
+		fmt.Fprintln(c.out)
+		titleC.Fprintln(c.out, "  Web 控制台（推荐在浏览器操作）")
+		fmt.Fprintf(c.out, "    本机    http://127.0.0.1:%d/ui/\n", apiPort)
+		if localIP != "" {
+			fmt.Fprintf(c.out, "    局域网  http://%s:%d/ui/\n", localIP, apiPort)
+		}
+		dimC.Fprintln(c.out, "    浏览器里更适合切节点、看连接、做细操作。")
+	}
+	h := c.app.Health()
+	if h.FallbackActive {
+		badC.Fprintln(c.out)
+		badC.Fprintf(c.out, "  ⚠ 代理源异常 · 已临时切直连：%s\n", h.LastError)
+	}
+	fmt.Fprint(c.out, "\n请选择：> ")
+}
+
+// screenMenu 是旧版主菜单折成的「操作抽屉」。返回 true 表示用户在里头关了
+// gateway，主循环该一起退出。
+func (c *consoleUI) screenMenu(ctx context.Context) (exitConsole bool) {
+	for {
+		c.drawMainMenu()
+		choice := strings.ToLower(c.readLine())
+		switch choice {
+		case "":
+		case "1":
+			c.screenGateway()
+		case "2":
+			c.screenTraffic(ctx)
+		case "3":
+			c.screenSource(ctx)
+		case "4":
+			c.screenLifecycle(ctx)
+		case "5":
+			c.screenLogs()
+		case "6":
+			if c.shutdownGateway() {
+				return true
+			}
+		case "0", "q", "back":
+			return false
+		default:
+			warnC.Fprintln(c.out, "无效选项（数字=子菜单，0/Q 返回仪表盘）")
 		}
 	}
 }
@@ -571,8 +604,10 @@ func (c *consoleUI) screenGateway() {
 		// 自相矛盾。
 		if runtime.GOOS == "windows" {
 			fmt.Fprintln(c.out)
-			titleC.Fprintln(c.out, "  ── 操作 ── 0 返回（或按 Q）")
+			titleC.Fprintln(c.out, "  ── 操作 ── T 给 IP 起名字   0 返回（或按 Q）")
 			switch strings.ToLower(strings.TrimSpace(c.prompt("选择：> "))) {
+			case "t":
+				c.screenDeviceLabels()
 			case "", "0", "q":
 				return
 			default:
@@ -589,7 +624,7 @@ func (c *consoleUI) screenGateway() {
 			dimC.Fprintln(c.out, "\n  ○ 本机 DNS 未指向 127.0.0.1（方式 3 未生效）")
 		}
 		fmt.Fprintln(c.out)
-		titleC.Fprintln(c.out, "  ── 操作 ── L 本机 DNS 切到 127.0.0.1   R 恢复默认   0 返回（或按 Q）")
+		titleC.Fprintln(c.out, "  ── 操作 ── L 本机 DNS 切到 127.0.0.1   R 恢复默认   T 给 IP 起名字   0 返回（或按 Q）")
 
 		switch strings.ToLower(strings.TrimSpace(c.prompt("选择：> "))) {
 		case "l":
@@ -601,7 +636,7 @@ func (c *consoleUI) screenGateway() {
 					badC.Fprintf(c.out, "  切换失败: %v\n", err)
 				}
 			} else {
-				okC.Fprintln(c.out, "  ✓ 已把本机 DNS 切到 127.0.0.1")
+				okC.Fprintln(c.out, "  ✓ 已把本机 DNS 切到 127.0.0.1（顺手关了系统 HTTP/SOCKS 代理）")
 			}
 		case "r":
 			if err := c.app.Plat.RestoreLocalDNS(); err != nil {
@@ -614,6 +649,8 @@ func (c *consoleUI) screenGateway() {
 			} else {
 				okC.Fprintln(c.out, "  ✓ 已恢复系统默认 DNS")
 			}
+		case "t":
+			c.screenDeviceLabels()
 		case "", "0", "q":
 			return
 		default:
@@ -977,10 +1014,10 @@ func (c *consoleUI) screenSource(ctx context.Context) {
 		renderRow("3", "本地配置文件", probes.file)
 		renderRow("4", "暂不配置", sourceSlot{value: dimC.Sprint("全部走直连")})
 
-		// 订阅 / 本地文件源：展示可访问的 Web 控制台地址（本机 + LAN），
-		// 并发探测 /ui 可达性。UI 内嵌在 binary 里，一定能 serve，用户直接点就行。
-		if c.app.Cfg.Source.Type == config.SourceTypeSubscription ||
-			c.app.Cfg.Source.Type == config.SourceTypeFile {
+		// Web 控制台是 mihomo 自带的，跟源类型无关：只要 mihomo 在跑，UI 就能
+		// 访问（单点代理 / 订阅 / 本地文件一视同仁）。过去只对 subscription+file
+		// 显示，导致选「单点代理」的人看不到 URL，误以为没这功能。
+		if c.app.Engine != nil && c.app.Engine.Running() {
 			apiPort := c.app.Cfg.Runtime.Ports.API
 			localIP := c.app.Status().Gateway.LocalIP
 			probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -1028,26 +1065,21 @@ func (c *consoleUI) screenSource(ctx context.Context) {
 		fmt.Fprintln(c.out, strings.Join(ops, "   "))
 
 		choice := strings.ToLower(c.prompt("选择：> "))
-		changed := false // 是否改动了 config（需要 save+reload 并重新探测）
+		before := c.app.Cfg.Source
 		switch choice {
 		case "1":
 			c.configureSingle()
-			changed = true
 		case "2":
 			c.configureSubscription()
-			changed = true
 		case "3":
 			c.configureFile()
-			changed = true
 		case "4":
 			c.app.Cfg.Source.Type = config.SourceTypeNone
-			changed = true
 		case "n":
 			c.screenSwitchNode(ctx)
 			continue
 		case "s":
 			c.configureScript()
-			changed = true
 		case "t":
 			probes = c.probeAllSources(ctx, c.app.Cfg)
 			continue
@@ -1057,6 +1089,7 @@ func (c *consoleUI) screenSource(ctx context.Context) {
 			warnC.Fprintln(c.out, "无效选项，按 0 或 Q 返回")
 			continue
 		}
+		changed := !reflect.DeepEqual(before, c.app.Cfg.Source)
 		if !changed {
 			continue
 		}
@@ -1109,10 +1142,11 @@ func (c *consoleUI) probeAllSources(ctx context.Context, cfg *config.Config) sou
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var r sourceProbes
+	testOpts := c.sourceTestOptions()
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() { defer wg.Done(); r.single = probeSingle(probeCtx, cfg) }()
-	go func() { defer wg.Done(); r.subscription = probeSubscription(probeCtx, cfg) }()
+	go func() { defer wg.Done(); r.subscription = probeSubscription(probeCtx, cfg, testOpts) }()
 	go func() { defer wg.Done(); r.file = probeFile(cfg) }()
 	wg.Wait()
 	return r
@@ -1137,14 +1171,14 @@ func probeSingle(ctx context.Context, cfg *config.Config) sourceSlot {
 	return sourceSlot{value: dimC.Sprint("(未配置)"), empty: true}
 }
 
-func probeSubscription(ctx context.Context, cfg *config.Config) sourceSlot {
+func probeSubscription(ctx context.Context, cfg *config.Config, opts source.TestOptions) sourceSlot {
 	s := cfg.Source.Subscription
 	if s.URL == "" {
 		return sourceSlot{value: dimC.Sprint("(未配置)"), empty: true}
 	}
 	return sourceSlot{
 		value: truncateMiddle(s.URL, 50),
-		err:   source.Test(ctx, config.SourceConfig{Type: config.SourceTypeSubscription, Subscription: s}),
+		err:   source.TestWithOptions(ctx, config.SourceConfig{Type: config.SourceTypeSubscription, Subscription: s}, opts),
 	}
 }
 
@@ -1249,14 +1283,14 @@ func displayWidth(s string) int {
 		case r < 0x80:
 			w++
 		case r >= 0x1100 && r <= 0x115F, // Hangul jamo
-			r >= 0x2E80 && r <= 0x303E,  // CJK 符号 / 部首
-			r >= 0x3041 && r <= 0x33FF,  // Hiragana / Katakana
-			r >= 0x3400 && r <= 0x9FFF,  // CJK Unified Ideographs
-			r >= 0xAC00 && r <= 0xD7A3,  // Hangul
-			r >= 0xF900 && r <= 0xFAFF,  // CJK compat
-			r >= 0xFE30 && r <= 0xFE4F,  // CJK compat forms
-			r >= 0xFF00 && r <= 0xFF60,  // 全角
-			r >= 0xFFE0 && r <= 0xFFE6,  // 全角符号
+			r >= 0x2E80 && r <= 0x303E,   // CJK 符号 / 部首
+			r >= 0x3041 && r <= 0x33FF,   // Hiragana / Katakana
+			r >= 0x3400 && r <= 0x9FFF,   // CJK Unified Ideographs
+			r >= 0xAC00 && r <= 0xD7A3,   // Hangul
+			r >= 0xF900 && r <= 0xFAFF,   // CJK compat
+			r >= 0xFE30 && r <= 0xFE4F,   // CJK compat forms
+			r >= 0xFF00 && r <= 0xFF60,   // 全角
+			r >= 0xFFE0 && r <= 0xFFE6,   // 全角符号
 			r >= 0x1F000 && r <= 0x1FFFF: // Emoji / supplementary
 			w += 2
 		default:
@@ -1273,6 +1307,143 @@ func padRightWide(s string, cols int) string {
 		return s
 	}
 	return s + strings.Repeat(" ", need)
+}
+
+const nodeListPreviewLimit = 20
+
+type nodeListMode int
+
+const (
+	nodeListPreview nodeListMode = iota
+	nodeListCompact
+	nodeListVerbose
+)
+
+func sortProxyNodes(all []string, delays map[string]int) []string {
+	sorted := append([]string(nil), all...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		di, dj := delays[sorted[i]], delays[sorted[j]]
+		if di == 0 && dj == 0 {
+			return false
+		}
+		if di == 0 {
+			return false
+		}
+		if dj == 0 {
+			return true
+		}
+		return di < dj
+	})
+	return sorted
+}
+
+func renderProxyNodeList(w io.Writer, sorted []string, current string, delays map[string]int, mode nodeListMode) {
+	displayed := sorted
+	if mode == nodeListPreview && len(displayed) > nodeListPreviewLimit {
+		displayed = displayed[:nodeListPreviewLimit]
+	}
+	switch mode {
+	case nodeListVerbose:
+		// ll：单列详细表格（# / 当前 / 延迟 / 节点），便于一眼看清每个节点状态
+		fmt.Fprintf(w, "  %3s  %-4s  %-8s  %s\n", "#", "当前", "延迟", "节点")
+		for i, n := range displayed {
+			currentText := ""
+			if n == current {
+				currentText = "当前"
+			}
+			fmt.Fprintf(w, "  %3d  %-4s  %s  %s\n",
+				i+1, currentText, delayLabel(delays[n]), n)
+		}
+	case nodeListCompact:
+		// ls：Linux `ls` 风格多列网格（列优先：第一列装延迟最低的几个）
+		renderCompactNodeGrid(w, displayed, current, delays)
+	default:
+		// preview：首屏前 20 个单列概览，用户一眼能看到编号→名字→延迟对齐
+		for i, n := range displayed {
+			mark := "  "
+			if n == current {
+				mark = "✓ "
+			}
+			fmt.Fprintf(w, "  %2d  %s%s  %s\n",
+				i+1, mark, padRightWide(n, 30), delayLabel(delays[n]))
+		}
+	}
+}
+
+// renderCompactNodeGrid 按 Linux `ls` 风格把节点紧凑铺成多列网格。
+//   - 列优先（column-major）：第一列装前 rows 个最快的，读起来跟 `ls` 一致；
+//   - 单元格宽度 = 最宽一项 + 2 空格间距，按终端宽度算列数，CJK/emoji 算 2 列；
+//   - 延迟带颜色时打印彩色串，但对齐按无色宽度来，不会被 ANSI 序列撑歪。
+func renderCompactNodeGrid(w io.Writer, sorted []string, current string, delays map[string]int) {
+	if len(sorted) == 0 {
+		return
+	}
+	plain := make([]string, len(sorted))
+	colored := make([]string, len(sorted))
+	maxW := 0
+	for i, n := range sorted {
+		mark := " "
+		if n == current {
+			mark = "✓"
+		}
+		plain[i] = fmt.Sprintf("%2d%s %s  %s", i+1, mark, n, delayPlain(delays[n]))
+		colored[i] = fmt.Sprintf("%2d%s %s  %s", i+1, mark, n, delayLabel(delays[n]))
+		if dw := displayWidth(plain[i]); dw > maxW {
+			maxW = dw
+		}
+	}
+	const (
+		gap    = 2 // 列与列之间的空格数
+		indent = 2 // 整块左侧缩进
+	)
+	cellW := maxW + gap
+	avail := terminalWidth() - indent
+	cols := avail / cellW
+	if cols < 1 {
+		cols = 1
+	}
+	if cols > len(sorted) {
+		cols = len(sorted)
+	}
+	rows := (len(sorted) + cols - 1) / cols
+	for r := 0; r < rows; r++ {
+		fmt.Fprint(w, "  ")
+		for c := 0; c < cols; c++ {
+			idx := c*rows + r
+			if idx >= len(sorted) {
+				break
+			}
+			fmt.Fprint(w, colored[idx])
+			// 末列不补 padding，避免在行尾多出一段空白
+			if c < cols-1 && c*rows+r+rows < len(sorted) {
+				pad := cellW - displayWidth(plain[idx])
+				if pad < 0 {
+					pad = 0
+				}
+				fmt.Fprint(w, strings.Repeat(" ", pad))
+			}
+		}
+		fmt.Fprintln(w)
+	}
+}
+
+// delayPlain 是 delayLabel 的无色版，仅用于计算对齐宽度。
+func delayPlain(ms int) string {
+	if ms <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%4d ms", ms)
+}
+
+// terminalWidth 尽量拿到当前终端宽度。拿不到时退回 80 列的保守值。
+// 这里不引入新依赖，优先读 COLUMNS 环境变量（大多数交互 shell 会设）。
+func terminalWidth() int {
+	if s := os.Getenv("COLUMNS"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 80
 }
 
 // screenSwitchNode 让用户在 mihomo 当前加载的 proxy-groups 里挑分组、挑节点。
@@ -1326,6 +1497,7 @@ func (c *consoleUI) screenSwitchNode(ctx context.Context) {
 func (c *consoleUI) screenSwitchNodeInGroup(ctx context.Context, g engine.ProxyGroup) {
 	delays := map[string]int{}
 	testFailed := false
+	listMode := nodeListPreview
 
 	runDelay := func() {
 		testCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
@@ -1347,38 +1519,20 @@ func (c *consoleUI) screenSwitchNodeInGroup(ctx context.Context, g engine.ProxyG
 	for {
 		c.banner(fmt.Sprintf("分组：%s  (当前：%s)", g.Name, g.Now))
 
-		// 按延迟升序排（0/超时的往后丢）
-		sorted := append([]string(nil), g.All...)
-		sort.SliceStable(sorted, func(i, j int) bool {
-			di, dj := delays[sorted[i]], delays[sorted[j]]
-			if di == 0 && dj == 0 {
-				return false
-			}
-			if di == 0 {
-				return false
-			}
-			if dj == 0 {
-				return true
-			}
-			return di < dj
-		})
+		sorted := sortProxyNodes(g.All, delays)
 
 		if testFailed {
 			warnC.Fprintln(c.out, "  ⚠ 上一次整组测速失败（可能 mihomo API 版本不支持或网络问题）")
 		}
-		for i, n := range sorted {
-			mark := "  "
-			if n == g.Now {
-				mark = "✓ "
-			}
-			delayText := delayLabel(delays[n])
-			fmt.Fprintf(c.out, "  %2d  %s%s  %s\n",
-				i+1, mark, padRightWide(n, 30), delayText)
+		renderProxyNodeList(c.out, sorted, g.Now, delays, listMode)
+		if listMode == nodeListPreview && len(sorted) > nodeListPreviewLimit {
+			dimC.Fprintf(c.out, "  共 %d 个节点，当前只显示前 %d 个；输入 ls 看完整列表，ll 看详细列表。\n",
+				len(sorted), nodeListPreviewLimit)
 		}
 
 		fmt.Fprintln(c.out)
 		titleC.Fprint(c.out, "  ── 操作 ── ")
-		fmt.Fprintln(c.out, "R 刷新测速   <编号> 切到该节点   0 返回（或按 Q）")
+		fmt.Fprintln(c.out, "R 刷新测速   ls/ll 列表   <编号> 切到该节点   0 返回（或按 Q）")
 		input := strings.ToLower(strings.TrimSpace(c.prompt("选择：> ")))
 		switch {
 		case input == "" || input == "0" || input == "q":
@@ -1386,10 +1540,14 @@ func (c *consoleUI) screenSwitchNodeInGroup(ctx context.Context, g engine.ProxyG
 		case input == "r":
 			dimC.Fprintln(c.out, "  测速中……")
 			runDelay()
+		case input == "ls":
+			listMode = nodeListCompact
+		case input == "ll":
+			listMode = nodeListVerbose
 		default:
 			idx, err := strconv.Atoi(input)
 			if err != nil || idx < 1 || idx > len(sorted) {
-				warnC.Fprintln(c.out, "无效选项（按数字选节点 / R 刷新 / 0 返回）")
+				warnC.Fprintln(c.out, "无效选项（按数字选节点 / ls / ll / R 刷新 / 0 返回）")
 				continue
 			}
 			node := sorted[idx-1]
@@ -1403,6 +1561,15 @@ func (c *consoleUI) screenSwitchNodeInGroup(ctx context.Context, g engine.ProxyG
 				g.Now = node
 			}
 		}
+	}
+}
+
+func (c *consoleUI) sourceTestOptions() source.TestOptions {
+	if c.app == nil || c.app.Engine == nil || !c.app.Engine.Running() {
+		return source.TestOptions{}
+	}
+	return source.TestOptions{
+		SubscriptionProxyURL: source.LocalMixedProxyURL(c.app.Cfg.Runtime.Ports.Mixed),
 	}
 }
 
@@ -1436,7 +1603,14 @@ func (c *consoleUI) screenLifecycle(ctx context.Context) {
 	titleC.Fprintln(c.out, "  ── 操作 ── 0 返回主菜单（或按 Q）")
 	admin, _ := c.app.Plat.IsAdmin()
 	if !admin {
-		warnC.Fprintln(c.out, "  （未用 sudo 运行，启动/停止/清理会失败，请先 sudo gateway）")
+		// 运行中时重启/停止只是拉/杀用户态 mihomo，不需要 sudo；只有「首次启动」
+		// 才要改系统状态（IP 转发、TUN 设备）。按是否在运行给两种语气的提示，
+		// 避免旧文案把「启动/停止/清理全都要 sudo」这条过度告警给误导用户。
+		if s.Running {
+			dimC.Fprintln(c.out, "  （未用 sudo：已在运行，重启/停止通常不需要 sudo；切 TUN 或绑 53 端口才需要）")
+		} else {
+			warnC.Fprintln(c.out, "  （未用 sudo 运行：启动需要 sudo，请退出后运行 sudo gateway）")
+		}
 	}
 	switch c.prompt("选择：> ") {
 	case "1":
@@ -1603,13 +1777,19 @@ func (c *consoleUI) renderTail(path string, n int, rawMode bool) error {
 	if len(lines) > n {
 		start = len(lines) - n
 	}
-	for _, l := range lines[start:] {
-		if rawMode {
+	if rawMode {
+		for _, l := range lines[start:] {
 			fmt.Fprintln(c.out, l)
-		} else {
-			fmt.Fprintln(c.out, humanizeMihomoLine(l))
 		}
+		return nil
 	}
+	// 易读模式下同一告警每 15 秒重复一次会把末尾几十行刷成一片，走 dedup 折叠
+	dd := newLineDeduper(c.out)
+	for _, l := range lines[start:] {
+		formatted, key, t := humanizeMihomoLineWithKey(l)
+		dd.Write(formatted, key, t)
+	}
+	dd.Flush()
 	return nil
 }
 
@@ -1651,6 +1831,13 @@ func (c *consoleUI) tailFollow(path string, n int, rawMode bool) {
 	}
 	buf := make([]byte, 8192)
 	var pending strings.Builder // 易读模式下用来攒半行
+	// 实时段独立一个 deduper：从 renderTail 过渡到实时可能短暂重复打印一条，
+	// 容忍一下——比跨段共享 deduper 导致的锁/状态耦合简单。
+	var dd *lineDeduper
+	if !rawMode {
+		dd = newLineDeduper(c.out)
+		defer dd.Flush()
+	}
 	for {
 		select {
 		case <-done:
@@ -1665,6 +1852,9 @@ func (c *consoleUI) tailFollow(path string, n int, rawMode bool) {
 				_, _ = f.Seek(0, io.SeekStart)
 				lastSize = 0
 				pending.Reset()
+				if dd != nil {
+					dd.Flush()
+				}
 			}
 			for {
 				rn, rerr := f.Read(buf)
@@ -1680,7 +1870,8 @@ func (c *consoleUI) tailFollow(path string, n int, rawMode bool) {
 							if nl < 0 {
 								break
 							}
-							fmt.Fprintln(c.out, humanizeMihomoLine(s[:nl]))
+							formatted, key, t := humanizeMihomoLineWithKey(s[:nl])
+							dd.Write(formatted, key, t)
 							pending.Reset()
 							pending.WriteString(s[nl+1:])
 						}

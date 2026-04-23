@@ -23,6 +23,9 @@ type GatewayConfig struct {
 	Enabled bool      `yaml:"enabled"`
 	TUN     TUNConfig `yaml:"tun"`
 	DNS     DNSConfig `yaml:"dns"`
+	// DeviceLabels 把 LAN 设备 IP 映射成人读的名字（例如 "192.168.1.23" → "Switch"），
+	// 给仪表盘设备表用。反向 DNS 拿不到/不准时用户可以在菜单里手动打标签覆盖。
+	DeviceLabels map[string]string `yaml:"device_labels,omitempty"`
 }
 
 // TUNConfig toggles the TUN virtual interface.

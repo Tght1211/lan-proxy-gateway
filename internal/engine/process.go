@@ -2,10 +2,25 @@ package engine
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"time"
 )
+
+// probeAPIPort 在 127.0.0.1:port 上做一次快速 TCP 连接，看看 mihomo API 是不是
+// 有人在听。用在 Engine.Running() 的跨 uid fallback 路径：sudo 起的 mihomo，
+// pid 文件落在 root 的 workdir 里普通用户读不到，但 API 端口对所有 uid 开放。
+//
+// 250ms 超时：本机 loopback 连上几乎是即时的，超了大概率是没人听。
+func probeAPIPort(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 250*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
 
 type process struct {
 	bin     string

@@ -13,6 +13,7 @@ import (
 	embedpkg "github.com/tght/lan-proxy-gateway/embed"
 	configpkg "github.com/tght/lan-proxy-gateway/internal/config"
 	"github.com/tght/lan-proxy-gateway/internal/mihomo"
+	"github.com/tght/lan-proxy-gateway/internal/source"
 )
 
 // deployWebUI 把 go:embed 进来的 embed/webui/* 释放到 workdir/ui/ 下。
@@ -57,6 +58,12 @@ type Engine struct {
 	cacheDir string // optional, for geodata caching across reinstalls
 	proc     *process
 	api      *Client
+	// apiPort 用来做跨 uid 的存活探测。sudo gateway 写的 mihomo.pid 在 /var/root
+	// 下，普通 gateway 读不到会误判「未启动」。Attach 时把 cfg.Runtime.Ports.API
+	// 灌进来，Running() 在 pid 路径失效时回退到端口探测，两种启动方式看到的状
+	// 态就一致了。
+	apiPort   int
+	mixedPort int
 }
 
 // New returns an Engine configured to run `bin` with its working directory.
@@ -75,17 +82,20 @@ func New(bin, workdir, cacheDir string) *Engine {
 	return e
 }
 
-// Attach wires the API client to an already-running mihomo (identified by the
-// pid file in workdir). Returns true if a live process was found. This is the
-// reattach path: the prior `gateway` process exited, left mihomo as an orphan,
-// and the new process wants to pick up where it left off.
+// Attach wires the API client to an already-running mihomo. Returns true if a
+// live process was found. This is the reattach path: the prior `gateway`
+// process exited, left mihomo as an orphan, and the new process wants to pick
+// up where it left off.
+//
+// 先写入 apiPort 再查 Running()：Running() 在找不到 pidfile 时会用 apiPort 做
+// 端口探测，这样即便上一次是 sudo 启的（pid 写在 /var/root），本次以普通用户
+// 起也能认出 mihomo 还在后台跑。
 func (e *Engine) Attach(cfg *configpkg.Config) bool {
-	if !e.Running() {
-		return false
-	}
+	e.apiPort = cfg.Runtime.Ports.API
+	e.mixedPort = cfg.Runtime.Ports.Mixed
 	e.api.baseURL = fmt.Sprintf("http://127.0.0.1:%d", cfg.Runtime.Ports.API)
 	e.api.secret = cfg.Runtime.APISecret
-	return true
+	return e.Running()
 }
 
 // Workdir returns the working directory where the rendered config lives.
@@ -99,6 +109,10 @@ func (e *Engine) API() *Client { return e.api }
 
 // Start renders the config, launches mihomo, and waits briefly for the API to come up.
 func (e *Engine) Start(ctx context.Context, cfg *configpkg.Config) error {
+	return e.startRendered(ctx, cfg, nil)
+}
+
+func (e *Engine) startRendered(ctx context.Context, cfg *configpkg.Config, rendered []byte) error {
 	if e.bin == "" {
 		return fmt.Errorf("未找到 mihomo 二进制，请先运行 `gateway install`")
 	}
@@ -107,6 +121,8 @@ func (e *Engine) Start(ctx context.Context, cfg *configpkg.Config) error {
 	// Without this, preflight below would flag OUR OWN mihomo as a port
 	// conflict and the user would be prompted to kill it.
 	if e.Running() {
+		e.apiPort = cfg.Runtime.Ports.API
+		e.mixedPort = cfg.Runtime.Ports.Mixed
 		e.api.baseURL = fmt.Sprintf("http://127.0.0.1:%d", cfg.Runtime.Ports.API)
 		e.api.secret = cfg.Runtime.APISecret
 		return nil
@@ -133,9 +149,13 @@ func (e *Engine) Start(ctx context.Context, cfg *configpkg.Config) error {
 	upstream := localUpstreamURL(cfg)
 	_ = mihomo.EnsureGeodata(e.workdir, e.cacheDir, upstream, nil)
 
-	data, err := Render(ctx, cfg, e.workdir)
-	if err != nil {
-		return err
+	data := rendered
+	if data == nil {
+		var err error
+		data, err = Render(ctx, cfg, e.workdir)
+		if err != nil {
+			return err
+		}
 	}
 	if err := os.WriteFile(e.ConfigPath(), data, 0o600); err != nil {
 		return fmt.Errorf("write config: %w", err)
@@ -147,6 +167,8 @@ func (e *Engine) Start(ctx context.Context, cfg *configpkg.Config) error {
 	if err := e.proc.Start(); err != nil {
 		return fmt.Errorf("启动 mihomo 失败: %w", err)
 	}
+	e.apiPort = cfg.Runtime.Ports.API
+	e.mixedPort = cfg.Runtime.Ports.Mixed
 	e.api.baseURL = fmt.Sprintf("http://127.0.0.1:%d", cfg.Runtime.Ports.API)
 	e.api.secret = cfg.Runtime.APISecret
 	if err := e.api.WaitReady(ctx, 10*time.Second); err != nil {
@@ -175,13 +197,29 @@ func (e *Engine) Stop() error {
 // 进程重启才生效。用户从菜单点「重启」后发现 UI 不通、端口没换，体验很差。
 // 统一走 Stop+Start 简单可靠，代价是 LAN 设备断流 1-2 秒。
 func (e *Engine) Reload(ctx context.Context, cfg *configpkg.Config) error {
+	if !e.Running() {
+		return e.Start(ctx, cfg)
+	}
+	data, err := renderWithOptions(ctx, cfg, e.workdir, renderOptions{
+		subscriptionProxyURL: source.LocalMixedProxyURL(e.mixedPort),
+	})
+	if err != nil {
+		return err
+	}
 	_ = e.Stop()
-	return e.Start(ctx, cfg)
+	return e.startRendered(ctx, cfg, data)
 }
 
-// Running reports whether the mihomo child process is alive.
+// Running reports whether mihomo is alive.
+//
+// 两段判定：先看进程 handle（自己 fork 出来的子进程 + 同 uid 写的 pidfile）；
+// 拿不到再用 apiPort 做 TCP 探测，覆盖「上一次 sudo 启的，这次普通用户接管」
+// 这种 uid 不同导致 pidfile 不可读的场景。
 func (e *Engine) Running() bool {
-	return e.proc != nil && e.proc.Alive()
+	if e.proc != nil && e.proc.Alive() {
+		return true
+	}
+	return e.apiPort > 0 && probeAPIPort(e.apiPort)
 }
 
 // LogPath returns the path to the mihomo log file.

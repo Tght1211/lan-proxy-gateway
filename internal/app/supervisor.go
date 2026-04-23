@@ -97,7 +97,9 @@ func (a *App) checkSourceHealth(ctx context.Context) {
 
 	testCtx, cancel := context.WithTimeout(ctx, supervisorTimeout)
 	defer cancel()
-	err := source.Test(testCtx, a.Cfg.Source)
+	err := source.TestWithOptions(testCtx, a.Cfg.Source, source.TestOptions{
+		SubscriptionProxyURL: source.LocalMixedProxyURL(a.Cfg.Runtime.Ports.Mixed),
+	})
 
 	prev := a.health.snapshot()
 	now := time.Now()

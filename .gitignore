@@ -52,3 +52,7 @@ upgrade-local.sh
 *.backup
 *.orig
 .try
+
+# Claude Code / AI 工作目录与接力文档
+.claude/
+handoff_unfinished_tasks.txt

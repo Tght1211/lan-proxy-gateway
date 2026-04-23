@@ -219,6 +219,12 @@ func (darwinPlatform) SetLocalDNSToLoopback() error {
 		if _, err := run("networksetup", "-setdnsservers", svc, "127.0.0.1"); err != nil && firstErr == nil {
 			firstErr = err
 		}
+		// 方式 3（DNS 劫持）和系统 HTTP/SOCKS 代理并存时，系统代理会抢先把
+		// 流量直送到代理端口，DNS fake-ip 这条路被架空。切 DNS 的同时把三类
+		// 系统代理 state 关掉（只关 state，不动 server/port，用户下次自己再开）。
+		for _, flag := range []string{"-setwebproxystate", "-setsecurewebproxystate", "-setsocksfirewallproxystate"} {
+			_, _ = run("networksetup", flag, svc, "off")
+		}
 	}
 	// 清 DNS 缓存立即生效（非致命，失败忽略）
 	_, _ = run("dscacheutil", "-flushcache")

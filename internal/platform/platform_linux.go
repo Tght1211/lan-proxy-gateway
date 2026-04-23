@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"strings"
 )
 
@@ -132,19 +133,27 @@ func (linuxPlatform) InstallService(binPath string) error {
 			return fmt.Errorf("locate gateway binary: %w", err)
 		}
 	}
+	// 把调用 install 时的用户 HOME 写进 service，避免 systemd 跑 gateway 时
+	// HOME 默认是 /root（sudo 下）导致 `~/.config/lan-proxy-gateway/gateway.yaml`
+	// 找不到用户之前编辑过的配置。issue #2 用户 @lingbaoboy 在 Debian 13 上
+	// 就是踩到这个坑：非 root 放的 config 被 root 模式的 service 忽略。
+	envBlock := ""
+	if home := resolveServiceHome(); home != "" {
+		envBlock = fmt.Sprintf("Environment=HOME=%s\nEnvironment=XDG_CONFIG_HOME=%s/.config\n", home, home)
+	}
 	unit := fmt.Sprintf(`[Unit]
 Description=LAN Proxy Gateway
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=%s start --foreground
+%sExecStart=%s start --foreground
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-`, binPath)
+`, envBlock, binPath)
 	if err := os.WriteFile(systemdPath, []byte(unit), 0o644); err != nil {
 		return err
 	}
@@ -153,6 +162,27 @@ WantedBy=multi-user.target
 	}
 	_, err := run("systemctl", "enable", systemdUnit)
 	return err
+}
+
+// resolveServiceHome 挑一个合理的 HOME 写进 systemd service。
+// 策略：
+//   - sudo gateway install 时优先用 SUDO_USER 对应的 home，对齐普通用户之前编辑过的
+//     ~/.config/lan-proxy-gateway/；
+//   - 否则 fallback 到当前进程的 HOME（root 登录直接 install 的情况）；
+//   - 全都拿不到时返回空串，让 systemd 用默认值，保持向前兼容。
+func resolveServiceHome() string {
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" && sudoUser != "root" {
+		if u, err := user.Lookup(sudoUser); err == nil && u.HomeDir != "" {
+			return u.HomeDir
+		}
+	}
+	if h := os.Getenv("HOME"); h != "" {
+		return h
+	}
+	if u, err := user.Current(); err == nil && u.HomeDir != "" {
+		return u.HomeDir
+	}
+	return ""
 }
 
 func (linuxPlatform) UninstallService() error {

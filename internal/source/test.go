@@ -12,6 +12,11 @@ import (
 	"github.com/tght/lan-proxy-gateway/internal/config"
 )
 
+// TestOptions tweaks runtime-only test behavior.
+type TestOptions struct {
+	SubscriptionProxyURL string
+}
+
 // Test 探测当前源是否可达。每种 type 做不同的检查：
 //   - external / remote: TCP dial server:port
 //   - subscription: HTTP GET url（状态码 < 400）
@@ -20,13 +25,22 @@ import (
 //
 // 失败返回中文 error；成功返回 nil。超时走 ctx。
 func Test(ctx context.Context, src config.SourceConfig) error {
+	return TestWithOptions(ctx, src, TestOptions{})
+}
+
+// TestWithOptions is the runtime-aware variant used by console/supervisor.
+func TestWithOptions(ctx context.Context, src config.SourceConfig, opts TestOptions) error {
 	switch src.Type {
 	case config.SourceTypeExternal:
 		return testTCP(ctx, src.External.Server, src.External.Port)
 	case config.SourceTypeRemote:
 		return testTCP(ctx, src.Remote.Server, src.Remote.Port)
 	case config.SourceTypeSubscription:
-		return testURL(ctx, src.Subscription.URL)
+		proxyURL := opts.SubscriptionProxyURL
+		if proxyURL == "" {
+			proxyURL = firstUpstreamProxyURL(src)
+		}
+		return testURL(ctx, src.Subscription.URL, proxyURL)
 	case config.SourceTypeFile:
 		return testFile(src.File.Path)
 	case config.SourceTypeNone, "":
@@ -48,7 +62,7 @@ func testTCP(ctx context.Context, host string, port int) error {
 	return nil
 }
 
-func testURL(ctx context.Context, url string) error {
+func testURL(ctx context.Context, url string, proxyURL string) error {
 	if url == "" {
 		return fmt.Errorf("订阅 URL 为空")
 	}
@@ -57,7 +71,8 @@ func testURL(ctx context.Context, url string) error {
 		return err
 	}
 	req.Header.Set("User-Agent", "clash-meta/1.18")
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := newSubscriptionClient(proxyURL)
+	client.Timeout = 10 * time.Second
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("访问订阅失败 → %w", err)
