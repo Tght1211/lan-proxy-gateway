@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented here.
 
+## v3.4.0 - 2026-04-24
+
+### Added
+
+- `traffic.auto_groups` config (default `false`) plus a toggle in `[M] → 2 分流 & 规则 → 5 策略组自动补全`. When enabled, subscription / file sources get two extra groups injected only when missing: `Auto` (`type: url-test`) and `Fallback` (`type: fallback`), both referencing every proxy in the subscription. The detection is **by group type, not name**, so custom-named subscriptions (`🚀 节点选择`, `智能选择`, etc.) are recognized and no duplicate groups appear. Restores the v2.x template behavior that was lost in the v3.0 rewrite. Resolves the "no fallback when a directly selected node goes down" report in [issue #2](https://github.com/Tght1211/lan-proxy-gateway/issues/2).
+
+### Tests
+
+- `internal/source/source_autogroups_test.go` — five scenarios: off, append both when subscription only has `select`, skip Auto when `url-test` exists, skip both when both types exist, rename to `Auto2` on name clash
+
 ## v3.3.2 - 2026-04-24
 
 ### Fixed

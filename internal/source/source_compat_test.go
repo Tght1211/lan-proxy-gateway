@@ -39,7 +39,7 @@ func TestNormalizeSubscriptionContent_DecodesBase64YAML(t *testing.T) {
 }
 
 func TestInlineUserYAML_AddsFallbackProxyGroupWhenMissing(t *testing.T) {
-	frag, err := inlineUserYAML([]byte("proxies:\n  - name: hk\n    type: socks5\n    server: 1.2.3.4\n    port: 443\n"))
+	frag, err := inlineUserYAML([]byte("proxies:\n  - name: hk\n    type: socks5\n    server: 1.2.3.4\n    port: 443\n"), false)
 	if err != nil {
 		t.Fatalf("inlineUserYAML: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestMaterializeSubscription_Base64Response(t *testing.T) {
 	}))
 	defer server.Close()
 
-	frag, err := materializeSubscription(context.Background(), config.SubscriptionSource{URL: server.URL, Name: "test"}, t.TempDir(), "")
+	frag, err := materializeSubscription(context.Background(), config.SubscriptionSource{URL: server.URL, Name: "test"}, t.TempDir(), "", false)
 	if err != nil {
 		t.Fatalf("materializeSubscription: %v", err)
 	}

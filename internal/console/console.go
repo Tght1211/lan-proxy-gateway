@@ -672,6 +672,8 @@ func (c *consoleUI) screenTraffic(ctx context.Context) {
 		fmt.Fprintln(c.out, "  2  开关 TUN     （Switch/PS5 等能走代理的关键，一般别动）")
 		fmt.Fprintln(c.out, "  3  开关广告拦截")
 		fmt.Fprintln(c.out, "  4  自定义规则   直连 / 代理 / 拒绝 三组（优先级最高，盖过内置 china_direct 等）")
+		fmt.Fprintf(c.out, "  5  策略组自动补全 %s   订阅里缺 Auto/Fallback 时自动加（直选节点也能自动切换）\n",
+			onOff(cfg.Traffic.AutoGroups))
 		dimC.Fprintln(c.out, "  9  高级设置     （DNS 开关 / 端口调整，端口冲突时才来）")
 		fmt.Fprintln(c.out)
 		titleC.Fprintln(c.out, "  ── 操作 ── 0 返回主菜单（或按 Q）")
@@ -721,6 +723,12 @@ func (c *consoleUI) screenTraffic(ctx context.Context) {
 			}
 		case "4":
 			c.screenCustomRules(ctx)
+		case "5":
+			// 策略组自动补全：只影响下一次 render。订阅里类型是 url-test /
+			// fallback 的组已经在则不动；两个都不在时补 Auto + Fallback，
+			// 引用订阅里全部节点。reload 后 mihomo Web UI 就能看到新组。
+			c.app.Cfg.Traffic.AutoGroups = !c.app.Cfg.Traffic.AutoGroups
+			c.saveAndMaybeReload(ctx, fmt.Sprintf("策略组自动补全已 %s", onOff(c.app.Cfg.Traffic.AutoGroups)))
 		case "9":
 			c.screenTrafficAdvanced(ctx)
 		case "0", "q", "Q", "":

@@ -38,6 +38,7 @@ func renderWithOptions(ctx context.Context, cfg *configpkg.Config, workDir strin
 
 	frag, err := source.MaterializeWithOptions(ctx, cfg.Source, workDir, source.MaterializeOptions{
 		SubscriptionProxyURL: opts.subscriptionProxyURL,
+		AutoGroups:           cfg.Traffic.AutoGroups,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("materialize source: %w", err)

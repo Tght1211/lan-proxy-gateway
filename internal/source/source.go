@@ -33,6 +33,11 @@ type Fragment struct {
 // MaterializeOptions tweaks runtime-only behavior without changing persisted config.
 type MaterializeOptions struct {
 	SubscriptionProxyURL string
+	// AutoGroups 是 traffic.auto_groups 的旁路。仅对 subscription / file 类型生效：
+	// 若用户订阅里既没 type: url-test 也没 type: fallback 的组，会追加一对
+	// "Auto" (url-test) + "Fallback" (fallback)，引用订阅里全部节点。
+	// 已有对应类型组时不重复追加，不改用户已有组的内容。
+	AutoGroups bool
 }
 
 // Materialize produces the Fragment for this source config.
@@ -51,9 +56,9 @@ func MaterializeWithOptions(ctx context.Context, src config.SourceConfig, workDi
 		if proxyURL == "" {
 			proxyURL = firstUpstreamProxyURL(src)
 		}
-		return materializeSubscription(ctx, src.Subscription, workDir, proxyURL)
+		return materializeSubscription(ctx, src.Subscription, workDir, proxyURL, opts.AutoGroups)
 	case config.SourceTypeFile:
-		return materializeFile(src.File, workDir)
+		return materializeFile(src.File, workDir, opts.AutoGroups)
 	case config.SourceTypeRemote:
 		return materializeRemote(src.Remote), nil
 	case config.SourceTypeNone:
@@ -136,7 +141,7 @@ func singleProxyFragment(proxyYaml string) string {
 //
 // 把订阅 yaml 下载到 workdir 做备份（方便调试 / 下次启动离线用），
 // 但真正给 mihomo 的是 inline 的 proxies + proxy-groups + rules。
-func materializeSubscription(ctx context.Context, s config.SubscriptionSource, workDir string, proxyURL string) (Fragment, error) {
+func materializeSubscription(ctx context.Context, s config.SubscriptionSource, workDir string, proxyURL string, autoGroups bool) (Fragment, error) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return Fragment{}, err
 	}
@@ -165,7 +170,7 @@ func materializeSubscription(ctx context.Context, s config.SubscriptionSource, w
 	}
 	_ = os.WriteFile(dst, normalized, 0o600)
 
-	frag, err := inlineUserYAML(normalized)
+	frag, err := inlineUserYAML(normalized, autoGroups)
 	if err != nil {
 		return Fragment{}, fmt.Errorf("解析订阅 yaml: %w", err)
 	}
@@ -179,7 +184,7 @@ func materializeSubscription(ctx context.Context, s config.SubscriptionSource, w
 // 用户 yaml 里自己的 proxy-groups 和 rules 会被整体扔掉。所以这里改成
 // inline：读 yaml → 提 proxies + proxy-groups + rules → 直接嵌进最终
 // mihomo config.yaml。script enhancer 和「切换节点」菜单都能看到完整内容。
-func materializeFile(f config.FileSource, workDir string) (Fragment, error) {
+func materializeFile(f config.FileSource, workDir string, autoGroups bool) (Fragment, error) {
 	info, err := os.Stat(f.Path)
 	if err != nil {
 		return Fragment{}, fmt.Errorf("本地配置文件 %s: %w", f.Path, err)
@@ -195,7 +200,7 @@ func materializeFile(f config.FileSource, workDir string) (Fragment, error) {
 	if err != nil {
 		return Fragment{}, fmt.Errorf("标准化 %s 失败: %w", f.Path, err)
 	}
-	frag, err := inlineUserYAML(normalized)
+	frag, err := inlineUserYAML(normalized, autoGroups)
 	if err != nil {
 		return Fragment{}, fmt.Errorf("解析 %s: %w", f.Path, err)
 	}
@@ -209,7 +214,7 @@ func materializeFile(f config.FileSource, workDir string) (Fragment, error) {
 //
 // 如果用户 yaml 里没有「Proxy」组，补一个 select 组指向 DIRECT，让 base rules
 // 里的 `MATCH,Proxy`（rule 模式兜底）不会挂。
-func inlineUserYAML(data []byte) (Fragment, error) {
+func inlineUserYAML(data []byte, autoGroups bool) (Fragment, error) {
 	var doc struct {
 		Proxies     []yaml.Node `yaml:"proxies"`
 		ProxyGroups []yaml.Node `yaml:"proxy-groups"`
@@ -252,6 +257,16 @@ proxies:
 		}
 	}
 
+	// 自动补全 Auto (url-test) / Fallback (fallback) 组 —— v2.x 模板默认就提供
+	// 这两个策略。只在用户订阅**按类型**没有对应组时才追加，已有则不动。
+	// 追加的组引用 proxies 里所有节点名，给只会"直选节点"的订阅用户一个
+	// 自动切换兜底。用户没开这个开关时完全沿用订阅原状。
+	if autoGroups {
+		if err := appendAutoFallbackGroups(&doc); err != nil {
+			return Fragment{}, err
+		}
+	}
+
 	extract := map[string]interface{}{}
 	if len(doc.Proxies) > 0 {
 		extract["proxies"] = doc.Proxies
@@ -268,6 +283,119 @@ proxies:
 		YAML:  string(out),
 		Rules: doc.Rules,
 	}, nil
+}
+
+// appendAutoFallbackGroups 给 doc 按需追加 Auto / Fallback 组。判断依据是
+// **组的 type**（不看名字）：用户订阅里已存在 type: url-test 的组就不重复
+// 加 Auto；已存在 type: fallback 就不重复加 Fallback。这样不管用户订阅里
+// 那个自动选节点组叫 "Auto" / "🚀 节点选择" / "智能选择" 都能正确识别。
+// 追加的组 proxies 列表 = 订阅里所有节点名。节点数很多时 mihomo 会对整表做
+// 周期健康检查（default 300s），略贵，但对只会直选节点的用户价值大得多。
+func appendAutoFallbackGroups(doc *struct {
+	Proxies     []yaml.Node `yaml:"proxies"`
+	ProxyGroups []yaml.Node `yaml:"proxy-groups"`
+	Rules       []string    `yaml:"rules"`
+}) error {
+	names := proxyNamesFromNodes(doc.Proxies)
+	if len(names) == 0 {
+		return nil // 没节点就没意义
+	}
+
+	// 已有名字冲突时,给追加组换个名字避免 mihomo 报 duplicate
+	existingNames := map[string]bool{}
+	existingTypes := map[string]bool{}
+	for _, g := range doc.ProxyGroups {
+		if n := groupNameFromNode(g); n != "" {
+			existingNames[n] = true
+		}
+		if t := groupTypeFromNode(g); t != "" {
+			existingTypes[t] = true
+		}
+	}
+
+	add := func(baseName, kind string) error {
+		if existingTypes[kind] {
+			return nil // 同类型组已有,不重复
+		}
+		name := baseName
+		for i := 2; existingNames[name]; i++ {
+			name = fmt.Sprintf("%s%d", baseName, i)
+		}
+		node, err := buildAutoOrFallbackNode(name, kind, names)
+		if err != nil {
+			return err
+		}
+		doc.ProxyGroups = append(doc.ProxyGroups, *node)
+		existingNames[name] = true
+		existingTypes[kind] = true
+		return nil
+	}
+
+	if err := add("Auto", "url-test"); err != nil {
+		return err
+	}
+	if err := add("Fallback", "fallback"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// buildAutoOrFallbackNode 拼一个 url-test / fallback 组的 yaml.Node。
+// url 和 interval 用社区惯例（gstatic 204，300s 探测一次）。
+// tolerance 只对 url-test 有意义，50ms 是 mihomo 默认推荐。
+func buildAutoOrFallbackNode(name, kind string, nodeNames []string) (*yaml.Node, error) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "name: %q\n", name)
+	fmt.Fprintf(&b, "type: %s\n", kind)
+	b.WriteString("proxies:\n")
+	for _, n := range nodeNames {
+		fmt.Fprintf(&b, "  - %q\n", n)
+	}
+	b.WriteString("url: http://www.gstatic.com/generate_204\n")
+	b.WriteString("interval: 300\n")
+	if kind == "url-test" {
+		b.WriteString("tolerance: 50\n")
+	}
+	var node yaml.Node
+	if err := yaml.Unmarshal([]byte(b.String()), &node); err != nil {
+		return nil, fmt.Errorf("构造 %s 组 yaml 失败: %w", name, err)
+	}
+	if len(node.Content) == 0 {
+		return nil, fmt.Errorf("构造 %s 组返回空 node", name)
+	}
+	return node.Content[0], nil
+}
+
+// proxyNamesFromNodes 从 proxies yaml.Node 列表里抽出所有节点的 name 字段。
+func proxyNamesFromNodes(proxies []yaml.Node) []string {
+	names := make([]string, 0, len(proxies))
+	for _, p := range proxies {
+		if p.Kind != yaml.MappingNode {
+			continue
+		}
+		for i := 0; i+1 < len(p.Content); i += 2 {
+			if p.Content[i].Value == "name" && p.Content[i+1].Kind == yaml.ScalarNode {
+				names = append(names, p.Content[i+1].Value)
+				break
+			}
+		}
+	}
+	return names
+}
+
+// groupTypeFromNode 抽 type 字段。跟 groupNameFromNode 一个套路。
+func groupTypeFromNode(n yaml.Node) string {
+	if n.Kind != yaml.MappingNode {
+		return ""
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k := n.Content[i]
+		v := n.Content[i+1]
+		if k.Value == "type" && v.Kind == yaml.ScalarNode {
+			return v.Value
+		}
+	}
+	return ""
 }
 
 // groupNameFromNode 从 yaml.Node（映射）里抽出 name 字段，失败返回 ""。

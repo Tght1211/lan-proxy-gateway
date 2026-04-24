@@ -46,6 +46,12 @@ type TrafficConfig struct {
 	Adblock  bool            `yaml:"adblock"`
 	Extras   ExtraRules      `yaml:"extras"`
 	Rulesets RulesetToggles  `yaml:"rulesets"`
+	// AutoGroups 开启后，subscription / file 源在渲染时若发现用户订阅里没有
+	// url-test / fallback 类型的策略组，会自动追加 Auto + Fallback 组，引用
+	// 订阅里全部节点。v2.x 的模板里默认就有这两个组，v3 重写时丢了这个能力，
+	// 本字段是把能力补回来。默认 false：升级用户 config 不主动变，想要的用户
+	// 在菜单 [M] → 2 → 自动补全策略组 主动开启。
+	AutoGroups bool `yaml:"auto_groups,omitempty"`
 }
 
 // ExtraRules lets the user add custom rules without touching rulesets.
