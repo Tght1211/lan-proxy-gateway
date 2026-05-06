@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented here.
 
+## v3.4.1 - 2026-05-06
+
+### Fixed
+
+- `gateway install` now generates a systemd unit with `After=network-online.target` + `Wants=network-online.target` instead of the old `After=network.target`. On Debian 13 with DHCP, the previous unit fired before the interface had an IPv4 lease, causing `gateway start` to fail with `detect network: no IPv4 address on enp0s1` and noisy auto-restart loops in `journalctl`. Reported by @lingbaoboy in [issue #2](https://github.com/Tght1211/lan-proxy-gateway/issues/2). Reinstall the service (`sudo gateway install`) to pick up the new unit
+- `traffic.auto_groups` now also injects the appended `Auto` / `Fallback` group names + `DIRECT` into the user's `Proxy` select group (appended at the tail, never reordering the head). v3.4.0 added `Auto` / `Fallback` to the proxy-groups list but the user's `Proxy` group did not reference them, so they showed up in the mihomo UI but could not actually be selected from the main entrypoint group ("看得见用不着"). DIRECT injection also gives a last-resort escape hatch when every node is down, so the host doesn't lose basic connectivity. Behavior change is gated on `auto_groups: true` only — users who never opted in see no difference
+
+### Tests
+
+- `internal/source/source_autogroups_test.go` — three new scenarios: existing url-test/fallback groups (named `🚀 自动` / `🛡 兜底`) get injected into Proxy, the auto-synthesized fallback Proxy group also receives Auto/Fallback/DIRECT, and `auto_groups=false` keeps Proxy's proxies list bit-identical to the subscription
+- Existing `AutoGroupsAppendsBoth` updated to assert the Proxy group now contains `n1, n2, n3, Auto, Fallback, DIRECT` with `n1` still at index 0 (preserving mihomo's default selection)
+
 ## v3.4.0 - 2026-04-24
 
 ### Added

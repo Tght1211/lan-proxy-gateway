@@ -141,9 +141,16 @@ func (linuxPlatform) InstallService(binPath string) error {
 	if home := resolveServiceHome(); home != "" {
 		envBlock = fmt.Sprintf("Environment=HOME=%s\nEnvironment=XDG_CONFIG_HOME=%s/.config\n", home, home)
 	}
+	// 用 network-online.target 而不是 network.target：开机时 network.target 表示
+	// "网络栈起来了"，但接口还可能在 DHCP 拿地址。我们启动时 detectNetwork() 一旦
+	// 发现网卡没 IPv4 就会直接报错退出（systemd 然后会按 RestartSec 重试）。
+	// 改成 network-online.target + Wants= 让 systemd 等到接口真正拿到地址再拉
+	// gateway，避免 issue #2 里 @lingbaoboy 在 Debian 13 上看到的
+	// "no IPv4 address on enp0s1" 启动失败 + 重试日志噪音。
 	unit := fmt.Sprintf(`[Unit]
 Description=LAN Proxy Gateway
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple

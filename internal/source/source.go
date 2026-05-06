@@ -265,6 +265,13 @@ proxies:
 		if err := appendAutoFallbackGroups(&doc); err != nil {
 			return Fragment{}, err
 		}
+		// v3.4.0 反馈 (issue #2 @lingbaoboy): 追加了 Auto/Fallback 组但用户的
+		// Proxy 组里没引用它们 → mihomo UI 看得见、Proxy 组里选不到。
+		// 这里把所有 url-test / fallback 类型的组名 + DIRECT 注入到 Proxy 的
+		// proxies 列表（追加到尾部，已有则跳过），让用户能切换到自动组、
+		// 节点全挂时还能掉到 DIRECT 兜底。仅修改 type=select 名为 "Proxy"
+		// 的组，不动订阅里别的自定义组。
+		augmentProxyGroupOptions(&doc)
 	}
 
 	extract := map[string]interface{}{}
@@ -364,6 +371,79 @@ func buildAutoOrFallbackNode(name, kind string, nodeNames []string) (*yaml.Node,
 		return nil, fmt.Errorf("构造 %s 组返回空 node", name)
 	}
 	return node.Content[0], nil
+}
+
+// augmentProxyGroupOptions 把 doc 里所有 url-test / fallback 类型的策略组名 +
+// DIRECT 追加到名为 "Proxy" 的 select 组的 proxies 列表（已存在则跳过，新项
+// append 到尾部以保留用户原有的默认选择）。仅在 auto_groups 开启后调用。
+//
+// 设计权衡:
+//   - 只动名为 "Proxy" 的 select 组 —— 它是 base rules `MATCH,Proxy` 的目标，
+//     是 gateway 的"主入口"。订阅里别的自定义组 (区域分组、协议分组等) 不动，
+//     避免改动用户精心设计的策略结构
+//   - 追加到尾部而不是头部 —— select 组的第一项是 mihomo 的初始默认选择，
+//     插到头部会偷偷改用户当前默认走的节点
+//   - DIRECT 始终注入 —— 节点全挂时给本机一个直连兜底，避免基础联网都断
+func augmentProxyGroupOptions(doc *struct {
+	Proxies     []yaml.Node `yaml:"proxies"`
+	ProxyGroups []yaml.Node `yaml:"proxy-groups"`
+	Rules       []string    `yaml:"rules"`
+}) {
+	var injectNames []string
+	for _, g := range doc.ProxyGroups {
+		t := groupTypeFromNode(g)
+		if t != "url-test" && t != "fallback" {
+			continue
+		}
+		if n := groupNameFromNode(g); n != "" {
+			injectNames = append(injectNames, n)
+		}
+	}
+	injectNames = append(injectNames, "DIRECT")
+
+	for i := range doc.ProxyGroups {
+		if groupNameFromNode(doc.ProxyGroups[i]) != "Proxy" {
+			continue
+		}
+		if groupTypeFromNode(doc.ProxyGroups[i]) != "select" {
+			return
+		}
+		appendProxyOptions(&doc.ProxyGroups[i], injectNames)
+		return
+	}
+}
+
+// appendProxyOptions 在一个 mapping 类型的 group node 里找 proxies: 子节点,
+// 把 names 中尚未在列表里的项 append 到末尾。
+func appendProxyOptions(group *yaml.Node, names []string) {
+	if group.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 0; i+1 < len(group.Content); i += 2 {
+		k := group.Content[i]
+		v := group.Content[i+1]
+		if k.Value != "proxies" || v.Kind != yaml.SequenceNode {
+			continue
+		}
+		existing := map[string]bool{}
+		for _, item := range v.Content {
+			if item.Kind == yaml.ScalarNode {
+				existing[item.Value] = true
+			}
+		}
+		for _, n := range names {
+			if existing[n] {
+				continue
+			}
+			v.Content = append(v.Content, &yaml.Node{
+				Kind:  yaml.ScalarNode,
+				Tag:   "!!str",
+				Value: n,
+			})
+			existing[n] = true
+		}
+		return
+	}
 }
 
 // proxyNamesFromNodes 从 proxies yaml.Node 列表里抽出所有节点的 name 字段。
