@@ -31,6 +31,14 @@ type Platform interface {
 	ConfigureNAT(iface string) error
 	UnconfigureNAT(iface string) error
 
+	// PostStopCleanup runs after the mihomo engine has been signaled to stop.
+	// Defensive cleanup for OS state mihomo may have left behind when killed
+	// abruptly (SIGKILL after grace timeout, crash, OOM). On Linux this scrubs
+	// any leftover TUN strict-route ip rules whose pref looks like mihomo's
+	// signature (high pref + unreachable action). No-op on darwin / windows.
+	// Best-effort: errors are returned but callers usually log and continue.
+	PostStopCleanup() error
+
 	// Process plumbing
 	ResolveMihomoPath(preferred string) (string, error)
 	IsAdmin() (bool, error)

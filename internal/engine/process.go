@@ -73,6 +73,21 @@ func (p *process) Start() error {
 	return nil
 }
 
+// stopGrace is the SIGTERM → SIGKILL escalation timeout for mihomo. v3.4.1
+// used 3s, which on Linux was sometimes too tight for mihomo's TUN cleanup
+// (removing high-pref ip rules + flushing custom routing table + tearing
+// down the tun device) — when mihomo got SIGKILL'd mid-cleanup, the leftover
+// `pref 9000 from all unreachable` rule could break Docker DNAT (issue #5).
+// 8s is generous in normal cases (clean exit takes < 2s) but gives slow / busy
+// hosts a real chance to cleanly tear down before we escalate.
+const stopGrace = 8 * time.Second
+
+// orphanGrace is the equivalent for the orphan-cleanup path (no live cmd
+// handle, only pid in file). Shorter — if our parent process didn't even
+// own the proc, we can't really wait on it; this is just a hint for the OS
+// signal to be delivered before SIGKILL.
+const orphanGrace = 2 * time.Second
+
 func (p *process) Stop() error {
 	if p.cmd != nil && p.cmd.Process != nil {
 		terminateProcess(p.cmd.Process)
@@ -80,14 +95,16 @@ func (p *process) Stop() error {
 		go func() { done <- p.cmd.Wait() }()
 		select {
 		case <-done:
-		case <-time.After(3 * time.Second):
+		case <-time.After(stopGrace):
 			_ = p.cmd.Process.Kill()
 		}
 	} else if pid, ok := p.readPID(); ok {
 		if proc, err := os.FindProcess(pid); err == nil {
 			terminateProcess(proc)
-			time.Sleep(500 * time.Millisecond)
-			_ = proc.Kill()
+			time.Sleep(orphanGrace)
+			if pidAlive(pid) {
+				_ = proc.Kill()
+			}
 		}
 	}
 	_ = os.Remove(p.pidFile)

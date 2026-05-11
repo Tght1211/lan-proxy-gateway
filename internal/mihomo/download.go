@@ -21,7 +21,7 @@ import (
 // Installer knows how to fetch the mihomo binary for the running host.
 type Installer struct {
 	DestDir string                           // directory to place the binary, e.g. /usr/local/bin
-	Version string                           // e.g. "v1.18.6"; empty means "latest"
+	Version string                           // e.g. "v1.19.24"; empty means "latest"
 	Logf    func(format string, args ...any) // optional progress log; nil = silent
 	BaseURL string                           // release URL prefix; empty = official github. Used by tests.
 }
@@ -120,9 +120,23 @@ func binaryName() string {
 	return "mihomo"
 }
 
+// PinnedMihomoVersion is the mihomo release this gateway version is verified
+// against. Exposed so cmd/install can compare with what's installed on disk
+// and warn / re-download when out of date (issue #4: user's subscription used
+// type: anytls which mihomo only learned in v1.19.3).
+//
+// Bump checklist when changing this:
+//  1. Verify mihomo release notes for breaking config schema changes
+//  2. Update CHANGELOG with the bump rationale
+//  3. Check that key adapters in user subscriptions still parse (vmess/vless/
+//     hysteria2/anytls/tuic)
+//  4. Pin only to non-prerelease tags
+const PinnedMihomoVersion = "v1.19.24"
+
 func resolveLatest() (string, error) {
-	// Pinned version; keeps the build hermetic. Bump as needed.
-	return "v1.18.6", nil
+	// Pinned version; keeps the build hermetic. Bump as needed (see comment
+	// above PinnedMihomoVersion for the bump checklist).
+	return PinnedMihomoVersion, nil
 }
 
 func assetName(goos, arch, version string) (string, string, error) {

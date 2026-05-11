@@ -97,6 +97,10 @@ func (darwinPlatform) ConfigureNAT(iface string) error {
 
 func (darwinPlatform) UnconfigureNAT(iface string) error { return nil }
 
+// PostStopCleanup no-op on darwin: mihomo TUN's NAT/route changes are scoped
+// to its own utun interface, which disappears with the process.
+func (darwinPlatform) PostStopCleanup() error { return nil }
+
 func (darwinPlatform) ResolveMihomoPath(preferred string) (string, error) {
 	if preferred != "" {
 		if _, err := os.Stat(preferred); err == nil {

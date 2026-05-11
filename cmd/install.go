@@ -16,6 +16,10 @@ import (
 	"github.com/tght/lan-proxy-gateway/internal/platform"
 )
 
+var (
+	installReinstallMihomo bool
+)
+
 var installCmd = &cobra.Command{
 	Use:   "install",
 	Short: "一键安装：下载内核 + 数据文件 + 配置向导 + 启动",
@@ -26,9 +30,21 @@ var installCmd = &cobra.Command{
 		plat := platform.Current()
 
 		// Step 1: mihomo 内核
+		// 走"是否要下载"决策的三个分支：
+		//   1) 找不到 mihomo 二进制 → 下载
+		//   2) 找到了但用户传了 --reinstall-mihomo → 强制覆盖下载（本版的主要
+		//      用途：从 v3.4.1 (mihomo v1.18.6) 升上来的用户拿到 v1.19.24 以
+		//      支持订阅里的 anytls 节点；issue #4）
+		//   3) 找到了且用户没要求重装 → 跳过下载，沿用当前 binary
 		color.Cyan("[1/5] 检查 mihomo 内核…")
-		if _, err := plat.ResolveMihomoPath(""); err != nil {
-			color.Yellow("  未检测到 mihomo，开始下载…")
+		existing, lookupErr := plat.ResolveMihomoPath("")
+		needDownload := lookupErr != nil || installReinstallMihomo
+		if needDownload {
+			if installReinstallMihomo && lookupErr == nil {
+				color.Yellow("  --reinstall-mihomo 强制重新下载（覆盖现有 %s 到 %s）", existing, mihomopkg.PinnedMihomoVersion)
+			} else {
+				color.Yellow("  未检测到 mihomo，开始下载…")
+			}
 			dest := defaultInstallDir()
 			inst := mihomopkg.Installer{
 				DestDir: dest,
@@ -40,9 +56,11 @@ var installCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("下载 mihomo 失败: %w\n    若所有镜像都超时，可设 HTTP_PROXY 环境变量或 GITHUB_MIRROR=<镜像前缀> 后重试", err)
 			}
-			color.Green("  ✓ mihomo 已安装: %s", path)
+			color.Green("  ✓ mihomo 已安装: %s (%s)", path, mihomopkg.PinnedMihomoVersion)
 		} else {
 			color.Green("  ✓ mihomo 已就绪")
+			color.New(color.Faint).Printf("    （本版本对应 mihomo %s。订阅里有 anytls / 新协议且报 unsupport proxy type 时，跑 %s 强制升级）\n",
+				mihomopkg.PinnedMihomoVersion, elevatedCmd("install --reinstall-mihomo"))
 		}
 
 		// Step 2: 配置（走向导或加载已有）
@@ -130,6 +148,11 @@ var installCmd = &cobra.Command{
 		color.New(color.Faint).Printf("停止 mihomo   %s\n", elevatedCmd("stop"))
 		return nil
 	},
+}
+
+func init() {
+	installCmd.Flags().BoolVar(&installReinstallMihomo, "reinstall-mihomo", false,
+		"强制重新下载 mihomo 内核，覆盖已有版本（订阅里有 anytls / vless reality 等新协议但报 unsupport proxy type 时用）")
 }
 
 // askYesNo 读一行 y/n，空回车走默认。失败 fallback 到默认（non-TTY 下也不卡）。

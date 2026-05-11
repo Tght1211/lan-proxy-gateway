@@ -112,6 +112,10 @@ func (windowsPlatform) IPForwardEnabled() (bool, error) {
 func (windowsPlatform) ConfigureNAT(iface string) error   { return nil }
 func (windowsPlatform) UnconfigureNAT(iface string) error { return nil }
 
+// PostStopCleanup no-op on windows: mihomo's TUN driver (wintun) cleans up its
+// own routes via the wintun lifecycle when the adapter is destroyed.
+func (windowsPlatform) PostStopCleanup() error { return nil }
+
 func (windowsPlatform) ResolveMihomoPath(preferred string) (string, error) {
 	if preferred != "" {
 		if _, err := os.Stat(preferred); err == nil {

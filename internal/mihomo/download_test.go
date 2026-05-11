@@ -15,6 +15,44 @@ import (
 	"testing"
 )
 
+// 锚住 mihomo 版本 pin：v3.4.2 起 mihomo 必须 ≥ v1.19.3 才能识别订阅里的
+// `type: anytls` 节点 (issue #4)。降到 v1.19.x 以下属于回归 —— 这测试就是
+// 防回归栏，提醒未来改 PinnedMihomoVersion 的人意识到这条最低线。
+func TestPinnedMihomoVersionSatisfiesAnytls(t *testing.T) {
+	v := PinnedMihomoVersion
+	if !strings.HasPrefix(v, "v") {
+		t.Fatalf("pinned version must start with 'v', got %q", v)
+	}
+	parts := strings.SplitN(strings.TrimPrefix(v, "v"), ".", 3)
+	if len(parts) < 2 {
+		t.Fatalf("pinned version too short: %q", v)
+	}
+	major, err1 := atoiTest(parts[0])
+	minor, err2 := atoiTest(parts[1])
+	if err1 != nil || err2 != nil {
+		t.Fatalf("non-numeric major/minor in %q", v)
+	}
+	// anytls 在 v1.19.3 加入；最低门槛 v1.19。
+	switch {
+	case major < 1:
+		t.Fatalf("pinned mihomo %s < v1.x — way too old, missing modern adapters", v)
+	case major == 1 && minor < 19:
+		t.Fatalf("pinned mihomo %s < v1.19 — anytls / vless-reality not supported (issue #4 regression)", v)
+	}
+}
+
+// 小工具，避开测试文件单独 import strconv
+func atoiTest(s string) (int, error) {
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0, fmt.Errorf("non-digit %q", r)
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n, nil
+}
+
 func TestMirrorCandidatesDefault(t *testing.T) {
 	t.Setenv("GITHUB_MIRROR", "")
 	got := mirrorCandidates("https://github.com/foo/bar")

@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented here.
 
+## v3.4.2 - 2026-05-12
+
+### Changed
+
+- Bumped pinned mihomo from `v1.18.6` to `v1.19.24`. Adds support for the `anytls` proxy type that landed in mihomo v1.19.3 (resolves [issue #4](https://github.com/Tght1211/lan-proxy-gateway/issues/4): subscriptions with `type: anytls` nodes were rejected with `unsupport proxy type: anytls`). v1.19.24 also brings vless reality fixes, hysteria2 stability, and several CVE patches for net/http. New users get this automatically; existing users on v1.18.6 must run the new `gateway install --reinstall-mihomo` flag (see Added) — `gateway install` alone won't re-download because it skips the step when mihomo is already on disk.
+- Mihomo SIGTERM → SIGKILL grace bumped from **3s to 8s** on Unix. mihomo's TUN strict-route shutdown work (deleting high-pref ip rules, flushing custom routing table, tearing down the tun device) sometimes didn't fit in 3s; the SIGKILL escalation cut it short, leaving the rules behind (root cause of [issue #5](https://github.com/Tght1211/lan-proxy-gateway/issues/5)). 8s is generous for the normal case (clean exit < 2s) but gives slow / busy hosts real headroom.
+
+### Added
+
+- `gateway install --reinstall-mihomo` flag forces re-download of mihomo even if a binary already exists on disk, overwriting it with the version pinned to the current gateway release. Primary use: lifting v3.4.1 (mihomo v1.18.6) installs to v3.4.2 (mihomo v1.19.24) so subscriptions with anytls nodes start working
+- New `Platform.PostStopCleanup()` hook on the OS abstraction. No-op on darwin / windows; on Linux it scrubs leftover mihomo TUN strict-route ip rules whose pref looks like mihomo's signature (`9000-9999` + `unreachable` action). Defends against the case where mihomo got SIGKILL'd mid-cleanup or crashed, leaving stale `pref 9000 from all unreachable` rules behind that could break Docker DNAT for non-port-preserving port mappings (`host:container 2228:2283` style — root cause of [issue #5](https://github.com/Tght1211/lan-proxy-gateway/issues/5)). Wired into `gateway.Disable()` so it always runs on `gateway stop` after mihomo terminates and after the MASQUERADE rule has been removed
+
+### Tests
+
+- `internal/platform/cleanup_parser_test.go` — 7 cases covering the leftover-rule parser: detects mihomo signature, ignores clean systems, refuses to touch admin's own high-pref non-unreachable rules, refuses pref outside [9000,9999], handles multiple leftovers, handles empty / junk input. Parser lives in a portable file (`cleanup_parser.go`) so darwin / windows CI also runs the tests.
+- `internal/gateway/gateway_test.go` — asserts `Gateway.Disable()` calls `UnconfigureNAT` → `DisableIPForward` → `PostStopCleanup` in that order, and that `PostStopCleanup` still runs when no interface was detected (defense-in-depth — the cleanup is independent of NAT teardown).
+- `internal/mihomo/download_test.go::TestPinnedMihomoVersionSatisfiesAnytls` — version-pin guardrail. Refuses any future bump back below mihomo v1.19, where anytls support starts. Catches accidental regressions during cherry-picks / merges.
+
 ## v3.4.1 - 2026-05-06
 
 ### Fixed

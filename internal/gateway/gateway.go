@@ -52,11 +52,24 @@ func (g *Gateway) Enable() error {
 }
 
 // Disable is the inverse of Enable, best-effort.
+//
+// Order matters:
+//  1. UnconfigureNAT — remove the MASQUERADE rule we added in Enable
+//  2. DisableIPForward — turn off sysctl
+//  3. PostStopCleanup — scrub leftover TUN strict-route ip rules from
+//     mihomo (Linux only, no-op elsewhere). Issue #5: mihomo killed
+//     by SIGKILL leaves `pref 9000+ from all unreachable` rules behind
+//     which can break Docker DNAT for non-port-preserving port mappings.
+//
+// Each step's failure is swallowed except DisableIPForward which we
+// return so the user sees if the sysctl write actually failed.
 func (g *Gateway) Disable() error {
 	if g.info.Interface != "" {
 		_ = g.plat.UnconfigureNAT(g.info.Interface)
 	}
-	return g.plat.DisableIPForward()
+	disableErr := g.plat.DisableIPForward()
+	_ = g.plat.PostStopCleanup()
+	return disableErr
 }
 
 // Status reports whether IP forwarding is currently active.
