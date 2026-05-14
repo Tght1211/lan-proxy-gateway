@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizeRequestedVersion(t *testing.T) {
@@ -14,6 +16,8 @@ func TestNormalizeRequestedVersion(t *testing.T) {
 		{in: "", want: ""},
 		{in: "latest", want: ""},
 		{in: "LATEST", want: ""},
+		{in: "laste", want: ""},
+		{in: "lastest", want: ""},
 		{in: "3.4.3", want: "v3.4.3"},
 		{in: " v3.3.2 ", want: "v3.3.2"},
 		{in: "nightly", want: "nightly"},
@@ -22,6 +26,19 @@ func TestNormalizeRequestedVersion(t *testing.T) {
 		if got := normalizeRequestedVersion(tc.in); got != tc.want {
 			t.Fatalf("normalizeRequestedVersion(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestResolveUpdateTagSpecificVersionDoesNotFetchNetwork(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	got, err := resolveUpdateTag(ctx, "3.4.4")
+	if err != nil {
+		t.Fatalf("resolveUpdateTag() error = %v", err)
+	}
+	if got != "v3.4.4" {
+		t.Fatalf("resolveUpdateTag() = %q, want %q", got, "v3.4.4")
 	}
 }
 

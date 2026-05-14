@@ -418,7 +418,7 @@ func (c *consoleUI) configureFile() bool {
 //
 // 默认只画 dashboard（实时速率 / 累计 / 起飞落地 / 设备表），每 2 秒自动刷。
 // 旧的多级菜单藏到 [M] 键后面，避免首屏被操作项淹没。
-// 快捷键：M 菜单、N 切节点、T 重测代理源、Q 关网关退出。
+// 快捷键：M 菜单、N 切节点、T 重测代理源、Q 退出控制台（网关留后台）。
 
 func (c *consoleUI) main(ctx context.Context) error {
 	// 静态首页：画一次 dashboard，等用户输入。回车 / R 主动刷新，避免自动刷新
@@ -438,9 +438,7 @@ func (c *consoleUI) main(ctx context.Context) error {
 		case "t":
 			c.screenSource(ctx)
 		case "q", "exit", "quit":
-			if c.shutdownGateway() {
-				return nil
-			}
+			return nil
 		default:
 			warnC.Fprintln(c.out, "无效选项（回车 / R 刷新 · M 菜单 · N 切节点 · T 重测 · Q 退出）")
 		}
@@ -508,10 +506,12 @@ func (c *consoleUI) screenMenu(ctx context.Context) (exitConsole bool) {
 			if c.shutdownGateway() {
 				return true
 			}
-		case "0", "q", "back":
+		case "0", "back":
 			return false
+		case "q", "exit", "quit":
+			return true
 		default:
-			warnC.Fprintln(c.out, "无效选项（数字=子菜单，0/Q 返回仪表盘）")
+			warnC.Fprintln(c.out, "无效选项（数字=子菜单，0 返回仪表盘，Q 退出控制台）")
 		}
 	}
 }

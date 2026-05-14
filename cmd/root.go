@@ -28,7 +28,8 @@ var rootCmd = &cobra.Command{
 		}
 		return console.Run(context.Background(), a)
 	},
-	SilenceUsage: true,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 // Execute runs the root command. Called from main.

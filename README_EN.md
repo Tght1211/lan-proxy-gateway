@@ -123,6 +123,7 @@ Detailed scenarios + traffic-path diagrams: [docs/scenarios.md](docs/scenarios.m
 
 ```bash
 sudo gateway update            # latest release
+sudo gateway update latest     # same as above
 sudo gateway update v3.4.3     # specific tag (or rollback)
 ```
 

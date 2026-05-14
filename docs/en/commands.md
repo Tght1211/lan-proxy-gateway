@@ -85,7 +85,7 @@ This makes the project feel closer to a CLI workbench for Clash Verge Rev style 
 | Command | Purpose | Requires admin |
 |---|---|:---:|
 | `sudo gateway health` | Run health checks and try to repair common issues | Yes |
-| `sudo gateway update` | Upgrade to the latest version, with mirror-aware download fallback | Yes |
+| `sudo gateway update` / `sudo gateway update latest` | Upgrade to the latest version, with mirror-aware download fallback | Yes |
 | `sudo gateway update v3.4.3` | Update or roll back to a specific version; `3.4.3` also works | Yes |
 | `gateway permission print` | Print the sudoers snippet | No |
 | `sudo gateway permission install` | Install passwordless control rules so normal commands can auto-escalate later | Yes |

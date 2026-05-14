@@ -20,8 +20,9 @@ import (
 )
 
 const (
-	updateRepo    = "Tght1211/lan-proxy-gateway"
-	updateAPIBase = "https://api.github.com/repos/" + updateRepo
+	updateRepo       = "Tght1211/lan-proxy-gateway"
+	updateAPIBase    = "https://api.github.com/repos/" + updateRepo
+	updateAPITimeout = 20 * time.Second
 )
 
 var updateMirrors = []string{
@@ -35,6 +36,7 @@ var updateCmd = &cobra.Command{
 	Use:   "update [version]",
 	Short: "升级到最新版本，或升级/回退到指定版本",
 	Example: `  sudo gateway update
+  sudo gateway update latest
   sudo gateway update v3.4.3
   sudo gateway update 3.3.2`,
 	Args: cobra.MaximumNArgs(1),
@@ -152,12 +154,13 @@ func resolveUpdateTag(ctx context.Context, requested string) (string, error) {
 	if tag == "" {
 		return fetchReleaseTag(ctx, updateAPIBase+"/releases/latest")
 	}
-	return fetchReleaseTag(ctx, updateAPIBase+"/releases/tags/"+tag)
+	return tag, nil
 }
 
 func normalizeRequestedVersion(v string) string {
 	v = strings.TrimSpace(v)
-	if v == "" || strings.EqualFold(v, "latest") {
+	switch strings.ToLower(v) {
+	case "", "latest", "last", "laste", "lastest":
 		return ""
 	}
 	if !strings.HasPrefix(v, "v") && len(v) > 0 && v[0] >= '0' && v[0] <= '9' {
@@ -167,37 +170,44 @@ func normalizeRequestedVersion(v string) string {
 }
 
 func fetchReleaseTag(ctx context.Context, url string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
 	var failures []string
 	client := updateHTTPClient()
 	for _, candidate := range updateURLCandidates(url) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, candidate, nil)
-		if err != nil {
-			return "", err
+		tag, err := fetchReleaseTagFromCandidate(ctx, client, candidate)
+		if err == nil {
+			return tag, nil
 		}
-		req.Header.Set("User-Agent", "lan-proxy-gateway")
-		req.Header.Set("Accept", "application/vnd.github+json")
-		resp, err := client.Do(req)
-		if err != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", candidate, err))
-			continue
-		}
-		var release githubRelease
-		decodeErr := json.NewDecoder(resp.Body).Decode(&release)
-		resp.Body.Close()
-		if resp.StatusCode == http.StatusOK && decodeErr == nil && release.TagName != "" {
-			return release.TagName, nil
-		}
-		if resp.StatusCode != http.StatusOK {
-			failures = append(failures, fmt.Sprintf("%s: HTTP %d", candidate, resp.StatusCode))
-		} else if decodeErr != nil {
-			failures = append(failures, fmt.Sprintf("%s: 解析版本信息失败: %v", candidate, decodeErr))
-		} else {
-			failures = append(failures, fmt.Sprintf("%s: 版本信息里没有 tag_name", candidate))
-		}
+		failures = append(failures, fmt.Sprintf("%s: %v", candidate, err))
 	}
 	return "", fmt.Errorf("所有版本源均失败: %s", strings.Join(failures, "; "))
+}
+
+func fetchReleaseTagFromCandidate(ctx context.Context, client *http.Client, candidate string) (string, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, updateAPITimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, candidate, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "lan-proxy-gateway")
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var release githubRelease
+	decodeErr := json.NewDecoder(resp.Body).Decode(&release)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	if decodeErr != nil {
+		return "", fmt.Errorf("解析版本信息失败: %v", decodeErr)
+	}
+	if release.TagName == "" {
+		return "", fmt.Errorf("版本信息里没有 tag_name")
+	}
+	return release.TagName, nil
 }
 
 func gatewayReleaseAsset(goos, goarch string) (string, error) {

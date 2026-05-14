@@ -132,6 +132,7 @@ gateway start          # Windows（管理员终端，无需 sudo）
 
 ```bash
 sudo gateway update            # 升级到最新
+sudo gateway update latest     # 同上，显式指定 latest
 sudo gateway update v3.4.3     # 升级或回退到指定版本
 ```
 
