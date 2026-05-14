@@ -109,6 +109,7 @@ func (e *Engine) API() *Client { return e.api }
 
 // Start renders the config, launches mihomo, and waits briefly for the API to come up.
 func (e *Engine) Start(ctx context.Context, cfg *configpkg.Config) error {
+	cfg = configpkg.EffectiveRuntimeConfig(cfg)
 	return e.startRendered(ctx, cfg, nil)
 }
 
@@ -197,6 +198,7 @@ func (e *Engine) Stop() error {
 // 进程重启才生效。用户从菜单点「重启」后发现 UI 不通、端口没换，体验很差。
 // 统一走 Stop+Start 简单可靠，代价是 LAN 设备断流 1-2 秒。
 func (e *Engine) Reload(ctx context.Context, cfg *configpkg.Config) error {
+	cfg = configpkg.EffectiveRuntimeConfig(cfg)
 	if !e.Running() {
 		return e.Start(ctx, cfg)
 	}

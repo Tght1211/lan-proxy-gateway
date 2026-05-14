@@ -6,16 +6,21 @@
 //   - Source   : proxy source (external/subscription/file/remote/none) + optional script
 package config
 
+import (
+	"net"
+	"strings"
+)
+
 // Version is the current schema version. Bump when a breaking change lands.
 const Version = 2
 
 // Config is the root configuration persisted at ~/.config/lan-proxy-gateway/gateway.yaml.
 type Config struct {
-	Version int            `yaml:"version"`
-	Gateway GatewayConfig  `yaml:"gateway"`
-	Traffic TrafficConfig  `yaml:"traffic"`
-	Source  SourceConfig   `yaml:"source"`
-	Runtime RuntimeConfig  `yaml:"runtime"`
+	Version int           `yaml:"version"`
+	Gateway GatewayConfig `yaml:"gateway"`
+	Traffic TrafficConfig `yaml:"traffic"`
+	Source  SourceConfig  `yaml:"source"`
+	Runtime RuntimeConfig `yaml:"runtime"`
 }
 
 // GatewayConfig drives the LAN gateway (the "main" feature).
@@ -42,10 +47,10 @@ type DNSConfig struct {
 
 // TrafficConfig is the traffic policy (the "sub" feature).
 type TrafficConfig struct {
-	Mode     string          `yaml:"mode"`    // rule | global | direct
-	Adblock  bool            `yaml:"adblock"`
-	Extras   ExtraRules      `yaml:"extras"`
-	Rulesets RulesetToggles  `yaml:"rulesets"`
+	Mode     string         `yaml:"mode"` // rule | global | direct
+	Adblock  bool           `yaml:"adblock"`
+	Extras   ExtraRules     `yaml:"extras"`
+	Rulesets RulesetToggles `yaml:"rulesets"`
 	// AutoGroups 开启后，subscription / file 源在渲染时若发现用户订阅里没有
 	// url-test / fallback 类型的策略组，会自动追加 Auto + Fallback 组，引用
 	// 订阅里全部节点。v2.x 的模板里默认就有这两个组，v3 重写时丢了这个能力，
@@ -133,12 +138,12 @@ type RemoteProxy struct {
 
 // Profile is a named source preset (advanced).
 type Profile struct {
-	Name         string             `yaml:"name"`
-	Type         string             `yaml:"type"`
-	External     *ExternalProxy     `yaml:"external,omitempty"`
+	Name         string              `yaml:"name"`
+	Type         string              `yaml:"type"`
+	External     *ExternalProxy      `yaml:"external,omitempty"`
 	Subscription *SubscriptionSource `yaml:"subscription,omitempty"`
-	File         *FileSource        `yaml:"file,omitempty"`
-	Remote       *RemoteProxy       `yaml:"remote,omitempty"`
+	File         *FileSource         `yaml:"file,omitempty"`
+	Remote       *RemoteProxy        `yaml:"remote,omitempty"`
 }
 
 // RuntimeConfig groups technical settings (ports, secrets, logging).
@@ -212,3 +217,49 @@ const (
 	SourceTypeRemote       = "remote"
 	SourceTypeNone         = "none"
 )
+
+// UsesLocalExternalProxy reports whether gateway is chained behind another
+// proxy client on the same host, e.g. Clash Verge / Mihomo Party at 127.0.0.1.
+// In this shape gateway must not enable transparent TUN routing, otherwise the
+// upstream client's own outbound traffic can be captured again and loop back
+// through gateway.
+func UsesLocalExternalProxy(cfg *Config) bool {
+	if cfg == nil || cfg.Source.Type != SourceTypeExternal {
+		return false
+	}
+	return IsLoopbackHost(cfg.Source.External.Server)
+}
+
+// EffectiveRuntimeConfig returns a copy adjusted for runtime safety.
+//
+// When gateway chains behind another proxy on the same machine, transparent TUN
+// routing can capture that upstream proxy client's own outbound traffic and
+// create a self-proxy loop. In that topology gateway should act as a LAN
+// HTTP/SOCKS port sharer only: keep mixed-port available, but avoid IP
+// forwarding, DNS hijack, and TUN route changes.
+func EffectiveRuntimeConfig(cfg *Config) *Config {
+	if cfg == nil {
+		return nil
+	}
+	out := *cfg
+	if UsesLocalExternalProxy(cfg) {
+		out.Gateway.Enabled = false
+		out.Gateway.TUN.Enabled = false
+		out.Gateway.DNS.Enabled = false
+	}
+	return &out
+}
+
+func IsLoopbackHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}

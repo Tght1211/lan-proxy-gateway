@@ -8,7 +8,7 @@
 
 当前计划版本:
 
-- `v3.4.5`
+- `v3.4.6`
 
 ## 发布前检查
 
@@ -23,7 +23,7 @@ go test ./...
 4. 构建 release 资产:
 
 ```bash
-make build-all VERSION=v3.4.5
+make build-all VERSION=v3.4.6
 ```
 
 ## Release 资产
@@ -38,9 +38,9 @@ make build-all VERSION=v3.4.5
 ## 触发正式发布
 
 ```bash
-git tag -a v3.4.5 -m "v3.4.5"
+git tag -a v3.4.6 -m "v3.4.6"
 git push origin main
-git push origin v3.4.5
+git push origin v3.4.6
 ```
 
 GitHub Actions 会自动:

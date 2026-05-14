@@ -115,3 +115,38 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("validate: %v", err)
 	}
 }
+
+func TestUsesLocalExternalProxy(t *testing.T) {
+	cfg := Default()
+	cfg.Source.Type = SourceTypeExternal
+	for _, host := range []string{"127.0.0.1", "localhost", "::1"} {
+		cfg.Source.External.Server = host
+		if !UsesLocalExternalProxy(cfg) {
+			t.Fatalf("host %q should be treated as local external proxy", host)
+		}
+	}
+	cfg.Source.External.Server = "192.168.1.2"
+	if UsesLocalExternalProxy(cfg) {
+		t.Fatal("LAN host should not be treated as local external proxy")
+	}
+}
+
+func TestEffectiveRuntimeConfigProtectsLocalExternalProxy(t *testing.T) {
+	cfg := Default()
+	cfg.Gateway.Enabled = true
+	cfg.Gateway.TUN.Enabled = true
+	cfg.Gateway.DNS.Enabled = true
+	cfg.Source.Type = SourceTypeExternal
+	cfg.Source.External.Server = "127.0.0.1"
+
+	effective := EffectiveRuntimeConfig(cfg)
+	if effective == cfg {
+		t.Fatal("EffectiveRuntimeConfig must return a copy")
+	}
+	if effective.Gateway.Enabled || effective.Gateway.TUN.Enabled || effective.Gateway.DNS.Enabled {
+		t.Fatalf("local external proxy should disable transparent gateway features: %+v", effective.Gateway)
+	}
+	if !cfg.Gateway.Enabled || !cfg.Gateway.TUN.Enabled || !cfg.Gateway.DNS.Enabled {
+		t.Fatal("original config should not be mutated")
+	}
+}

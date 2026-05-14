@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented here.
 
+## v3.4.6 - 2026-05-15
+
+### Fixed
+
+- Local single-proxy mode is now protected from self-proxy loops. When `source.type=external` points to a loopback host such as `127.0.0.1`, `localhost`, or `::1`, gateway now runs as a LAN mixed-port sharer only: it keeps `mixed-port` available for devices, but disables transparent gateway, DNS listener, and TUN routing at runtime. This prevents gateway from capturing the upstream proxy client's own outbound traffic and breaking the whole chain.
+- Source health checks for `external` and `remote` proxies now perform a real proxy request to `http://www.gstatic.com/generate_204` instead of only checking that the TCP port is open. An open but unusable proxy port is now reported as unhealthy immediately.
+- Console wording now explicitly says TUN is for "change gateway" devices, while phone/computer clients that manually set `gatewayIP:17890` should keep TUN off when chaining through a local proxy client.
+
+### Tests
+
+- Added runtime-config tests for loopback external proxy detection and non-mutating safety-mode generation.
+- Added render tests proving local external proxy mode emits `tun.enable=false` and `dns.enable=false`.
+- Added source tests that reject an open TCP port that is not a functioning proxy.
+- Added app test proving local external proxy mode skips transparent gateway enablement.
+
 ## v3.4.5 - 2026-05-15
 
 ### Fixed

@@ -669,7 +669,7 @@ func (c *consoleUI) screenTraffic(ctx context.Context) {
 			onOff(cfg.Traffic.Adblock),
 			len(cfg.Traffic.Extras.Direct)+len(cfg.Traffic.Extras.Proxy)+len(cfg.Traffic.Extras.Reject))
 		fmt.Fprintln(c.out, "  1  切换模式     rule=国内直连+国外代理（推荐）/ global=全走代理 / direct=全直连")
-		fmt.Fprintln(c.out, "  2  开关 TUN     （Switch/PS5 等能走代理的关键，一般别动）")
+		fmt.Fprintln(c.out, "  2  开关 TUN     （改网关设备需要；手机/电脑只填 17890 时建议关，避免影响本机其它代理）")
 		fmt.Fprintln(c.out, "  3  开关广告拦截")
 		fmt.Fprintln(c.out, "  4  自定义规则   直连 / 代理 / 拒绝 三组（优先级最高，盖过内置 china_direct 等）")
 		fmt.Fprintf(c.out, "  5  策略组自动补全 %s   订阅里缺 Auto/Fallback 时自动加（直选节点也能自动切换）\n",
@@ -707,7 +707,8 @@ func (c *consoleUI) screenTraffic(ctx context.Context) {
 				fmt.Fprintln(c.out, "  Switch / PS5 / Apple TV / 智能电视")
 				fmt.Fprintln(c.out, "  即使改了网关指向本机，流量也只会被普通路由转发，")
 				fmt.Fprintln(c.out, "  【不会走代理】，跟没开网关一样被墙。")
-				fmt.Fprintln(c.out, "  只有手机/电脑等可以手动填代理服务器的设备才能关 TUN。")
+				fmt.Fprintln(c.out, "  如果你只是让手机/电脑手动填代理服务器=本机 IP:17890，")
+				fmt.Fprintln(c.out, "  关 TUN 反而更稳：gateway 只共享端口，不接管本机其它代理客户端的出站。")
 				if !c.yesNo("确定要关闭 TUN？", false) {
 					continue
 				}
@@ -885,7 +886,7 @@ func (c *consoleUI) screenTrafficAdvanced(ctx context.Context) {
 		fmt.Fprintf(c.out, "  DNS 代理 %s (端口 %d)  ·  mixed %d  ·  API %d\n\n",
 			onOff(cfg.Gateway.DNS.Enabled), cfg.Gateway.DNS.Port,
 			cfg.Runtime.Ports.Mixed, cfg.Runtime.Ports.API)
-		fmt.Fprintln(c.out, "  1  开关 DNS 代理        （本机 53 端口被 Clash Verge 等占用时关掉）")
+		fmt.Fprintln(c.out, "  1  开关 DNS 代理        （只用手机/电脑填 17890 时可关；改网关设备才需要）")
 		fmt.Fprintln(c.out, "  2  修改 DNS 监听端口    （默认 53；改了 LAN 设备就基本解析不了，不建议动）")
 		fmt.Fprintln(c.out, "  3  修改 mixed 端口      （HTTP+SOCKS5，默认 17890，避开 Clash 7890；也是局域网代理端口）")
 		fmt.Fprintln(c.out, "  4  修改 API 端口        （默认 19090，避开 Clash 9090；Web 控制台也走这个）")

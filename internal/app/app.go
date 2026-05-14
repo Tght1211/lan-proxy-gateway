@@ -68,7 +68,8 @@ func (a *App) Save() error {
 
 // Start brings up the LAN gateway and the mihomo engine.
 func (a *App) Start(ctx context.Context) error {
-	if a.Cfg.Gateway.Enabled {
+	effective := config.EffectiveRuntimeConfig(a.Cfg)
+	if effective.Gateway.Enabled {
 		if err := a.Gateway.Enable(); err != nil {
 			return fmt.Errorf("启动局域网网关失败: %w", err)
 		}
@@ -84,7 +85,7 @@ func (a *App) Start(ctx context.Context) error {
 	}
 	startCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	return a.Engine.Start(startCtx, a.Cfg)
+	return a.Engine.Start(startCtx, effective)
 }
 
 // Stop tears everything down, best-effort.
@@ -136,7 +137,7 @@ func (a *App) SetMode(ctx context.Context, mode string) error {
 		return err
 	}
 	if a.Engine.Running() {
-		return a.Engine.Reload(ctx, a.Cfg)
+		return a.Engine.Reload(ctx, config.EffectiveRuntimeConfig(a.Cfg))
 	}
 	return nil
 }
@@ -148,7 +149,7 @@ func (a *App) ToggleAdblock(ctx context.Context) error {
 		return err
 	}
 	if a.Engine.Running() {
-		return a.Engine.Reload(ctx, a.Cfg)
+		return a.Engine.Reload(ctx, config.EffectiveRuntimeConfig(a.Cfg))
 	}
 	return nil
 }
@@ -160,7 +161,7 @@ func (a *App) ToggleTUN(ctx context.Context) error {
 		return err
 	}
 	if a.Engine.Running() {
-		return a.Engine.Reload(ctx, a.Cfg)
+		return a.Engine.Reload(ctx, config.EffectiveRuntimeConfig(a.Cfg))
 	}
 	return nil
 }
@@ -172,7 +173,7 @@ func (a *App) SetSource(ctx context.Context, src config.SourceConfig) error {
 		return err
 	}
 	if a.Engine.Running() {
-		return a.Engine.Reload(ctx, a.Cfg)
+		return a.Engine.Reload(ctx, config.EffectiveRuntimeConfig(a.Cfg))
 	}
 	return nil
 }
@@ -193,6 +194,7 @@ type Status struct {
 
 // Status returns the current runtime status (no blocking network calls).
 func (a *App) Status() Status {
+	effective := config.EffectiveRuntimeConfig(a.Cfg)
 	gs, _ := a.Gateway.Status()
 	bin := ""
 	if p, err := a.Plat.ResolveMihomoPath(""); err == nil {
@@ -201,12 +203,12 @@ func (a *App) Status() Status {
 	return Status{
 		Configured: a.Configured(),
 		Running:    a.Engine != nil && a.Engine.Running(),
-		Mode:       a.Cfg.Traffic.Mode,
-		Adblock:    a.Cfg.Traffic.Adblock,
-		TUN:        a.Cfg.Gateway.TUN.Enabled,
-		Source:     a.Cfg.Source.Type,
+		Mode:       effective.Traffic.Mode,
+		Adblock:    effective.Traffic.Adblock,
+		TUN:        effective.Gateway.TUN.Enabled,
+		Source:     effective.Source.Type,
 		Gateway:    gs,
-		Ports:      a.Cfg.Runtime.Ports,
+		Ports:      effective.Runtime.Ports,
 		MihomoBin:  bin,
 		ConfigFile: a.Paths.ConfigFile,
 	}

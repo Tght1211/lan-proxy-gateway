@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -32,9 +33,9 @@ func Test(ctx context.Context, src config.SourceConfig) error {
 func TestWithOptions(ctx context.Context, src config.SourceConfig, opts TestOptions) error {
 	switch src.Type {
 	case config.SourceTypeExternal:
-		return testTCP(ctx, src.External.Server, src.External.Port)
+		return testProxy(ctx, src.External.Kind, src.External.Server, src.External.Port, "", "")
 	case config.SourceTypeRemote:
-		return testTCP(ctx, src.Remote.Server, src.Remote.Port)
+		return testProxy(ctx, src.Remote.Kind, src.Remote.Server, src.Remote.Port, src.Remote.Username, src.Remote.Password)
 	case config.SourceTypeSubscription:
 		proxyURL := opts.SubscriptionProxyURL
 		if proxyURL == "" {
@@ -59,6 +60,37 @@ func testTCP(ctx context.Context, host string, port int) error {
 		return fmt.Errorf("连不上 %s:%d → %w", host, port, err)
 	}
 	_ = conn.Close()
+	return nil
+}
+
+func testProxy(ctx context.Context, kind, host string, port int, username, password string) error {
+	if err := testTCP(ctx, host, port); err != nil {
+		return err
+	}
+	proxyURL := proxyURLForProxy(kind, host, port, username, password)
+	if proxyURL == "" {
+		return fmt.Errorf("不支持的代理类型: %s", kind)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://www.gstatic.com/generate_204", nil)
+	if err != nil {
+		return err
+	}
+	u, err := url.Parse(proxyURL)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: http.ProxyURL(u)},
+		Timeout:   8 * time.Second,
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("%s:%d 端口开着，但代理请求失败 → %w", host, port, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("%s:%d 端口开着，但代理返回 HTTP %d", host, port, resp.StatusCode)
+	}
 	return nil
 }
 

@@ -11,7 +11,7 @@ import (
 func TestRenderExternalSource(t *testing.T) {
 	cfg := config.Default()
 	cfg.Source.Type = config.SourceTypeExternal
-	cfg.Source.External.Server = "127.0.0.1"
+	cfg.Source.External.Server = "192.0.2.10"
 	cfg.Source.External.Port = 7890
 	cfg.Source.External.Kind = "http"
 
@@ -29,7 +29,7 @@ func TestRenderExternalSource(t *testing.T) {
 	if !strings.Contains(s, "MATCH,Proxy") {
 		t.Errorf("rules not rendered")
 	}
-	if !strings.Contains(s, "127.0.0.1") {
+	if !strings.Contains(s, "192.0.2.10") {
 		t.Errorf("upstream server not rendered")
 	}
 	if !strings.Contains(s, "tun:") || !strings.Contains(s, "enable: true") {
@@ -110,5 +110,28 @@ func TestRenderTUNOff(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "enable: false") {
 		t.Errorf("TUN off not rendered")
+	}
+}
+
+func TestRenderLocalExternalProxyDisablesTransparentGateway(t *testing.T) {
+	cfg := config.Default()
+	cfg.Gateway.Enabled = true
+	cfg.Gateway.TUN.Enabled = true
+	cfg.Gateway.DNS.Enabled = true
+	cfg.Source.Type = config.SourceTypeExternal
+	cfg.Source.External.Server = "127.0.0.1"
+	cfg.Source.External.Port = 6578
+	cfg.Source.External.Kind = "socks5"
+
+	out, err := Render(context.Background(), cfg, t.TempDir())
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "tun:\n  enable: false\n") {
+		t.Fatalf("local external proxy must not enable TUN:\n%s", contextAround(s, "tun:", 160))
+	}
+	if !strings.Contains(s, "dns:\n  enable: false\n") {
+		t.Fatalf("local external proxy must not enable DNS listener:\n%s", contextAround(s, "dns:", 220))
 	}
 }
