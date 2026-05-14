@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented here.
 
+## v3.4.5 - 2026-05-15
+
+### Fixed
+
+- `gateway update vX.Y.Z` no longer calls the GitHub release-tag API before comparing versions. A pinned update such as `gateway update v3.4.4` now resolves locally to that exact tag first, so an already-current install can return immediately instead of failing on a GitHub API timeout.
+- `gateway update` / `gateway update latest` still fetch the latest release. Common mistypes `laste` and `lastest` are treated as `latest`.
+- Release-version lookup now gives every candidate source its own timeout budget. Previously the first slow GitHub API request could consume the shared context, causing all mirror candidates to fail immediately with `context deadline exceeded` without really being tried.
+- CLI errors are no longer printed twice by Cobra on failure.
+- Console `Q` now matches the text shown on screen: it exits the console and leaves mihomo running in the background. Use menu item `6` to stop gateway/mihomo and exit.
+
+### Docs
+
+- README and command docs now explicitly list `gateway update latest`.
+
+### Tests
+
+- Added update tests for pinned-version resolution without network access and `latest` mistype normalization.
+- Added console tests for `Q` exiting the console and `0` returning to the dashboard.
+
 ## v3.4.4 - 2026-05-14
 
 ### Fixed
