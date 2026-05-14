@@ -619,12 +619,12 @@ func (c *consoleUI) screenGateway() {
 		// 方式 3 的状态灯 + 一键开关（macOS 实打实切；Linux 显示命令提示）
 		isLoopback, _ := c.app.Plat.LocalDNSIsLoopback()
 		if isLoopback {
-			okC.Fprintln(c.out, "\n  ● 本机 DNS 已指向 127.0.0.1（方式 3 已生效）")
+			okC.Fprintln(c.out, "\n  本机 DNS: 127.0.0.1（停止 gateway 时自动恢复）")
 		} else {
-			dimC.Fprintln(c.out, "\n  ○ 本机 DNS 未指向 127.0.0.1（方式 3 未生效）")
+			dimC.Fprintln(c.out, "\n  本机 DNS: 默认")
 		}
 		fmt.Fprintln(c.out)
-		titleC.Fprintln(c.out, "  ── 操作 ── L 本机 DNS 切到 127.0.0.1   R 恢复默认   T 给 IP 起名字   0 返回（或按 Q）")
+		titleC.Fprintln(c.out, "  ── 操作 ── L 切本机 DNS   R 恢复 DNS   T 标记设备   0 返回（或按 Q）")
 
 		switch strings.ToLower(strings.TrimSpace(c.prompt("选择：> "))) {
 		case "l":
@@ -1615,7 +1615,11 @@ func (c *consoleUI) screenLifecycle(ctx context.Context) {
 		// 才要改系统状态（IP 转发、TUN 设备）。按是否在运行给两种语气的提示，
 		// 避免旧文案把「启动/停止/清理全都要 sudo」这条过度告警给误导用户。
 		if s.Running {
-			dimC.Fprintln(c.out, "  （未用 sudo：已在运行，重启/停止通常不需要 sudo；切 TUN 或绑 53 端口才需要）")
+			if loopback, _ := c.app.Plat.LocalDNSIsLoopback(); loopback {
+				warnC.Fprintln(c.out, "  （本机 DNS 指向 127.0.0.1；停止会恢复 DNS，建议用 sudo gateway stop）")
+			} else {
+				dimC.Fprintln(c.out, "  （未用 sudo：已在运行，重启/停止通常不需要 sudo；切 TUN 或绑 53 端口才需要）")
+			}
 		} else {
 			warnC.Fprintln(c.out, "  （未用 sudo 运行：启动需要 sudo，请退出后运行 sudo gateway）")
 		}
@@ -1637,7 +1641,7 @@ func (c *consoleUI) screenLifecycle(ctx context.Context) {
 		if err := c.app.Stop(); err != nil {
 			badC.Fprintln(c.out, err.Error())
 		} else {
-			okC.Fprintln(c.out, "已停止")
+			okC.Fprintln(c.out, "已停止，并已检查本机 DNS")
 		}
 	case "4":
 		c.cleanupStaleMihomo()
@@ -1661,7 +1665,7 @@ func (c *consoleUI) shutdownGateway() bool {
 			badC.Fprintf(c.out, "停止失败: %v\n", err)
 			return false
 		}
-		okC.Fprintln(c.out, "已停止 mihomo")
+		okC.Fprintln(c.out, "已停止 mihomo，并已检查本机 DNS")
 	}
 	return true
 }

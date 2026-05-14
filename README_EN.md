@@ -243,6 +243,7 @@ You will see:
 | `gateway permission install` | Install passwordless control rule (macOS/Linux only) |
 | `sudo gateway service install` | Install auto-start (implemented with Task Scheduler on Windows) |
 | `sudo gateway update` | Upgrade to the latest version |
+| `sudo gateway update v3.4.3` | Update or roll back to a specific version |
 
 Full command reference: [docs/en/commands.md](docs/en/commands.md)
 

@@ -86,8 +86,41 @@ func (a *App) Start(ctx context.Context) error {
 
 // Stop tears everything down, best-effort.
 func (a *App) Stop() error {
-	_ = a.Engine.Stop()
-	return a.Gateway.Disable()
+	var firstErr error
+	if err := a.restoreLocalDNSIfLoopback(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if a.Engine != nil {
+		if err := a.Engine.Stop(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if a.Gateway != nil {
+		if err := a.Gateway.Disable(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (a *App) restoreLocalDNSIfLoopback() error {
+	if a.Plat == nil {
+		return nil
+	}
+	loopback, err := a.Plat.LocalDNSIsLoopback()
+	if err != nil {
+		return fmt.Errorf("检查本机 DNS: %w", err)
+	}
+	if !loopback {
+		return nil
+	}
+	if err := a.Plat.RestoreLocalDNS(); err != nil {
+		if errors.Is(err, platform.ErrNotSupported) {
+			return nil
+		}
+		return fmt.Errorf("恢复本机 DNS: %w", err)
+	}
+	return nil
 }
 
 // SetMode updates traffic.mode, saves, and hot-reloads mihomo if it's running.

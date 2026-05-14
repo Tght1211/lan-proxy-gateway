@@ -19,7 +19,7 @@ var stopCmd = &cobra.Command{
 		if err := a.Stop(); err != nil {
 			return err
 		}
-		color.Green("✔ 已停止")
+		color.Green("✔ 已停止，并已检查本机 DNS")
 		return nil
 	},
 }

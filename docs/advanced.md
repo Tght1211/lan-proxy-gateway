@@ -224,6 +224,7 @@ gateway skill path
 
 ```bash
 sudo gateway update
+sudo gateway update v3.4.3
 ```
 
 2. 被动提醒

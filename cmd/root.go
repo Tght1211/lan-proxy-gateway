@@ -46,5 +46,6 @@ func init() {
 		stopCmd,
 		statusCmd,
 		serviceCmd,
+		updateCmd,
 	)
 }

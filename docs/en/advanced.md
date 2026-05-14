@@ -226,6 +226,7 @@ The project supports two upgrade paths:
 
 ```bash
 sudo gateway update
+sudo gateway update v3.4.3
 ```
 
 2. passive reminders

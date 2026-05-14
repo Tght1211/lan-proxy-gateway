@@ -83,9 +83,16 @@ irm https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.ps
 
 脚本装完自动进入配置向导（问代理源 → 启动 → 问开机自启），整条流在一个终端里走完。
 
+### 升级 / 回退
+
+```bash
+sudo gateway update          # 升级到最新版本
+sudo gateway update v3.4.3   # 更新或回退到指定版本
+```
+
 ### 国内访问 GitHub 慢？
 
-下载会按顺序尝试镜像（`ghfast.top` / `hub.gitmirror.com` / `github.moeyy.xyz` / `ghp.ci`）。也可以手动指定：
+下载会按顺序尝试镜像（`hub.gitmirror.com` / `mirror.ghproxy.com` / `github.moeyy.xyz` / `gh.ddlc.top`）。也可以手动指定：
 
 ```bash
 GITHUB_MIRROR=https://你的镜像/ bash install.sh           # Linux / macOS

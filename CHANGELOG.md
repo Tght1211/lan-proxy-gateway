@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented here.
 
+## v3.4.3 - 2026-05-14
+
+### Added
+
+- `gateway update [version]` now accepts an optional target release tag, so users can update or roll back to a specific release such as `v3.4.3` or `3.3.2`. Without an argument it still upgrades to the latest release.
+
+### Fixed
+
+- `gateway stop` and in-console shutdown now restore local DNS when it had been pointed at `127.0.0.1`, preventing the host network from staying broken after the gateway exits.
+- The device access guide is now a compact quick-reference table instead of a long prose checklist.
+
+### Changed
+
+- The GitHub release workflow now uses Go 1.25, matching `go.mod`.
+
 ## v3.4.2 - 2026-05-12
 
 ### Changed

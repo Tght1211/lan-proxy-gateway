@@ -84,6 +84,7 @@
 |---|---|:---:|
 | `sudo gateway health` | 健康检查；异常时尝试修复 | 是 |
 | `sudo gateway update` | 升级到最新版本，自动尝试镜像下载 | 是 |
+| `sudo gateway update v3.4.3` | 更新或回退到指定版本；也可写 `3.4.3` | 是 |
 | `gateway permission print` | 打印 sudoers 配置片段 | 否 |
 | `sudo gateway permission install` | 安装免密控制规则，之后可普通权限触发自动提权 | 是 |
 | `gateway permission status` | 查看权限控制状态 | 否 |
