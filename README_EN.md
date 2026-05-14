@@ -76,7 +76,6 @@ Detailed walkthroughs (with screenshots): [docs/en/](docs/en/) — phone / switc
 | ⚡ **Source supervisor** | Auto-fallback to direct within 30s if the upstream dies; switches back when it recovers |
 | 🎯 **Rule system** | Built-in LAN-direct, China-direct, Apple, Nintendo, ad-blocking, AI-service rules — fully editable |
 | 📊 **Node latency probe** | Switch-node page concurrently measures latency and sorts by speed |
-| 🤖 **AI ops skill** | Claude Code can drive the mihomo REST API to switch nodes / debug — **no sudo needed** |
 | 🗒️ **Readable log view** | mihomo's English logs rendered in a folded, deduplicated view |
 
 ---
@@ -148,10 +147,6 @@ curl -fsSL https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/ins
 The Go build cache defaults to `.cache/go-build` inside the repo to avoid global-cache permission issues.
 
 ---
-
-## 🤖 AI Ops Skill
-
-`~/.claude/skills/lan-proxy-gateway-ops/SKILL.md` lets Claude Code call the mihomo REST API for day-to-day ops (switch node / change mode / inspect logs) **without sudo**. Actions that need root go through a sudoers NOPASSWD allowlist or the system service.
 
 ## 📜 License
 

@@ -76,7 +76,6 @@ gateway start          # Windows（管理员终端，无需 sudo）
 | ⚡ **代理源 supervisor** | 上游挂了 30s 内自动切直连保命，恢复后切回 |
 | 🎯 **规则系统** | 内置 LAN 直连 / 中国直连 / Apple / Nintendo / 广告拦截，菜单可改 |
 | 📊 **节点测速** | 切节点页面自动并发测延迟，按速度升序 |
-| 🤖 **AI 运维 Skill** | Claude Code 可通过 mihomo REST API 切节点 / 排错（无需 sudo） |
 | 🗒️ **中文日志视图** | mihomo 英文日志翻译成中文（`🟡 TCP 直连 xxx → 超时`） |
 
 ---
@@ -143,19 +142,6 @@ curl -fsSL https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/ins
 ```
 
 ---
-
-## 🤖 给 AI 用的 Skill
-
-`~/.claude/skills/lan-proxy-gateway-ops/SKILL.md`：让 Claude Code 通过 mihomo REST API 做日常运维（切节点 / 换模式 / 查日志）**无需 sudo**。需要 sudo 的动作走 sudoers NOPASSWD 白名单或系统 service。
-
-## 🤝 贡献
-
-欢迎 issue / PR！需要帮手的方向：
-
-- Linux / Windows 一键 DNS 切换
-- 新的 ruleset 内置规则
-- 英文文档（`docs/en/`）
-- Linux 真机验证（最新版本仅 Windows 真机测过 + Linux 单元测试 / 交叉编译）
 
 ## 📜 License
 
