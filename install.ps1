@@ -42,6 +42,12 @@ function Add-CurrentSessionPath {
     }
 }
 
+function Short-Source {
+    param([string]$Url)
+    if ($Url -match '^https?://([^/]+)') { return $Matches[1] }
+    return $Url
+}
+
 function Download-WithFallback {
     param(
         [string[]]$Urls,
@@ -49,18 +55,30 @@ function Download-WithFallback {
     )
 
     $lastErrorMessage = ""
+    $tried = @()
     foreach ($candidate in $Urls) {
+        Write-Info "Trying: $(Short-Source $candidate)"
+        $tried += $candidate
         try {
             Invoke-WebRequest -Uri $candidate -Headers $RequestHeaders -OutFile $OutFile -UseBasicParsing
             return
         } catch {
             $lastErrorMessage = $_.Exception.Message
+            Write-Warn "  failed: $lastErrorMessage"
             if (Test-Path $OutFile) {
                 Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
             }
         }
     }
 
+    Write-Warn ""
+    Write-Warn "All download sources failed. Tried:"
+    foreach ($t in $tried) { Write-Warn "  - $(Short-Source $t)" }
+    Write-Warn ""
+    Write-Warn "Things you can try:"
+    Write-Warn "  1) Wait a few minutes and retry"
+    Write-Warn "  2) Pick a working mirror: `$env:GITHUB_MIRROR='https://your-mirror/'; irm https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.ps1 | iex"
+    Write-Warn "  3) Route through a local Clash / Mihomo: `$env:HTTPS_PROXY='http://127.0.0.1:7897'; ..."
     throw "Failed to download release asset. Last error: $lastErrorMessage"
 }
 
@@ -80,8 +98,9 @@ function Detect-Mirror {
     $mirrors = @(
         "https://hub.gitmirror.com/",
         "https://mirror.ghproxy.com/",
-        "https://github.moeyy.xyz/",
-        "https://gh.ddlc.top/"
+        "https://ghps.cc/",
+        "https://gh-proxy.com/",
+        "https://github.moeyy.xyz/"
     )
 
     foreach ($m in $mirrors) {
@@ -112,8 +131,9 @@ if (-not $GHMirror) {
     $AssetUrls += @(
         "https://hub.gitmirror.com/https://github.com/$Repo/releases/download/$Tag/$Asset",
         "https://mirror.ghproxy.com/https://github.com/$Repo/releases/download/$Tag/$Asset",
-        "https://github.moeyy.xyz/https://github.com/$Repo/releases/download/$Tag/$Asset",
-        "https://gh.ddlc.top/https://github.com/$Repo/releases/download/$Tag/$Asset"
+        "https://ghps.cc/https://github.com/$Repo/releases/download/$Tag/$Asset",
+        "https://gh-proxy.com/https://github.com/$Repo/releases/download/$Tag/$Asset",
+        "https://github.moeyy.xyz/https://github.com/$Repo/releases/download/$Tag/$Asset"
     )
 }
 

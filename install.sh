@@ -9,16 +9,19 @@ GITHUB_API_MAX_TIME="${GITHUB_API_MAX_TIME:-30}"
 GITHUB_ASSET_MAX_TIME="${GITHUB_ASSET_MAX_TIME:-600}"
 GITHUB_CONNECT_TIMEOUT="${GITHUB_CONNECT_TIMEOUT:-10}"
 GITHUB_DOWNLOAD_RETRIES="${GITHUB_DOWNLOAD_RETRIES:-3}"
-GITHUB_PROBE_MAX_TIME="${GITHUB_PROBE_MAX_TIME:-15}"
+GITHUB_PROBE_MAX_TIME="${GITHUB_PROBE_MAX_TIME:-6}"
 GITHUB_SPEED_LIMIT="${GITHUB_SPEED_LIMIT:-32768}"
 GITHUB_SPEED_TIME="${GITHUB_SPEED_TIME:-20}"
 GITHUB_CURL_HTTP1="${GITHUB_CURL_HTTP1:-1}"
 
+# 镜像顺序按经验排：靠前的更稳定。如果某条被官方下线就移掉，加新的到末尾。
+# 用户也可以用 GITHUB_MIRROR=https://你的镜像/ 覆盖整张表。
 MIRRORS=(
   "https://hub.gitmirror.com/"
   "https://mirror.ghproxy.com/"
+  "https://ghps.cc/"
+  "https://gh-proxy.com/"
   "https://github.moeyy.xyz/"
-  "https://gh.ddlc.top/"
 )
 
 info()  { printf "\033[1;32m%s\033[0m\n" "$*"; }
@@ -62,11 +65,18 @@ probe_download_candidate() {
   return 1
 }
 
+short_source() {
+  # 把候选 URL 截成一个能看的源标签：mirrors 拿出主机名，直连保留 github.com。
+  local s="$1"
+  printf '%s' "$s" | sed -E 's#^https?://([^/]+)/?.*#\1#'
+}
+
 download_with_candidates() {
   local url="$1" output="$2" show_progress="${3:-}" max_time="${4:-$GITHUB_ASSET_MAX_TIME}"
   local progress_args=("-s")
   local candidate selected=""
   local -a candidates=()
+  local -a tried=()
   local -a curl_opts=(
     -fSL
     --connect-timeout "$GITHUB_CONNECT_TIMEOUT"
@@ -85,6 +95,7 @@ download_with_candidates() {
     candidates+=("$candidate")
   done < <(build_download_candidates "$url")
 
+  # 第一阶段：用 1-byte probe 快速挑出"看起来通"的候选。多数情况下能选出最快的一条。
   for candidate in "${candidates[@]}"; do
     if probe_download_candidate "$candidate"; then
       selected="$candidate"
@@ -92,31 +103,47 @@ download_with_candidates() {
     fi
   done
 
-  if [ -z "$selected" ]; then
-    error "没有找到可用下载源。你也可以手动指定: GITHUB_MIRROR=https://你的镜像/ bash install.sh"
-  fi
-
-  if [ "$selected" != "$url" ]; then
-    warn "直连 GitHub 不稳定，切换到加速源: ${selected}"
-  fi
-
-  rm -f "$output"
-  if curl "${curl_opts[@]}" "${HTTP_VERSION_ARGS[@]}" "${progress_args[@]}" -o "$output" "$selected"; then
-    return 0
-  fi
-
-  for candidate in "${candidates[@]}"; do
-    [ "$candidate" = "$selected" ] && continue
-    if [ "$candidate" != "$url" ]; then
-      info "尝试镜像: ${candidate}"
+  # 第二阶段：如果探测选出了候选就先用它。
+  if [ -n "$selected" ]; then
+    if [ "$selected" != "$url" ]; then
+      warn "直连不稳定，先试加速源: $(short_source "$selected")"
     fi
     rm -f "$output"
+    tried+=("$selected")
+    if curl "${curl_opts[@]}" "${HTTP_VERSION_ARGS[@]}" "${progress_args[@]}" -o "$output" "$selected"; then
+      return 0
+    fi
+    warn "下载失败：$(short_source "$selected")"
+  fi
+
+  # 第三阶段：兜底 —— 即使所有 probe 都失败，也按顺序把每个候选真的跑一遍。
+  # 1-byte probe 失败不代表持续下载也失败（很多镜像 HEAD/short range 不友好，
+  # 但实际 GET 是稳的）。让 curl 自己用 --connect-timeout / --max-time 决断。
+  local already
+  for candidate in "${candidates[@]}"; do
+    already=0
+    for t in "${tried[@]:-}"; do
+      [ "$t" = "$candidate" ] && already=1 && break
+    done
+    [ "$already" = "1" ] && continue
+    info "尝试: $(short_source "$candidate")"
+    rm -f "$output"
+    tried+=("$candidate")
     if curl "${curl_opts[@]}" "${HTTP_VERSION_ARGS[@]}" "${progress_args[@]}" -o "$output" "$candidate"; then
       return 0
     fi
   done
 
-  error "所有下载方式均失败。请稍后重试，或手动指定: GITHUB_MIRROR=https://你的镜像/ bash install.sh"
+  warn "全部下载源都失败。尝试过："
+  for t in "${tried[@]:-}"; do
+    warn "  - $(short_source "$t")"
+  done
+  warn ""
+  warn "可以试试："
+  warn "  1) 等几分钟网络恢复后重试"
+  warn "  2) 指定一个能用的镜像：  GITHUB_MIRROR=https://你的镜像/ bash install.sh"
+  warn "  3) 走本机已经在跑的 Clash / Mihomo 端口： HTTP_PROXY=http://127.0.0.1:7897 HTTPS_PROXY=http://127.0.0.1:7897 bash install.sh"
+  error "下载失败，安装中止。"
 }
 
 # --- detect OS ---
