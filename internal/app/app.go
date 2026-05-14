@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -39,11 +40,13 @@ func New() (*App, error) {
 		return nil, err
 	}
 	bin, _ := platform.Current().ResolveMihomoPath("")
+	gw := gateway.New()
+	gw.SetStatePath(filepath.Join(paths.Root, "runtime.state"))
 	a := &App{
 		Cfg:     cfg,
 		Paths:   paths,
 		Engine:  engine.New(bin, paths.MihomoDir, paths.CacheDir),
-		Gateway: gateway.New(),
+		Gateway: gw,
 		Plat:    platform.Current(),
 	}
 	// If a previous gateway session left mihomo running in the background,

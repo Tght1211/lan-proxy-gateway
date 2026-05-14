@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented here.
 
+## v3.4.4 - 2026-05-14
+
+### Fixed
+
+- `gateway stop` no longer flips `net.ipv4.ip_forward` back to `0` when the host already had IP forwarding enabled before `gateway start` ran. Previously, every stop unconditionally turned forwarding off, which broke docker port-publish access from the LAN: `LAN device → host:2228 → docker DNAT → container` requires cross-interface forwarding, and docker hosts almost always have `ip_forward=1` independent of gateway. Reported by @lingbaoboy in [issue #5](https://github.com/Tght1211/lan-proxy-gateway/issues/5) (immich on Debian 13 / docker, 10.0.0.11:2228 became unreachable from LAN after `gateway stop`). Now `gateway start` records the prior `ip_forward` state in `~/.config/lan-proxy-gateway/runtime.state`, and `gateway stop` only reverts to `0` if gateway was the one that flipped it on.
+- `gateway stop` now actually removes the `MASQUERADE` rule on the egress interface. Previously `Gateway.Disable()` skipped `UnconfigureNAT` when its in-memory `info.Interface` was empty — which is exactly the case for `gateway stop` running as a fresh process. Now it reads the interface name from the runtime state file (and falls back to live `DetectNetwork()` if no state exists), so the rule is removed across process boundaries.
+
+### Tests
+
+- `internal/gateway/state.go` + 6 new cases in `internal/gateway/gateway_test.go`:
+  - `ip_forward=1` before Enable → Disable preserves it (issue #5 primary fix)
+  - `ip_forward=0` before Enable → Disable reverts to `0`
+  - Cross-process `Disable` reads `NATInterface` from state file and unconfigures NAT
+  - No state file (upgrade path) → Disable falls back to `Detect()` for NAT cleanup and leaves `ip_forward` untouched
+  - `PostStopCleanup` always runs
+  - Re-`Enable()` is idempotent and preserves the `WeEnabledIPForward` flag
+
 ## v3.4.3 - 2026-05-14
 
 ### Added
