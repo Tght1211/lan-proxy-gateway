@@ -220,9 +220,9 @@ const (
 
 // UsesLocalExternalProxy reports whether gateway is chained behind another
 // proxy client on the same host, e.g. Clash Verge / Mihomo Party at 127.0.0.1.
-// In this shape gateway must not enable transparent TUN routing, otherwise the
-// upstream client's own outbound traffic can be captured again and loop back
-// through gateway.
+// In this shape gateway must keep the local host out of strict TUN capture,
+// otherwise the upstream client's own outbound traffic can be captured again
+// and loop back through gateway.
 func UsesLocalExternalProxy(cfg *Config) bool {
 	if cfg == nil || cfg.Source.Type != SourceTypeExternal {
 		return false
@@ -232,20 +232,22 @@ func UsesLocalExternalProxy(cfg *Config) bool {
 
 // EffectiveRuntimeConfig returns a copy adjusted for runtime safety.
 //
-// When gateway chains behind another proxy on the same machine, transparent TUN
+// When gateway chains behind another proxy on the same machine, strict TUN
 // routing can capture that upstream proxy client's own outbound traffic and
-// create a self-proxy loop. In that topology gateway should act as a LAN
-// HTTP/SOCKS port sharer only: keep mixed-port available, but avoid IP
-// forwarding, DNS hijack, and TUN route changes.
+// create a self-proxy loop. Preserve the normal LAN gateway features, but force
+// TUN/DNS on plus local bypass so the rendered mihomo config uses
+// strict-route: false.
 func EffectiveRuntimeConfig(cfg *Config) *Config {
 	if cfg == nil {
 		return nil
 	}
 	out := *cfg
 	if UsesLocalExternalProxy(cfg) {
-		out.Gateway.Enabled = false
-		out.Gateway.TUN.Enabled = false
-		out.Gateway.DNS.Enabled = false
+		if out.Gateway.Enabled {
+			out.Gateway.TUN.Enabled = true
+			out.Gateway.DNS.Enabled = true
+		}
+		out.Gateway.TUN.BypassLocal = true
 	}
 	return &out
 }

@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented here.
 
+## v3.4.7 - 2026-05-15
+
+### Fixed
+
+- Corrected the v3.4.6 local single-proxy safety behavior. When `source.type=external` points to a loopback proxy such as `127.0.0.1:6578`, gateway now keeps LAN transparent gateway mode available: runtime TUN and DNS are forced on when `gateway.enabled=true`, while TUN local bypass is forced so mihomo renders `strict-route: false`. This preserves both LAN `mixed-port` sharing (`gatewayIP:17890`) and "change gateway + DNS" transparent proxying without capturing the upstream proxy client's own traffic.
+- Local single-proxy supervisor checks no longer perform fixed HTTP health probes or auto-switch mihomo to `direct`. The background supervisor only verifies the loopback upstream port is open, avoiding false "source unhealthy" warnings and unwanted runtime mode changes when the upstream client can serve real traffic but `generate_204` probes time out.
+- External/remote manual source tests now try multiple lightweight health URLs and accept the first successful response, while still rejecting open-but-broken proxy ports.
+- Added Fast.com / Netflix speedtest domains to the built-in global proxy rules, including `fast.com`, `api.fast.com`, Netflix API/logging hosts, and `nflxvideo.net`.
+- Added the documented `gateway restart` command.
+- In the menu drawer, `Q` / `0` / Enter now return to the dashboard. Only dashboard `Q` exits the console; menu item `6` still stops gateway/mihomo and exits.
+
+### Tests
+
+- Updated runtime-config and render tests to prove local loopback external mode keeps gateway/TUN/DNS enabled and renders `strict-route: false`.
+- Added source health tests for multi-probe checks and TCP-only supervisor checks.
+- Added traffic-rule coverage for the Fast.com speedtest chain.
+- Updated console tests for menu `Q` returning to the dashboard.
+
 ## v3.4.6 - 2026-05-15
 
 ### Fixed

@@ -134,8 +134,9 @@ func TestUsesLocalExternalProxy(t *testing.T) {
 func TestEffectiveRuntimeConfigProtectsLocalExternalProxy(t *testing.T) {
 	cfg := Default()
 	cfg.Gateway.Enabled = true
-	cfg.Gateway.TUN.Enabled = true
-	cfg.Gateway.DNS.Enabled = true
+	cfg.Gateway.TUN.Enabled = false
+	cfg.Gateway.TUN.BypassLocal = false
+	cfg.Gateway.DNS.Enabled = false
 	cfg.Source.Type = SourceTypeExternal
 	cfg.Source.External.Server = "127.0.0.1"
 
@@ -143,10 +144,30 @@ func TestEffectiveRuntimeConfigProtectsLocalExternalProxy(t *testing.T) {
 	if effective == cfg {
 		t.Fatal("EffectiveRuntimeConfig must return a copy")
 	}
-	if effective.Gateway.Enabled || effective.Gateway.TUN.Enabled || effective.Gateway.DNS.Enabled {
-		t.Fatalf("local external proxy should disable transparent gateway features: %+v", effective.Gateway)
+	if !effective.Gateway.Enabled || !effective.Gateway.TUN.Enabled || !effective.Gateway.DNS.Enabled {
+		t.Fatalf("local external proxy should preserve transparent gateway features: %+v", effective.Gateway)
 	}
-	if !cfg.Gateway.Enabled || !cfg.Gateway.TUN.Enabled || !cfg.Gateway.DNS.Enabled {
+	if !effective.Gateway.TUN.BypassLocal {
+		t.Fatalf("local external proxy should force TUN local bypass: %+v", effective.Gateway.TUN)
+	}
+	if !cfg.Gateway.Enabled || cfg.Gateway.TUN.Enabled || cfg.Gateway.TUN.BypassLocal || cfg.Gateway.DNS.Enabled {
 		t.Fatal("original config should not be mutated")
+	}
+}
+
+func TestEffectiveRuntimeConfigAllowsPortOnlyModeWhenGatewayDisabled(t *testing.T) {
+	cfg := Default()
+	cfg.Gateway.Enabled = false
+	cfg.Gateway.TUN.Enabled = false
+	cfg.Gateway.DNS.Enabled = false
+	cfg.Source.Type = SourceTypeExternal
+	cfg.Source.External.Server = "127.0.0.1"
+
+	effective := EffectiveRuntimeConfig(cfg)
+	if effective.Gateway.Enabled || effective.Gateway.TUN.Enabled || effective.Gateway.DNS.Enabled {
+		t.Fatalf("disabled gateway should stay port-only: %+v", effective.Gateway)
+	}
+	if !effective.Gateway.TUN.BypassLocal {
+		t.Fatalf("local external proxy should still force local bypass in the runtime copy")
 	}
 }

@@ -44,6 +44,7 @@ func init() {
 	rootCmd.AddCommand(
 		installCmd,
 		startCmd,
+		restartCmd,
 		stopCmd,
 		statusCmd,
 		serviceCmd,

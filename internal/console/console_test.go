@@ -34,7 +34,7 @@ func (consoleTestPlatform) SetLocalDNSToLoopback() error             { return ni
 func (consoleTestPlatform) RestoreLocalDNS() error                   { return nil }
 func (consoleTestPlatform) LocalDNSIsLoopback() (bool, error)        { return false, nil }
 
-func TestScreenMenuQExitsConsole(t *testing.T) {
+func TestScreenMenuQReturnsDashboard(t *testing.T) {
 	oldNoColor := color.NoColor
 	color.NoColor = true
 	defer func() { color.NoColor = oldNoColor }()
@@ -46,10 +46,10 @@ func TestScreenMenuQExitsConsole(t *testing.T) {
 		Plat:    consoleTestPlatform{},
 	}, strings.NewReader("q\n"), &out)
 
-	if !c.screenMenu(context.Background()) {
-		t.Fatal("screenMenu(q) should request console exit")
+	if c.screenMenu(context.Background()) {
+		t.Fatal("screenMenu(q) should return to dashboard, not exit console")
 	}
-	if !strings.Contains(out.String(), "Q  退出控制台") {
+	if !strings.Contains(out.String(), "Q  返回首页") {
 		t.Fatalf("expected menu output, got: %s", out.String())
 	}
 }

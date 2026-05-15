@@ -4,7 +4,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/tght/lan-proxy-gateway/internal/config"
 	"github.com/tght/lan-proxy-gateway/internal/platform"
 )
 
@@ -66,22 +65,5 @@ func TestStopReportsLocalDNSRestoreFailure(t *testing.T) {
 
 	if err := a.Stop(); !errors.Is(err, restoreErr) {
 		t.Fatalf("Stop error = %v, want restore error", err)
-	}
-}
-
-func TestStartLocalExternalProxySkipsGatewayEnable(t *testing.T) {
-	cfg := config.Default()
-	cfg.Source.Type = config.SourceTypeExternal
-	cfg.Source.External.Server = "127.0.0.1"
-	cfg.Source.External.Port = 6578
-	cfg.Source.External.Kind = "socks5"
-	cfg.Gateway.Enabled = true
-	cfg.Gateway.TUN.Enabled = true
-	cfg.Gateway.DNS.Enabled = true
-
-	a := &App{Cfg: cfg}
-	err := a.Start(nil)
-	if err == nil || err.Error() != "mihomo 未找到，请先运行 `gateway install`" {
-		t.Fatalf("Start error = %v, want missing mihomo after skipping gateway enable", err)
 	}
 }

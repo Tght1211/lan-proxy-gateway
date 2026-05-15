@@ -10,15 +10,15 @@ import (
 )
 
 // SourceHealth 是「代理源健康看板」，supervisor 写、UI 读。
-// 当 Healthy=false 且 FallbackActive=true 时，意味着我们已经通过 mihomo API
-// 把 mode 强切到 direct（LAN 设备能继续上网，但走的是直连），用户在主菜单
-// 应该能看到醒目告警。
+// 当 Healthy=false 时，源健康探测失败。只有 FallbackActive=true 才意味着
+// supervisor 已经通过 mihomo API 把 mode 强切到 direct。
 type SourceHealth struct {
 	Healthy        bool
 	LastError      string
 	FallbackActive bool // 是否因源异常被迫进入 direct
 	OriginalMode   string
 	CheckedAt      time.Time
+	FailCount      int
 }
 
 type healthState struct {
@@ -46,8 +46,9 @@ func (a *App) Health() SourceHealth {
 	return a.health.snapshot()
 }
 
-// StartSupervisor 启一个后台 goroutine，周期性检查代理源；
-// 代理源挂了自动切到 direct，恢复自动切回。
+// StartSupervisor 启一个后台 goroutine，周期性检查代理源。
+// 普通订阅/文件源异常时自动切到 direct；本机单点代理只告警，不自动改 mode，
+// 避免健康探测波动反过来干扰用户正在测试的本机代理链路。
 // 重复调用是安全的（第二次会 no-op，通过 supervisorStarted 标记）。
 func (a *App) StartSupervisor(ctx context.Context) {
 	if a.health == nil {
@@ -61,6 +62,7 @@ func (a *App) StartSupervisor(ctx context.Context) {
 const (
 	supervisorInterval = 30 * time.Second
 	supervisorTimeout  = 5 * time.Second
+	supervisorMaxFails = 2
 )
 
 func (a *App) supervisorLoop(ctx context.Context) {
@@ -80,7 +82,7 @@ func (a *App) supervisorLoop(ctx context.Context) {
 }
 
 // checkSourceHealth 执行一次 source.Test，并在必要时触发 fallback / restore。
-// 源异常时 fallback 到 direct（通过 mihomo API）；恢复时切回用户原本的 mode。
+// 普通源异常时 fallback 到 direct（通过 mihomo API）；恢复时切回用户原本的 mode。
 // 注意：fallback 不修改 a.Cfg.Traffic.Mode（用户视角 mode 没变），只是运行时
 // 临时覆盖，这样恢复时能无损还原。
 func (a *App) checkSourceHealth(ctx context.Context) {
@@ -99,6 +101,7 @@ func (a *App) checkSourceHealth(ctx context.Context) {
 	defer cancel()
 	err := source.TestWithOptions(testCtx, a.Cfg.Source, source.TestOptions{
 		SubscriptionProxyURL: source.LocalMixedProxyURL(a.Cfg.Runtime.Ports.Mixed),
+		ProxyTCPOnly:         config.UsesLocalExternalProxy(a.Cfg),
 	})
 
 	prev := a.health.snapshot()
@@ -106,6 +109,29 @@ func (a *App) checkSourceHealth(ctx context.Context) {
 
 	if err != nil {
 		errMsg := err.Error()
+		failCount := prev.FailCount + 1
+		if failCount < supervisorMaxFails {
+			a.health.set(SourceHealth{
+				Healthy:        false,
+				LastError:      errMsg,
+				FallbackActive: prev.FallbackActive,
+				OriginalMode:   prev.OriginalMode,
+				CheckedAt:      now,
+				FailCount:      failCount,
+			})
+			return
+		}
+		if config.UsesLocalExternalProxy(a.Cfg) {
+			a.health.set(SourceHealth{
+				Healthy:        false,
+				LastError:      errMsg,
+				FallbackActive: false,
+				OriginalMode:   prev.OriginalMode,
+				CheckedAt:      now,
+				FailCount:      failCount,
+			})
+			return
+		}
 		// 还没 fallback：切到 direct 保住 LAN 通网。
 		if !prev.FallbackActive {
 			apiCtx, cancelAPI := context.WithTimeout(ctx, supervisorTimeout)
@@ -118,6 +144,7 @@ func (a *App) checkSourceHealth(ctx context.Context) {
 					FallbackActive: true,
 					OriginalMode:   originalMode,
 					CheckedAt:      now,
+					FailCount:      failCount,
 				})
 				return
 			}
@@ -128,6 +155,7 @@ func (a *App) checkSourceHealth(ctx context.Context) {
 		prev.Healthy = false
 		prev.LastError = errMsg
 		prev.CheckedAt = now
+		prev.FailCount = failCount
 		a.health.set(prev)
 		return
 	}

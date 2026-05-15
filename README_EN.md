@@ -70,10 +70,10 @@ Detailed walkthroughs (with screenshots): [docs/en/](docs/en/) — phone / switc
 | Capability | What it gives you |
 |---|---|
 | 🌐 **LAN transparent gateway** | Devices join by changing gateway + DNS (macOS/Linux); devices that can't change gateway use HTTP proxy (all platforms) |
-| 🔗 **Three proxy sources** | Clash/mihomo subscription URL · local `.yaml` · an already-running Clash port on the same machine (chaining) |
+| 🔗 **Three proxy sources** | Clash/mihomo subscription URL · local `.yaml` · an already-running Clash port on the same machine (chaining); local single-proxy mode still supports both `17890` sharing and transparent gateway mode |
 | 🏠 **Chains preset** | One-click "airport entry → residential exit" — AI sites see a residential ASN |
 | 🌐 **Built-in web dashboard** | Open `http://gatewayIP:19090/ui/` to switch nodes, edit rules, watch traffic |
-| ⚡ **Source supervisor** | Auto-fallback to direct within 30s if the upstream dies; switches back when it recovers |
+| ⚡ **Source supervisor** | Auto-fallbacks subscription/file sources to direct when broken; local single-proxy mode only monitors the port to avoid false switches |
 | 🎯 **Rule system** | Built-in LAN-direct, China-direct, Apple, Nintendo, ad-blocking, AI-service rules — fully editable |
 | 📊 **Node latency probe** | Switch-node page concurrently measures latency and sorts by speed |
 | 🗒️ **Readable log view** | mihomo's English logs rendered in a folded, deduplicated view |

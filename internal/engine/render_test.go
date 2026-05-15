@@ -113,11 +113,12 @@ func TestRenderTUNOff(t *testing.T) {
 	}
 }
 
-func TestRenderLocalExternalProxyDisablesTransparentGateway(t *testing.T) {
+func TestRenderLocalExternalProxyKeepsGatewayWithLocalBypass(t *testing.T) {
 	cfg := config.Default()
 	cfg.Gateway.Enabled = true
-	cfg.Gateway.TUN.Enabled = true
-	cfg.Gateway.DNS.Enabled = true
+	cfg.Gateway.TUN.Enabled = false
+	cfg.Gateway.TUN.BypassLocal = false
+	cfg.Gateway.DNS.Enabled = false
 	cfg.Source.Type = config.SourceTypeExternal
 	cfg.Source.External.Server = "127.0.0.1"
 	cfg.Source.External.Port = 6578
@@ -128,10 +129,13 @@ func TestRenderLocalExternalProxyDisablesTransparentGateway(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	s := string(out)
-	if !strings.Contains(s, "tun:\n  enable: false\n") {
-		t.Fatalf("local external proxy must not enable TUN:\n%s", contextAround(s, "tun:", 160))
+	if !strings.Contains(s, "tun:\n  enable: true\n") {
+		t.Fatalf("local external proxy should keep TUN enabled:\n%s", contextAround(s, "tun:", 220))
 	}
-	if !strings.Contains(s, "dns:\n  enable: false\n") {
-		t.Fatalf("local external proxy must not enable DNS listener:\n%s", contextAround(s, "dns:", 220))
+	if !strings.Contains(s, "  strict-route: false\n") {
+		t.Fatalf("local external proxy should force strict-route false:\n%s", contextAround(s, "tun:", 260))
+	}
+	if !strings.Contains(s, "dns:\n  enable: true\n") {
+		t.Fatalf("local external proxy should keep DNS listener enabled:\n%s", contextAround(s, "dns:", 220))
 	}
 }

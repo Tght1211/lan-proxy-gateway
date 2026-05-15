@@ -53,6 +53,10 @@ proxy-groups:
 }
 
 func TestExternalProxyTestRequiresRealProxyResponse(t *testing.T) {
+	old := proxyHealthURLs
+	proxyHealthURLs = []string{"http://www.gstatic.com/generate_204"}
+	t.Cleanup(func() { proxyHealthURLs = old })
+
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.String() != "http://www.gstatic.com/generate_204" {
 			t.Fatalf("proxy received URL %q", r.URL.String())
@@ -72,6 +76,65 @@ func TestExternalProxyTestRequiresRealProxyResponse(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Test() error = %v", err)
+	}
+}
+
+func TestExternalProxyTestAcceptsAnyHealthyProbe(t *testing.T) {
+	old := proxyHealthURLs
+	proxyHealthURLs = []string{
+		"http://probe-one.example/generate_204",
+		"http://probe-two.example/generate_204",
+	}
+	t.Cleanup(func() { proxyHealthURLs = old })
+
+	var seen int
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen++
+		if r.URL.String() == "http://probe-one.example/generate_204" {
+			http.Error(w, "slow edge", http.StatusServiceUnavailable)
+			return
+		}
+		if r.URL.String() != "http://probe-two.example/generate_204" {
+			t.Fatalf("proxy received URL %q", r.URL.String())
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer proxy.Close()
+	host, port := splitTestAddr(t, proxy.Listener.Addr().String())
+
+	err := Test(context.Background(), config.SourceConfig{
+		Type: config.SourceTypeExternal,
+		External: config.ExternalProxy{
+			Server: host,
+			Port:   port,
+			Kind:   "http",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Test() error = %v", err)
+	}
+	if seen != 2 {
+		t.Fatalf("probe count = %d, want 2", seen)
+	}
+}
+
+func TestExternalProxyTCPOnlySkipsHTTPProbe(t *testing.T) {
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("HTTP probe should not run in TCP-only mode")
+	}))
+	defer proxy.Close()
+	host, port := splitTestAddr(t, proxy.Listener.Addr().String())
+
+	err := TestWithOptions(context.Background(), config.SourceConfig{
+		Type: config.SourceTypeExternal,
+		External: config.ExternalProxy{
+			Server: host,
+			Port:   port,
+			Kind:   "http",
+		},
+	}, TestOptions{ProxyTCPOnly: true})
+	if err != nil {
+		t.Fatalf("TestWithOptions() error = %v", err)
 	}
 }
 

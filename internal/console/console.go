@@ -480,18 +480,20 @@ func (c *consoleUI) drawDashboardOnce(ctx context.Context) {
 	if h.FallbackActive {
 		badC.Fprintln(c.out)
 		badC.Fprintf(c.out, "  ⚠ 代理源异常 · 已临时切直连：%s\n", h.LastError)
+	} else if !h.Healthy && h.LastError != "" {
+		warnC.Fprintln(c.out)
+		warnC.Fprintf(c.out, "  ⚠ 代理源健康探测失败（未切直连）：%s\n", h.LastError)
 	}
 	fmt.Fprint(c.out, "\n请选择：> ")
 }
 
 // screenMenu 是旧版主菜单折成的「操作抽屉」。返回 true 表示用户在里头关了
-// gateway，主循环该一起退出。
+// gateway，主循环该一起退出。Q/0/回车只返回首页仪表盘；首页的 Q 才退出控制台。
 func (c *consoleUI) screenMenu(ctx context.Context) (exitConsole bool) {
 	for {
 		c.drawMainMenu()
 		choice := strings.ToLower(c.readLine())
 		switch choice {
-		case "":
 		case "1":
 			c.screenGateway()
 		case "2":
@@ -506,12 +508,10 @@ func (c *consoleUI) screenMenu(ctx context.Context) (exitConsole bool) {
 			if c.shutdownGateway() {
 				return true
 			}
-		case "0", "back":
+		case "", "0", "q", "back", "exit", "quit":
 			return false
-		case "q", "exit", "quit":
-			return true
 		default:
-			warnC.Fprintln(c.out, "无效选项（数字=子菜单，0 返回仪表盘，Q 退出控制台）")
+			warnC.Fprintln(c.out, "无效选项（数字=子菜单，0/Q 返回首页，6 停止并退出）")
 		}
 	}
 }
@@ -527,7 +527,7 @@ func (c *consoleUI) drawMainMenu() {
 	fmt.Fprintln(c.out, "  4  启动 / 重启 / 停止")
 	fmt.Fprintln(c.out, "  5  看日志")
 	fmt.Fprintln(c.out, "  6  关闭 gateway 并退出（停 mihomo）")
-	fmt.Fprintln(c.out, "  Q  退出控制台（mihomo 留在后台继续跑）")
+	fmt.Fprintln(c.out, "  Q  返回首页（mihomo 留在后台继续跑）")
 	fmt.Fprint(c.out, "\n请选择：> ")
 }
 
@@ -558,6 +558,10 @@ func (c *consoleUI) printStatus() {
 		badC.Fprintln(c.out, "  ⚠ 代理源异常 · 已临时切到直连（LAN 设备不会断网，但不再走代理）")
 		badC.Fprintf(c.out, "    原因: %s\n", h.LastError)
 		dimC.Fprintln(c.out, "    修复后会自动切回；想立刻重试去「代理 & 订阅 → T 重新测试」")
+	} else if !h.Healthy && h.LastError != "" {
+		warnC.Fprintln(c.out, "  ⚠ 代理源健康探测失败（未切直连）")
+		warnC.Fprintf(c.out, "    原因: %s\n", h.LastError)
+		dimC.Fprintln(c.out, "    本机单点代理不会因探测失败自动切直连，避免影响正在使用的链路。")
 	}
 
 	admin, _ := c.app.Plat.IsAdmin()
@@ -669,7 +673,7 @@ func (c *consoleUI) screenTraffic(ctx context.Context) {
 			onOff(cfg.Traffic.Adblock),
 			len(cfg.Traffic.Extras.Direct)+len(cfg.Traffic.Extras.Proxy)+len(cfg.Traffic.Extras.Reject))
 		fmt.Fprintln(c.out, "  1  切换模式     rule=国内直连+国外代理（推荐）/ global=全走代理 / direct=全直连")
-		fmt.Fprintln(c.out, "  2  开关 TUN     （改网关设备需要；手机/电脑只填 17890 时建议关，避免影响本机其它代理）")
+		fmt.Fprintln(c.out, "  2  开关 TUN     （改网关设备需要；本机单点上游会自动启用本机绕过）")
 		fmt.Fprintln(c.out, "  3  开关广告拦截")
 		fmt.Fprintln(c.out, "  4  自定义规则   直连 / 代理 / 拒绝 三组（优先级最高，盖过内置 china_direct 等）")
 		fmt.Fprintf(c.out, "  5  策略组自动补全 %s   订阅里缺 Auto/Fallback 时自动加（直选节点也能自动切换）\n",
@@ -708,7 +712,8 @@ func (c *consoleUI) screenTraffic(ctx context.Context) {
 				fmt.Fprintln(c.out, "  即使改了网关指向本机，流量也只会被普通路由转发，")
 				fmt.Fprintln(c.out, "  【不会走代理】，跟没开网关一样被墙。")
 				fmt.Fprintln(c.out, "  如果你只是让手机/电脑手动填代理服务器=本机 IP:17890，")
-				fmt.Fprintln(c.out, "  关 TUN 反而更稳：gateway 只共享端口，不接管本机其它代理客户端的出站。")
+				fmt.Fprintln(c.out, "  不需要 TUN 也能用；但本机单点上游会自动用本机绕过，")
+				fmt.Fprintln(c.out, "  避免 Clash / 其它代理客户端自己的出站被 gateway 抓回来。")
 				if !c.yesNo("确定要关闭 TUN？", false) {
 					continue
 				}

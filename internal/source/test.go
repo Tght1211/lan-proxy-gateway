@@ -13,9 +13,16 @@ import (
 	"github.com/tght/lan-proxy-gateway/internal/config"
 )
 
+var proxyHealthURLs = []string{
+	"http://www.gstatic.com/generate_204",
+	"http://cp.cloudflare.com/generate_204",
+	"http://connectivitycheck.gstatic.com/generate_204",
+}
+
 // TestOptions tweaks runtime-only test behavior.
 type TestOptions struct {
 	SubscriptionProxyURL string
+	ProxyTCPOnly         bool
 }
 
 // Test 探测当前源是否可达。每种 type 做不同的检查：
@@ -33,8 +40,14 @@ func Test(ctx context.Context, src config.SourceConfig) error {
 func TestWithOptions(ctx context.Context, src config.SourceConfig, opts TestOptions) error {
 	switch src.Type {
 	case config.SourceTypeExternal:
+		if opts.ProxyTCPOnly {
+			return testTCP(ctx, src.External.Server, src.External.Port)
+		}
 		return testProxy(ctx, src.External.Kind, src.External.Server, src.External.Port, "", "")
 	case config.SourceTypeRemote:
+		if opts.ProxyTCPOnly {
+			return testTCP(ctx, src.Remote.Server, src.Remote.Port)
+		}
 		return testProxy(ctx, src.Remote.Kind, src.Remote.Server, src.Remote.Port, src.Remote.Username, src.Remote.Password)
 	case config.SourceTypeSubscription:
 		proxyURL := opts.SubscriptionProxyURL
@@ -71,10 +84,6 @@ func testProxy(ctx context.Context, kind, host string, port int, username, passw
 	if proxyURL == "" {
 		return fmt.Errorf("不支持的代理类型: %s", kind)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://www.gstatic.com/generate_204", nil)
-	if err != nil {
-		return err
-	}
 	u, err := url.Parse(proxyURL)
 	if err != nil {
 		return err
@@ -83,15 +92,24 @@ func testProxy(ctx context.Context, kind, host string, port int, username, passw
 		Transport: &http.Transport{Proxy: http.ProxyURL(u)},
 		Timeout:   8 * time.Second,
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("%s:%d 端口开着，但代理请求失败 → %w", host, port, err)
+	var lastErr error
+	for _, target := range proxyHealthURLs {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode < 400 {
+			return nil
+		}
+		lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("%s:%d 端口开着，但代理返回 HTTP %d", host, port, resp.StatusCode)
-	}
-	return nil
+	return fmt.Errorf("%s:%d 端口开着，但代理健康检查失败 → %w", host, port, lastErr)
 }
 
 func testURL(ctx context.Context, url string, proxyURL string) error {

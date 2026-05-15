@@ -30,7 +30,13 @@ DOMAIN-SUFFIX,claude.ai
 DOMAIN-SUFFIX,copilot.github.com
 DOMAIN-SUFFIX,cursor.sh
 DOMAIN-SUFFIX,notion.so
+DOMAIN-SUFFIX,fast.com
+DOMAIN-SUFFIX,api.fast.com
 DOMAIN-SUFFIX,netflix.com
+DOMAIN-SUFFIX,netflix.net
+DOMAIN-SUFFIX,api-global.netflix.com
+DOMAIN-SUFFIX,ichnaea.netflix.com
+DOMAIN-SUFFIX,ichnaea-web.netflix.com
 DOMAIN-SUFFIX,nflxvideo.net
 DOMAIN-SUFFIX,nflximg.com
 DOMAIN-SUFFIX,nflxso.net

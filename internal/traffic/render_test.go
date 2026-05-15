@@ -18,6 +18,23 @@ func TestRenderRuleModeIncludesMatchProxy(t *testing.T) {
 	}
 }
 
+func TestRenderGlobalRulesIncludeFastSpeedtestChain(t *testing.T) {
+	cfg := config.Default().Traffic
+	out := Render(cfg)
+	for _, want := range []string{
+		"DOMAIN-SUFFIX,fast.com,Proxy",
+		"DOMAIN-SUFFIX,api.fast.com,Proxy",
+		"DOMAIN-SUFFIX,api-global.netflix.com,Proxy",
+		"DOMAIN-SUFFIX,ichnaea.netflix.com,Proxy",
+		"DOMAIN-SUFFIX,ichnaea-web.netflix.com,Proxy",
+		"DOMAIN-SUFFIX,nflxvideo.net,Proxy",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing Fast.com speedtest rule %q in:\n%s", want, out)
+		}
+	}
+}
+
 func TestRenderDirectModeSkipsProxyRules(t *testing.T) {
 	cfg := config.Default().Traffic
 	cfg.Mode = config.ModeDirect
