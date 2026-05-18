@@ -26,6 +26,10 @@ const (
 	updateAPIBase    = "https://api.github.com/repos/" + updateRepo
 	updateLatestPage = "https://github.com/" + updateRepo + "/releases/latest"
 	updateAPITimeout = 20 * time.Second
+
+	updateUserAgentHeader = "User-Agent"
+	updateUserAgentValue  = "lan-proxy-gateway"
+	updateErrCandidateFmt = "%s: %v"
 )
 
 var updateMirrors = []string{
@@ -95,28 +99,54 @@ func runUpdate(ctx context.Context, requested string) error {
 		color.Yellow("如下载失败，请改用：gateway update %s（不要预先 sudo，程序会按需切换 sudo 并保留代理）。", requested)
 	}
 
-	target, err := resolveUpdateTag(ctx, requested)
+	tag, tmpPath, err := prepareUpdateBinary(ctx, requested)
 	if err != nil {
 		return err
 	}
+	if tmpPath == "" {
+		// prepareUpdateBinary 已打印 "已是目标版本"
+		return nil
+	}
+
+	if !admin {
+		color.Cyan("切换到 sudo 进行替换 ...")
+		if err := reexecForUpdateInstall(tag, tmpPath); err != nil {
+			_ = os.Remove(tmpPath)
+			return err
+		}
+		// syscall.Exec 成功时不会返回到这里。
+		return nil
+	}
+	return installUpdateBinary(ctx, tag, tmpPath)
+}
+
+// prepareUpdateBinary resolves the requested tag, downloads the matching
+// release asset to a temp path under the current user's identity, and
+// returns the resolved tag plus the temp path. Returns (tag, "", nil)
+// when the current version already matches and no download was needed.
+func prepareUpdateBinary(ctx context.Context, requested string) (string, string, error) {
+	tag, err := resolveUpdateTag(ctx, requested)
+	if err != nil {
+		return "", "", err
+	}
 	current := Version
 	color.Cyan("当前版本: %s", current)
-	color.Cyan("目标版本: %s", target)
-	if current == target {
+	color.Cyan("目标版本: %s", tag)
+	if current == tag {
 		color.Green("已是目标版本，无需更新")
-		return nil
+		return tag, "", nil
 	}
 
 	asset, err := gatewayReleaseAsset(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
-		return err
+		return "", "", err
 	}
-	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", updateRepo, target, asset)
+	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", updateRepo, tag, asset)
 
 	color.Cyan("下载 %s ...", asset)
 	tmpPath, err := downloadUpdateAsset(ctx, url)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	if runtime.GOOS != "windows" {
 		_ = os.Chmod(tmpPath, 0o755)
@@ -128,17 +158,7 @@ func runUpdate(ctx context.Context, requested string) error {
 	} else {
 		color.Green("下载完成")
 	}
-
-	if !admin {
-		color.Cyan("切换到 sudo 进行替换 ...")
-		if err := reexecForUpdateInstall(target, tmpPath); err != nil {
-			_ = os.Remove(tmpPath)
-			return err
-		}
-		// syscall.Exec 成功时不会返回到这里。
-		return nil
-	}
-	return installUpdateBinary(ctx, target, tmpPath)
+	return tag, tmpPath, nil
 }
 
 // installUpdateBinary 接管 stop / 替换 / restart，要求当前进程已具备 admin。
@@ -154,16 +174,9 @@ func installUpdateBinary(ctx context.Context, target, tmpPath string) error {
 	if err != nil {
 		return err
 	}
-	wasRunning := a.Status().Running
-	localDNSWasLoopback := false
-	if wasRunning && a.Plat != nil {
-		localDNSWasLoopback, _ = a.Plat.LocalDNSIsLoopback()
-	}
-	if wasRunning {
-		color.Cyan("停止当前 gateway ...")
-		if err := a.Stop(); err != nil {
-			return err
-		}
+	wasRunning, localDNSWasLoopback, err := stopGatewayBeforeUpdate(a)
+	if err != nil {
+		return err
 	}
 
 	self, err := currentExecutablePath()
@@ -190,17 +203,47 @@ func installUpdateBinary(ctx context.Context, target, tmpPath string) error {
 	color.Green("已更新到 %s", target)
 
 	if wasRunning {
-		color.Cyan("重新启动 gateway ...")
-		if err := a.Start(ctx); err != nil {
+		if err := restartGatewayAfterUpdate(ctx, a, localDNSWasLoopback); err != nil {
 			return err
 		}
-		if localDNSWasLoopback && a.Plat != nil {
-			if err := a.Plat.SetLocalDNSToLoopback(); err != nil {
-				color.Yellow("gateway 已启动，但恢复本机 DNS 到 127.0.0.1 失败: %v", err)
-			}
-		}
-		color.Green("gateway 已重新启动")
 	}
+	return nil
+}
+
+// stopGatewayBeforeUpdate captures whether gateway was running and whether
+// its loopback DNS pinning was active, then stops the daemon if needed.
+// Returns (wasRunning, localDNSWasLoopback, error) so the caller can
+// later decide whether to restart and restore the DNS pin.
+func stopGatewayBeforeUpdate(a *app.App) (bool, bool, error) {
+	wasRunning := a.Status().Running
+	localDNSWasLoopback := false
+	if wasRunning && a.Plat != nil {
+		localDNSWasLoopback, _ = a.Plat.LocalDNSIsLoopback()
+	}
+	if wasRunning {
+		color.Cyan("停止当前 gateway ...")
+		if err := a.Stop(); err != nil {
+			return false, false, err
+		}
+	}
+	return wasRunning, localDNSWasLoopback, nil
+}
+
+// restartGatewayAfterUpdate brings gateway back up after a successful
+// binary swap, restoring the loopback DNS pinning if it was active
+// before the stop. Caller is expected to have already replaced the
+// binary on disk.
+func restartGatewayAfterUpdate(ctx context.Context, a *app.App, localDNSWasLoopback bool) error {
+	color.Cyan("重新启动 gateway ...")
+	if err := a.Start(ctx); err != nil {
+		return err
+	}
+	if localDNSWasLoopback && a.Plat != nil {
+		if err := a.Plat.SetLocalDNSToLoopback(); err != nil {
+			color.Yellow("gateway 已启动，但恢复本机 DNS 到 127.0.0.1 失败: %v", err)
+		}
+	}
+	color.Green("gateway 已重新启动")
 	return nil
 }
 
@@ -244,7 +287,7 @@ func fetchReleaseTag(ctx context.Context, url string) (string, error) {
 		if err == nil {
 			return tag, nil
 		}
-		failures = append(failures, fmt.Sprintf("%s: %v", candidate, err))
+		failures = append(failures, fmt.Sprintf(updateErrCandidateFmt, candidate, err))
 	}
 	return "", fmt.Errorf("所有版本源均失败: %s", strings.Join(failures, "; "))
 }
@@ -273,7 +316,7 @@ func fetchLatestReleaseTagFromRedirect(ctx context.Context, url string) (string,
 		if err == nil {
 			return tag, nil
 		}
-		failures = append(failures, fmt.Sprintf("%s: %v", candidate, err))
+		failures = append(failures, fmt.Sprintf(updateErrCandidateFmt, candidate, err))
 	}
 	return "", fmt.Errorf("所有页面跳转源均失败: %s", strings.Join(failures, "; "))
 }
@@ -285,7 +328,7 @@ func fetchLatestReleaseTagFromRedirectCandidate(ctx context.Context, client *htt
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "lan-proxy-gateway")
+	req.Header.Set(updateUserAgentHeader, updateUserAgentValue)
 	req.Header.Set("Accept", "text/html,*/*")
 	resp, err := client.Do(req)
 	if err != nil {
@@ -331,7 +374,7 @@ func fetchReleaseTagFromCandidate(ctx context.Context, client *http.Client, cand
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "lan-proxy-gateway")
+	req.Header.Set(updateUserAgentHeader, updateUserAgentValue)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := client.Do(req)
 	if err != nil {
@@ -399,7 +442,7 @@ func openUpdateURL(ctx context.Context, url string) (*http.Response, error) {
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("User-Agent", "lan-proxy-gateway")
+		req.Header.Set(updateUserAgentHeader, updateUserAgentValue)
 		req.Header.Set("Accept", "*/*")
 		resp, err := client.Do(req)
 		if err == nil && resp.StatusCode == http.StatusOK {
@@ -409,7 +452,7 @@ func openUpdateURL(ctx context.Context, url string) (*http.Response, error) {
 			failures = append(failures, fmt.Sprintf("%s: HTTP %d", candidate, resp.StatusCode))
 			resp.Body.Close()
 		} else {
-			failures = append(failures, fmt.Sprintf("%s: %v", candidate, err))
+			failures = append(failures, fmt.Sprintf(updateErrCandidateFmt, candidate, err))
 		}
 	}
 	return nil, fmt.Errorf("所有下载源均失败: %s", strings.Join(failures, "; "))
