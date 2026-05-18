@@ -22,6 +22,7 @@ import (
 const (
 	updateRepo       = "Tght1211/lan-proxy-gateway"
 	updateAPIBase    = "https://api.github.com/repos/" + updateRepo
+	updateLatestPage = "https://github.com/" + updateRepo + "/releases/latest"
 	updateAPITimeout = 20 * time.Second
 )
 
@@ -152,7 +153,7 @@ func runUpdate(ctx context.Context, requested string) error {
 func resolveUpdateTag(ctx context.Context, requested string) (string, error) {
 	tag := normalizeRequestedVersion(requested)
 	if tag == "" {
-		return fetchReleaseTag(ctx, updateAPIBase+"/releases/latest")
+		return fetchLatestReleaseTag(ctx)
 	}
 	return tag, nil
 }
@@ -180,6 +181,81 @@ func fetchReleaseTag(ctx context.Context, url string) (string, error) {
 		failures = append(failures, fmt.Sprintf("%s: %v", candidate, err))
 	}
 	return "", fmt.Errorf("所有版本源均失败: %s", strings.Join(failures, "; "))
+}
+
+func fetchLatestReleaseTag(ctx context.Context) (string, error) {
+	apiTag, apiErr := fetchReleaseTag(ctx, updateAPIBase+"/releases/latest")
+	if apiErr == nil {
+		return apiTag, nil
+	}
+	pageTag, pageErr := fetchLatestReleaseTagFromRedirect(ctx, updateLatestPage)
+	if pageErr == nil {
+		color.Yellow("GitHub API 暂不可用，已通过 release 页面跳转解析最新版本: %s", pageTag)
+		return pageTag, nil
+	}
+	return "", fmt.Errorf("无法获取最新版本: API 查询失败: %v; release 页面跳转失败: %v", apiErr, pageErr)
+}
+
+func fetchLatestReleaseTagFromRedirect(ctx context.Context, url string) (string, error) {
+	var failures []string
+	client := updateHTTPClient()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	for _, candidate := range updateURLCandidates(url) {
+		tag, err := fetchLatestReleaseTagFromRedirectCandidate(ctx, client, candidate)
+		if err == nil {
+			return tag, nil
+		}
+		failures = append(failures, fmt.Sprintf("%s: %v", candidate, err))
+	}
+	return "", fmt.Errorf("所有页面跳转源均失败: %s", strings.Join(failures, "; "))
+}
+
+func fetchLatestReleaseTagFromRedirectCandidate(ctx context.Context, client *http.Client, candidate string) (string, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, updateAPITimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, candidate, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "lan-proxy-gateway")
+	req.Header.Set("Accept", "text/html,*/*")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		if tag := tagFromReleaseURL(resp.Request.URL.String()); tag != "" {
+			return tag, nil
+		}
+		return "", fmt.Errorf("页面没有跳转到 release tag")
+	}
+	if resp.StatusCode < http.StatusMultipleChoices || resp.StatusCode >= http.StatusBadRequest {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	location := resp.Header.Get("Location")
+	if location == "" {
+		return "", fmt.Errorf("跳转响应没有 Location")
+	}
+	if tag := tagFromReleaseURL(location); tag != "" {
+		return tag, nil
+	}
+	return "", fmt.Errorf("跳转地址里没有 release tag: %s", location)
+}
+
+func tagFromReleaseURL(raw string) string {
+	const marker = "/releases/tag/"
+	idx := strings.Index(raw, marker)
+	if idx < 0 {
+		return ""
+	}
+	tag := raw[idx+len(marker):]
+	if cut := strings.IndexAny(tag, "?#/"); cut >= 0 {
+		tag = tag[:cut]
+	}
+	return strings.TrimSpace(tag)
 }
 
 func fetchReleaseTagFromCandidate(ctx context.Context, client *http.Client, candidate string) (string, error) {

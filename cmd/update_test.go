@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -39,6 +41,37 @@ func TestResolveUpdateTagSpecificVersionDoesNotFetchNetwork(t *testing.T) {
 	}
 	if got != "v3.4.4" {
 		t.Fatalf("resolveUpdateTag() = %q, want %q", got, "v3.4.4")
+	}
+}
+
+func TestTagFromReleaseURL(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{in: "https://github.com/Tght1211/lan-proxy-gateway/releases/tag/v3.4.8", want: "v3.4.8"},
+		{in: "https://github.com/Tght1211/lan-proxy-gateway/releases/tag/v3.4.8?expanded_assets=true", want: "v3.4.8"},
+		{in: "https://github.com/Tght1211/lan-proxy-gateway/releases/latest", want: ""},
+	}
+	for _, tc := range cases {
+		if got := tagFromReleaseURL(tc.in); got != tc.want {
+			t.Fatalf("tagFromReleaseURL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestFetchLatestReleaseTagFromRedirect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://github.com/Tght1211/lan-proxy-gateway/releases/tag/v3.4.8", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	got, err := fetchLatestReleaseTagFromRedirect(context.Background(), srv.URL+"/releases/latest")
+	if err != nil {
+		t.Fatalf("fetchLatestReleaseTagFromRedirect() error = %v", err)
+	}
+	if got != "v3.4.8" {
+		t.Fatalf("fetchLatestReleaseTagFromRedirect() = %q, want %q", got, "v3.4.8")
 	}
 }
 
