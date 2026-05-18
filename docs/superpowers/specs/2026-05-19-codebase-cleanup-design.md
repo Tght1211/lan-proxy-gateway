@@ -3,6 +3,7 @@
 - **Status:** Draft, awaiting user review
 - **Date:** 2026-05-19
 - **Posture:** Conservative — keep compat paths where files have public references
+- **Hard invariant:** No functional behavior change. Every commit either touches build/docs only, or is a pure refactor protected by existing tests. The branch is rejected before merge if `go test ./...` or any verification step regresses.
 - **Out of scope:** Splitting `internal/console/console.go` (2042 lines) and `internal/app/webui_adapter.go` (967 lines). Each is its own refactor epic.
 
 ## Context
@@ -32,10 +33,11 @@ clean:
 	rm -rf .tmp/ .cache/ .try/
 	rm -f logs/*.log
 	find . -name '.DS_Store' -delete
-	rm -f handoff_unfinished_tasks.txt
 ```
 
 Then run `make clean` once locally. Diff = `Makefile` only; the deletions affect only gitignored paths so git itself sees no file removals.
+
+`handoff_unfinished_tasks.txt` is intentionally **not** removed by `clean`: it is a hand-off / recovery document (gitignored but human-meaningful), not a build artifact. The user can delete it manually when no longer needed.
 
 ### Commit 2 — `chore(legacy): document archive status`
 
@@ -51,17 +53,26 @@ No other changes — `legacy/` keeps its contents.
 
 Moves:
 
-| From | To |
-|---|---|
-| `install-mihomo.sh` | `scripts/install-mihomo.sh` |
-| `download-mihomo.sh` | `scripts/download-mihomo.sh` |
-| `script-demo.js` | `examples/extension.js` |
+| From | To | Compat wrapper at original path? |
+|---|---|---|
+| `install-mihomo.sh` | `scripts/install-mihomo.sh` | Yes — 2-line shell wrapper |
+| `download-mihomo.sh` | `scripts/download-mihomo.sh` | Yes — 2-line shell wrapper |
+| `script-demo.js` | `examples/extension.js` | No (no callers; rename also intentional) |
 
-No compat wrappers. Grep confirmed no callers in code, scripts, README, docs, or release notes.
+Wrapper content (executable, retains original `#!/usr/bin/env bash` shebang for portability):
+
+```bash
+#!/usr/bin/env bash
+# Moved to scripts/. This shim is kept for compatibility with any
+# documentation or muscle-memory still pointing at the repo root.
+exec "$(dirname "$0")/scripts/$(basename "$0")" "$@"
+```
+
+Pre-move verification (already done while drafting this spec): `grep -rn 'install-mihomo\|download-mihomo\|script-demo' .github/ Makefile scripts/ embed/ internal/ cmd/ main.go README*.md docs/` → zero hits. The wrappers are belt-and-suspenders only.
 
 Stay at root (external/documented references): `install.sh`, `install.ps1`, `dev.sh`, `dev.ps1`.
 
-`scripts/` already exists with `rebuild-tag-assets.sh` and `sync-release-notes.sh`; the new arrivals fit the existing convention.
+`scripts/` already exists with `rebuild-tag-assets.sh` and `sync-release-notes.sh`; the new arrivals fit the existing convention. `examples/` will be created.
 
 ### Commit 4 — `refactor(update): satisfy lint, extract helpers`
 
@@ -99,7 +110,11 @@ Commit-specific checks:
 
 - **C1:** run `make clean` against a dirty tree, confirm it removes the listed paths and leaves tracked files alone.
 - **C2:** read-only — no checks beyond the build.
-- **C3:** `bash -n scripts/install-mihomo.sh`, `bash -n scripts/download-mihomo.sh`. Confirm `install.sh` and `install.ps1` are still at root. `git grep -n 'install-mihomo\|download-mihomo\|script-demo'` shows zero references.
+- **C3:**
+  - `bash -n scripts/install-mihomo.sh`, `bash -n scripts/download-mihomo.sh`, `bash -n install-mihomo.sh`, `bash -n download-mihomo.sh` — syntax-check both targets and both wrappers.
+  - `./install-mihomo.sh --help 2>&1 | head -2` and `./scripts/install-mihomo.sh --help 2>&1 | head -2` should produce identical output (wrapper invariant). Same for `download-mihomo.sh`.
+  - Confirm `install.sh` and `install.ps1` are still at repo root with original content (unchanged).
+  - `git grep -n 'install-mihomo\|download-mihomo\|script-demo'` shows references **only** inside `scripts/`, the wrappers, and `examples/extension.js`.
 - **C4:** `go test ./cmd/...` green. `gateway update --help` still parses (cobra hasn't lost any flags). `golangci-lint` (if available) clean on `cmd/update.go`.
 
 Whole-branch pre-merge:
