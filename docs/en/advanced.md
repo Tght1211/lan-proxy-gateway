@@ -94,7 +94,7 @@ sudo gateway restart
 The repo includes an example script:
 
 ```text
-./script-demo.js
+./examples/extension.js
 ```
 
 ---

@@ -92,7 +92,7 @@ sudo gateway restart
 项目内自带示例:
 
 ```text
-./script-demo.js
+./examples/extension.js
 ```
 
 ---
