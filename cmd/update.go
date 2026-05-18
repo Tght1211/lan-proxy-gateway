@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tght/lan-proxy-gateway/internal/app"
+	"github.com/tght/lan-proxy-gateway/internal/platform"
 )
 
 const (
@@ -33,16 +35,22 @@ var updateMirrors = []string{
 	"https://gh.ddlc.top/",
 }
 
+// 内部 flag：elevate 后的子进程通过这两个参数复用父进程已下载好的产物，
+// 避免 sudo 把代理类环境变量剥掉之后子进程没法重新下载。
+var (
+	updatePrefetchedAsset string
+	updatePrefetchedTag   string
+)
+
 var updateCmd = &cobra.Command{
 	Use:   "update [version]",
 	Short: "升级到最新版本，或升级/回退到指定版本",
-	Example: `  sudo gateway update
-  sudo gateway update latest
-  sudo gateway update v3.4.3
-  sudo gateway update 3.3.2`,
+	Example: `  gateway update
+  gateway update latest
+  gateway update v3.4.3
+  gateway update 3.3.2`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		maybeElevate()
 		target := "latest"
 		if len(args) > 0 {
 			target = args[0]
@@ -51,11 +59,42 @@ var updateCmd = &cobra.Command{
 	},
 }
 
+func init() {
+	updateCmd.Flags().StringVar(&updatePrefetchedAsset, "prefetched-asset", "", "")
+	updateCmd.Flags().StringVar(&updatePrefetchedTag, "prefetched-tag", "", "")
+	_ = updateCmd.Flags().MarkHidden("prefetched-asset")
+	_ = updateCmd.Flags().MarkHidden("prefetched-tag")
+}
+
 type githubRelease struct {
 	TagName string `json:"tag_name"`
 }
 
+// runUpdate 把 update 流程拆成两段：
+//  1. 用户权限阶段：版本查询 + 下载产物到 /tmp。这两步要访问 GitHub，必须能用
+//     用户的 HTTPS_PROXY/HTTP_PROXY；不能让 sudo 把这些变量先剥掉。
+//  2. root 权限阶段：stop / 替换 /usr/local/bin/gateway / restart。
+//
+// 完成 (1) 后通过 sudo 重新 exec 自己进入 (2)，把下载好的临时文件路径用隐藏
+// flag 透传给子进程，避免子进程在 root 身份下无代理可用。
 func runUpdate(ctx context.Context, requested string) error {
+	// elevate 后的 root 子进程：跳过下载，直接接管安装阶段。
+	if updatePrefetchedAsset != "" && updatePrefetchedTag != "" {
+		return installUpdateBinary(ctx, updatePrefetchedTag, updatePrefetchedAsset)
+	}
+
+	admin, _ := platform.Current().IsAdmin()
+	if !admin && runtime.GOOS == "windows" {
+		color.Red("此操作需要管理员权限。")
+		color.Yellow("请关闭当前窗口，右键 PowerShell → 以管理员身份运行，再执行：")
+		fmt.Printf("  gateway update %s\n", requested)
+		return errors.New("admin required")
+	}
+	if admin && runtime.GOOS != "windows" && os.Getenv("SUDO_USER") != "" && proxyEnvMissing() {
+		color.Yellow("提示：通过 sudo 启动会清除 HTTPS_PROXY 等代理变量。")
+		color.Yellow("如下载失败，请改用：gateway update %s（不要预先 sudo，程序会按需切换 sudo 并保留代理）。", requested)
+	}
+
 	target, err := resolveUpdateTag(ctx, requested)
 	if err != nil {
 		return err
@@ -79,12 +118,6 @@ func runUpdate(ctx context.Context, requested string) error {
 	if err != nil {
 		return err
 	}
-	keepTmp := false
-	defer func() {
-		if !keepTmp {
-			_ = os.Remove(tmpPath)
-		}
-	}()
 	if runtime.GOOS != "windows" {
 		_ = os.Chmod(tmpPath, 0o755)
 	}
@@ -95,6 +128,27 @@ func runUpdate(ctx context.Context, requested string) error {
 	} else {
 		color.Green("下载完成")
 	}
+
+	if !admin {
+		color.Cyan("切换到 sudo 进行替换 ...")
+		if err := reexecForUpdateInstall(target, tmpPath); err != nil {
+			_ = os.Remove(tmpPath)
+			return err
+		}
+		// syscall.Exec 成功时不会返回到这里。
+		return nil
+	}
+	return installUpdateBinary(ctx, target, tmpPath)
+}
+
+// installUpdateBinary 接管 stop / 替换 / restart，要求当前进程已具备 admin。
+func installUpdateBinary(ctx context.Context, target, tmpPath string) error {
+	keepTmp := false
+	defer func() {
+		if !keepTmp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
 
 	a, err := app.New()
 	if err != nil {
@@ -148,6 +202,18 @@ func runUpdate(ctx context.Context, requested string) error {
 		color.Green("gateway 已重新启动")
 	}
 	return nil
+}
+
+func proxyEnvMissing() bool {
+	for _, k := range []string{
+		"HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY",
+		"https_proxy", "http_proxy", "all_proxy",
+	} {
+		if os.Getenv(k) != "" {
+			return false
+		}
+	}
+	return true
 }
 
 func resolveUpdateTag(ctx context.Context, requested string) (string, error) {
@@ -350,11 +416,12 @@ func openUpdateURL(ctx context.Context, url string) (*http.Response, error) {
 }
 
 func updateHTTPClient() *http.Client {
-	// 此前曾设 tr.ForceAttemptHTTP2 = false 尝试禁用 HTTP/2，但 Clone 后
-	// TLSNextProto 是空 map（非 nil），TLS ALPN 仍会协商成 h2，结果传输层
-	// 协商成 h2、应用层却按 h1 读响应，表现为 EOF 或 "malformed HTTP
-	// response" 里夹带的 HTTP/2 SETTINGS 帧。让 Go 默认处理 HTTP/2 是最
-	// 简单且正确的选择。
+	// 直接克隆默认 transport，保留它的 ProxyFromEnvironment 与 HTTP/2 支持。
+	// 之前曾通过 tr.ForceAttemptHTTP2 = false 试图禁用 HTTP/2，但 Clone 后的
+	// TLSNextProto 是空 map（非 nil），加上 TLS ALPN 仍会协商成 h2，结果是
+	// 传输层握手成 h2、应用层却按 h1 读响应，复现为 EOF 或 malformed HTTP
+	// response（HTTP/2 SETTINGS 帧）。让 Go 自己处理 HTTP/2 是最简单且正确
+	// 的选择。
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	return &http.Client{
 		Timeout:   10 * time.Minute,
