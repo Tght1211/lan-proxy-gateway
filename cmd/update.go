@@ -350,8 +350,12 @@ func openUpdateURL(ctx context.Context, url string) (*http.Response, error) {
 }
 
 func updateHTTPClient() *http.Client {
+	// 此前曾设 tr.ForceAttemptHTTP2 = false 尝试禁用 HTTP/2，但 Clone 后
+	// TLSNextProto 是空 map（非 nil），TLS ALPN 仍会协商成 h2，结果传输层
+	// 协商成 h2、应用层却按 h1 读响应，表现为 EOF 或 "malformed HTTP
+	// response" 里夹带的 HTTP/2 SETTINGS 帧。让 Go 默认处理 HTTP/2 是最
+	// 简单且正确的选择。
 	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.ForceAttemptHTTP2 = false
 	return &http.Client{
 		Timeout:   10 * time.Minute,
 		Transport: tr,
