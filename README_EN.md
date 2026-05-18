@@ -122,10 +122,12 @@ Detailed scenarios + traffic-path diagrams: [docs/scenarios.md](docs/scenarios.m
 ## 🔄 Update / rollback
 
 ```bash
-sudo gateway update            # latest release
-sudo gateway update latest     # same as above
-sudo gateway update v3.4.3     # specific tag (or rollback)
+gateway update                 # latest release (recommended: do NOT pre-sudo)
+gateway update latest          # same as above
+gateway update v3.4.3          # specific tag (or rollback)
 ```
+
+> Since v3.4.9, **don't pre-sudo**: the command runs version lookup and asset download under your user identity (preserving `HTTPS_PROXY` etc.), then requests sudo only for the stop/replace/restart step. `sudo gateway update` still works, but macOS's default sudoers strips proxy variables, so GitHub becomes unreachable.
 
 First time upgrading from a pre-v3.4.3 install (no `gateway update` subcommand yet), just re-run the install script — it overwrites in place and preserves your `gateway.yaml`:
 

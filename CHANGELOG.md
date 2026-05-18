@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented here.
 
+## v3.4.9 - 2026-05-19
+
+### Fixed
+
+- Fixed `gateway update` returning `EOF` (and on one mirror, `malformed HTTP response "\x00\x00\x12\x04..."`) when run behind an HTTPS proxy. `tr.ForceAttemptHTTP2 = false` did not actually disable HTTP/2 on a cloned `http.DefaultTransport`: TLS ALPN still negotiated h2 while the application read responses as h1. Removed the line and let the transport handle HTTP/2 normally.
+- Fixed `gateway update` losing the user's `HTTPS_PROXY`/`HTTP_PROXY` after self-elevation. The update flow used to run entirely as root via `maybeElevate`; on macOS the default sudoers `env_reset` policy strips proxy variables before the elevated process sees them. Reworked the flow so version lookup and asset download happen in the user's environment, then a thin sudo re-exec hands the prefetched temp path to the root child for the stop/replace/restart step — the root child no longer touches the network.
+- Added a release-page redirect fallback when GitHub's `/releases/latest` API and every mirror fail. The fallback follows the 302 from `https://github.com/<repo>/releases/latest` and extracts the tag from the final URL.
+
+### Changed
+
+- Refactored `cmd/update.go` for maintainability: pulled three string literals (`"User-Agent"`, `"lan-proxy-gateway"`, `"%s: %v"`) into module-level constants and extracted three helpers (`prepareUpdateBinary`, `stopGatewayBeforeUpdate`, `restartGatewayAfterUpdate`) so `runUpdate` and `installUpdateBinary` drop below the cognitive-complexity threshold. No behavior change.
+- Marked `legacy/` as an archive via a new `legacy/README.md`. The directory's shell scripts and `legacy/v1/` Go module are kept only for git-history reference.
+- Relocated stand-alone helper scripts: `install-mihomo.sh` and `download-mihomo.sh` move to `scripts/`, root keeps a 4-line wrapper that `exec`s the real target so `bash install-mihomo.sh` still works. `script-demo.js` renames to `examples/extension.js`; `docs/advanced.md` / `docs/en/advanced.md` updated to track the rename. `install.sh`, `install.ps1`, `dev.sh`, `dev.ps1` stay at repo root.
+- Expanded `make clean` to also remove `.tmp/`, `.cache/`, `.try/`, `logs/*.log` and `.DS_Store` everywhere. `handoff_unfinished_tasks.txt` is intentionally not touched.
+
 ## v3.4.8 - 2026-05-18
 
 ### Added

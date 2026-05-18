@@ -131,10 +131,12 @@ gateway start          # Windows（管理员终端，无需 sudo）
 ## 🔄 升级 / 回退
 
 ```bash
-sudo gateway update            # 升级到最新
-sudo gateway update latest     # 同上，显式指定 latest
-sudo gateway update v3.4.3     # 升级或回退到指定版本
+gateway update                 # 升级到最新（推荐：不预先 sudo）
+gateway update latest          # 同上，显式指定 latest
+gateway update v3.4.3          # 升级或回退到指定版本
 ```
+
+> v3.4.9 起，推荐**不预先 sudo**：程序会自己在用户身份下完成版本查询和下载（保留你的 `HTTPS_PROXY` 等代理变量），再在替换二进制阶段请求 sudo。`sudo gateway update` 仍然可用，但 macOS 默认 sudoers 会剥掉代理变量，导致拉不到 GitHub。
 
 第一次升到 v3.4.4 之前的版本，或没有 `gateway update` 子命令时，跑安装脚本即可（覆盖式安装，会保留 `gateway.yaml`）：
 
