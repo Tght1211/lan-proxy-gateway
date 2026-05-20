@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented here.
 
+## v3.4.10 - 2026-05-21
+
+### Fixed
+
+- Fixed the Gateway Web control panel disappearing after `gateway start` returned to the shell. Background starts now spawn a dedicated WebUI daemon for `runtime.ports.web_ui` (default `19091`), keep its PID in `webui.pid`, and stop it from `gateway stop` / `gateway restart`.
+- Fixed console WebUI guidance pointing users to mihomo's `http://<IP>:9090/ui/` instead of the Gateway control panel. The dashboard now prioritizes `http://<IP>:19091/#token=...` and keeps mihomo `/ui/` as a secondary "complete console" link.
+- Fixed `gateway webui` probing when the printed URL contains `#token=...`; the health check now strips fragment/query data before requesting `/api/ping`.
+
+### Changed
+
+- Added the hidden `gateway __webui-serve` command used internally by `gateway start` to host the Gateway WebUI as a background process.
+- Console source screens now probe the Gateway WebUI root path when showing Web control panel availability.
+
 ## v3.4.9 - 2026-05-19
 
 ### Fixed

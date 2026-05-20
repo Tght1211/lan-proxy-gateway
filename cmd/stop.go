@@ -16,6 +16,7 @@ var stopCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		stopWebUIDaemon(a.Paths)
 		if err := a.Stop(); err != nil {
 			return err
 		}

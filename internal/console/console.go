@@ -148,7 +148,18 @@ func (c *consoleUI) printWebUIHint() {
 	if ip == "" {
 		ip = "localhost"
 	}
-	dimC.Fprintf(c.out, "  Web 控制台 → http://%s:%d   （CLI / Web 双开，gateway.yaml 实时同步）\n", ip, port)
+	dimC.Fprintf(c.out, "  Web 控制台 → %s   （CLI / Web 双开，gateway.yaml 实时同步）\n", webUIURL(ip, port, c.app.Cfg.Runtime.WebUIToken))
+}
+
+func webUIURL(host string, port int, token string) string {
+	if host == "" {
+		host = "localhost"
+	}
+	frag := ""
+	if token != "" {
+		frag = "#token=" + token
+	}
+	return fmt.Sprintf("http://%s:%d/%s", host, port, frag)
 }
 
 func (c *consoleUI) prompt(label string) string {
@@ -500,14 +511,25 @@ func (c *consoleUI) drawDashboardOnce(ctx context.Context) {
 	// 代理源异常告警（supervisor 维护的状态），叠在仪表盘顶部警示。
 	drawDashboard(c.out, snap, running)
 	if running {
+		webPort := c.app.Cfg.Runtime.Ports.WebUI
+		token := c.app.Cfg.Runtime.WebUIToken
 		apiPort := c.app.Cfg.Runtime.Ports.API
 		fmt.Fprintln(c.out)
 		titleC.Fprintln(c.out, "  Web 控制台（推荐在浏览器操作）")
-		fmt.Fprintf(c.out, "    本机    http://127.0.0.1:%d/ui/\n", apiPort)
-		if localIP != "" {
-			fmt.Fprintf(c.out, "    局域网  http://%s:%d/ui/\n", localIP, apiPort)
+		if webPort > 0 {
+			fmt.Fprintf(c.out, "    本机    %s\n", webUIURL("127.0.0.1", webPort, token))
+			if localIP != "" {
+				fmt.Fprintf(c.out, "    局域网  %s\n", webUIURL(localIP, webPort, token))
+			}
+			dimC.Fprintln(c.out, "    这里可以改代理源、切模式、管理接入能力。")
 		}
-		dimC.Fprintln(c.out, "    浏览器里更适合切节点、看连接、做细操作。")
+		if apiPort > 0 {
+			if localIP != "" {
+				dimC.Fprintf(c.out, "    Mihomo 完整控制台  http://%s:%d/ui/\n", localIP, apiPort)
+			} else {
+				dimC.Fprintf(c.out, "    Mihomo 完整控制台  http://127.0.0.1:%d/ui/\n", apiPort)
+			}
+		}
 	}
 	h := c.app.Health()
 	if h.FallbackActive {
@@ -1137,11 +1159,13 @@ func (c *consoleUI) screenSource(ctx context.Context) {
 		renderRow("3", "本地配置文件", probes.file)
 		renderRow("4", "暂不配置", sourceSlot{value: dimC.Sprint("全部走直连")})
 
-		// Web 控制台是 mihomo 自带的，跟源类型无关：只要 mihomo 在跑，UI 就能
-		// 访问（单点代理 / 订阅 / 本地文件一视同仁）。过去只对 subscription+file
+		// Gateway 自带 Web 控制台跟源类型无关：只要服务在跑，UI 就能访问
+		// （单点代理 / 订阅 / 本地文件一视同仁）。过去只对 subscription+file
 		// 显示，导致选「单点代理」的人看不到 URL，误以为没这功能。
-		if c.app.Engine != nil && c.app.Engine.Running() {
+		if c.app.Engine != nil && c.app.Engine.Running() && c.app.Cfg.Runtime.Ports.WebUI > 0 {
+			webPort := c.app.Cfg.Runtime.Ports.WebUI
 			apiPort := c.app.Cfg.Runtime.Ports.API
+			token := c.app.Cfg.Runtime.WebUIToken
 			localIP := c.app.Status().Gateway.LocalIP
 			probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			var wg sync.WaitGroup
@@ -1149,7 +1173,7 @@ func (c *consoleUI) screenSource(ctx context.Context) {
 			wg.Add(2)
 			go func() {
 				defer wg.Done()
-				markLocal = probeHTTP(probeCtx, fmt.Sprintf("http://127.0.0.1:%d/ui/", apiPort))
+				markLocal = probeHTTP(probeCtx, fmt.Sprintf("http://127.0.0.1:%d/", webPort))
 			}()
 			go func() {
 				defer wg.Done()
@@ -1157,18 +1181,21 @@ func (c *consoleUI) screenSource(ctx context.Context) {
 					markLAN = ""
 					return
 				}
-				markLAN = probeHTTP(probeCtx, fmt.Sprintf("http://%s:%d/ui/", localIP, apiPort))
+				markLAN = probeHTTP(probeCtx, fmt.Sprintf("http://%s:%d/", localIP, webPort))
 			}()
 			wg.Wait()
 			cancel()
 
 			fmt.Fprintln(c.out)
-			titleC.Fprintln(c.out, "  ── Web 控制台（浏览器打开，切节点 / 查流量 / 改规则）──")
-			urlLocal := fmt.Sprintf("http://127.0.0.1:%d/ui/", apiPort)
+			titleC.Fprintln(c.out, "  ── Gateway Web 控制台（浏览器打开，改配置 / 切模式 / 管接入）──")
+			urlLocal := webUIURL("127.0.0.1", webPort, token)
 			fmt.Fprintf(c.out, "    本机    %-36s  %s\n", urlLocal, markLocal)
 			if localIP != "" {
-				urlLAN := fmt.Sprintf("http://%s:%d/ui/", localIP, apiPort)
+				urlLAN := webUIURL(localIP, webPort, token)
 				fmt.Fprintf(c.out, "    局域网  %-36s  %s  %s\n", urlLAN, markLAN, dimC.Sprint("（手机 / 平板也能用）"))
+			}
+			if apiPort > 0 {
+				dimC.Fprintf(c.out, "    Mihomo 完整控制台  http://127.0.0.1:%d/ui/\n", apiPort)
 			}
 		}
 

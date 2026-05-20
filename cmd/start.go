@@ -41,16 +41,26 @@ var startCmd = &cobra.Command{
 		a.StartSupervisor(cmd.Context())
 		color.Green("✔ 网关已启动")
 		color.New(color.Faint).Println(a.Engine.LogPath())
+		app.InjectWebUIVersion(Version)
+
+		if !startForeground {
+			if err := startWebUIDaemon(a); err != nil {
+				color.Yellow("Web 控制台后台启动失败（不影响代理本体）：%v", err)
+			} else {
+				printWebUIBanner(a)
+			}
+			color.New(color.Faint).Printf("\nmihomo 已在后台运行；CLI 菜单 %s，停止 %s。\n",
+				elevatedCmd(""), elevatedCmd("stop"))
+			return nil
+		}
 
 		// Web 控制台：监听 runtime.ports.web_ui（默认 19091），失败只 warn 不阻塞主流程。
-		// 后台模式下 server 跟 mihomo 一样以孤儿 goroutine 跑下去，gateway stop 时再清；
 		// foreground 模式下 server 在 Ctrl+C 后跟着 a.Stop 一起优雅关闭。
 		webuiSrv := webui.New(
 			webui.PortFromInt(a.Cfg.Runtime.Ports.WebUI),
 			a.Cfg.Runtime.WebUIToken,
 			app.NewWebUIController(a),
 		)
-		app.InjectWebUIVersion(Version)
 		webuiOK := true
 		if err := webuiSrv.Start(cmd.Context(), func(format string, args ...any) {
 			color.New(color.Faint).Printf(format+"\n", args...)
@@ -60,12 +70,6 @@ var startCmd = &cobra.Command{
 		}
 		if webuiOK {
 			printWebUIBanner(a)
-		}
-
-		if !startForeground {
-			color.New(color.Faint).Printf("\nmihomo 已在后台运行；CLI 菜单 %s，停止 %s。\n",
-				elevatedCmd(""), elevatedCmd("stop"))
-			return nil
 		}
 
 		// --foreground: launchd / systemd 要前台进程，等 Ctrl+C 再优雅停止。

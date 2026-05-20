@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"runtime"
 	"time"
@@ -94,12 +95,21 @@ var webuiCmd = &cobra.Command{
 func init() {
 	webuiCmd.Flags().BoolVarP(&webuiOpen, "open", "o", false, "顺便用默认浏览器打开第一个 URL")
 	rootCmd.AddCommand(webuiCmd)
+	rootCmd.AddCommand(webuiServeCmd)
 }
 
 // probeURL 一次 GET /api/ping，不接收返回体，纯探活。失败返回 false 不抛错。
 func probeURL(base string) bool {
+	u, err := url.Parse(base)
+	if err != nil {
+		return false
+	}
+	u.Path = "/api/ping"
+	u.RawQuery = ""
+	u.Fragment = ""
+
 	cli := &http.Client{Timeout: 600 * time.Millisecond}
-	resp, err := cli.Get(base + "/api/ping")
+	resp, err := cli.Get(u.String())
 	if err != nil {
 		return false
 	}
