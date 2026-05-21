@@ -86,16 +86,19 @@ func Load() (*Config, Paths, error) {
 	if err != nil {
 		return nil, paths, err
 	}
-	cfg, migrated, err := loadFrom(paths.ConfigFile)
+	cfg, migrated, normalized, err := loadFrom(paths.ConfigFile)
 	if err != nil {
 		return nil, paths, err
 	}
-	if len(migrated) > 0 {
+	if len(migrated) > 0 || normalized {
 		fmt.Fprintln(os.Stderr, "配置已从 v1 升级到 v2：")
 		for _, n := range migrated {
 			fmt.Fprintf(os.Stderr, "  • %s\n", n)
 		}
-		// 写回 v2 形态，下次启动不再迁移。
+		if normalized {
+			fmt.Fprintln(os.Stderr, "  • 已补齐缺失的默认配置")
+		}
+		// 写回 v2 形态 / 默认值，下次启动不再重复生成运行期默认值。
 		if err := Save(cfg, paths.ConfigFile); err != nil {
 			fmt.Fprintf(os.Stderr, "  ⚠ 写回 v2 形态失败: %v（下次还会再迁移一次）\n", err)
 		} else {
@@ -108,17 +111,17 @@ func Load() (*Config, Paths, error) {
 // LoadFrom is the silent variant — suitable for Configured() probes that
 // shouldn't cause migration warnings to appear.
 func LoadFrom(path string) (*Config, error) {
-	cfg, _, err := loadFrom(path)
+	cfg, _, _, err := loadFrom(path)
 	return cfg, err
 }
 
-func loadFrom(path string) (*Config, []string, error) {
+func loadFrom(path string) (*Config, []string, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil, ErrNotConfigured
+			return nil, nil, false, ErrNotConfigured
 		}
-		return nil, nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, nil, false, fmt.Errorf("read %s: %w", path, err)
 	}
 	return parse(data)
 }
@@ -126,11 +129,11 @@ func loadFrom(path string) (*Config, []string, error) {
 // Parse (exported) converts raw YAML into Config, silently migrating v1.
 // Preferred for in-memory tests. Use Load() for the filesystem entry point.
 func Parse(data []byte) (*Config, error) {
-	cfg, _, err := parse(data)
+	cfg, _, _, err := parse(data)
 	return cfg, err
 }
 
-func parse(data []byte) (*Config, []string, error) {
+func parse(data []byte) (*Config, []string, bool, error) {
 	var probe struct {
 		Version int `yaml:"version"`
 	}
@@ -139,24 +142,26 @@ func parse(data []byte) (*Config, []string, error) {
 	if probe.Version >= Version {
 		cfg := Default()
 		if err := yaml.Unmarshal(data, cfg); err != nil {
-			return nil, nil, fmt.Errorf("parse gateway.yaml: %w", err)
+			return nil, nil, false, fmt.Errorf("parse gateway.yaml: %w", err)
 		}
+		before, _ := yaml.Marshal(cfg)
 		Normalize(cfg)
 		if err := Validate(cfg); err != nil {
-			return nil, nil, err
+			return nil, nil, false, err
 		}
-		return cfg, nil, nil
+		after, _ := yaml.Marshal(cfg)
+		return cfg, nil, string(before) != string(after), nil
 	}
 
 	cfg, notes, err := MigrateV1(data)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	Normalize(cfg)
 	if err := Validate(cfg); err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
-	return cfg, notes, nil
+	return cfg, notes, true, nil
 }
 
 // Save writes the config back to disk with mode 0600.

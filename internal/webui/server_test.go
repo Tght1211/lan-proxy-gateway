@@ -236,16 +236,31 @@ func min(a, b int) int {
 
 func TestAPIRejectsRequestsWithoutToken(t *testing.T) {
 	fc := &fakeController{}
-	srv := newAuthTestServer(fc, "secret-token")
-	defer srv.Close()
+	mux := http.NewServeMux()
+	(&Server{token: "secret-token"}).routes(mux, fc)
 
-	resp, err := http.Get(srv.URL + "/api/status")
-	if err != nil {
-		t.Fatalf("get: %v", err)
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.RemoteAddr = "192.168.12.113:53000"
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rr.Code)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", resp.StatusCode)
+}
+
+func TestAPIAcceptsLoopbackWithoutToken(t *testing.T) {
+	fc := &fakeController{snap: Snapshot{GatewayMode: "tun"}}
+	mux := http.NewServeMux()
+	(&Server{token: "secret-token"}).routes(mux, fc)
+
+	for _, remoteAddr := range []string{"127.0.0.1:53000", "[::1]:53000"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+		req.RemoteAddr = remoteAddr
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("remoteAddr %s status = %d, want 200", remoteAddr, rr.Code)
+		}
 	}
 }
 
@@ -285,18 +300,16 @@ func TestAPIAcceptsXGatewayTokenHeader(t *testing.T) {
 
 func TestAPIRejectsWrongToken(t *testing.T) {
 	fc := &fakeController{}
-	srv := newAuthTestServer(fc, "secret-token")
-	defer srv.Close()
+	mux := http.NewServeMux()
+	(&Server{token: "secret-token"}).routes(mux, fc)
 
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.RemoteAddr = "192.168.12.113:53000"
 	req.Header.Set("Authorization", "Bearer wrong-token")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("wrong token must be rejected; got %d", resp.StatusCode)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong token must be rejected; got %d", rr.Code)
 	}
 }
 

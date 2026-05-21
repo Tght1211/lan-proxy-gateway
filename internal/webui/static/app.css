@@ -1409,12 +1409,25 @@ code {
   font: 900 11px/1 var(--mono);
 }
 .rule-pane { padding: 14px 22px 18px; }
+.rule-group-target {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(160px, 1fr) minmax(180px, 1fr);
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 12px;
+}
 .rule-textarea {
   min-height: 260px;
   resize: vertical;
   font-family: var(--mono);
   font-size: 13px;
   line-height: 1.6;
+}
+
+@media (max-width: 760px) {
+  .rule-group-target {
+    grid-template-columns: 1fr;
+  }
 }
 
 .conn-param-val {

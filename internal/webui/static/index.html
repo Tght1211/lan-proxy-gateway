@@ -420,9 +420,15 @@
               <button role="tab" aria-selected="true" data-verdict="direct" type="button">直连 <span class="tab-count" id="cntDirect">0</span></button>
               <button role="tab" aria-selected="false" data-verdict="proxy" type="button">代理 <span class="tab-count" id="cntProxy">0</span></button>
               <button role="tab" aria-selected="false" data-verdict="reject" type="button">拒绝 <span class="tab-count" id="cntReject">0</span></button>
+              <button role="tab" aria-selected="false" data-verdict="group" type="button">指定分组 <span class="tab-count" id="cntGroup">0</span></button>
             </div>
 
             <div class="rule-pane">
+              <div class="rule-group-target" id="ruleGroupTarget" hidden>
+                <label class="form-label" for="ruleGroupSelect">目标策略组</label>
+                <select class="form-select" id="ruleGroupSelect"></select>
+                <input class="form-input" id="ruleGroupCustom" type="text" placeholder="手动输入策略组名" />
+              </div>
               <textarea
                 class="form-input rule-textarea"
                 id="ruleArea"

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -216,6 +218,43 @@ func TestNormalize_AutoGenWebUIToken(t *testing.T) {
 	Normalize(cfg)
 	if cfg.Runtime.WebUIToken != saved {
 		t.Fatalf("Normalize 不应覆盖已有 token；before=%q after=%q", saved, cfg.Runtime.WebUIToken)
+	}
+}
+
+func TestLoadPersistsGeneratedWebUIToken(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gateway.yaml")
+	data := []byte(`
+version: 2
+gateway:
+  enabled: true
+traffic:
+  mode: rule
+source:
+  type: none
+runtime:
+  ports:
+    mixed: 17890
+    redir: 17892
+    api: 19090
+    web_ui: 19091
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, migrated, normalized, err := loadFrom(path)
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if len(migrated) != 0 {
+		t.Fatalf("unexpected migration notes: %v", migrated)
+	}
+	if !normalized {
+		t.Fatal("missing web_ui_token should mark config as normalized")
+	}
+	if cfg.Runtime.WebUIToken == "" {
+		t.Fatal("expected generated web_ui_token")
 	}
 }
 

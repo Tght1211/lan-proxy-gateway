@@ -115,24 +115,32 @@ Rules are no longer hardcoded inside the template. They are built through a dedi
 ### Custom Rules
 
 ```yaml
-rules:
-  extra_direct_rules:
-    - "DOMAIN-SUFFIX,corp.example.com,DIRECT"
-  extra_proxy_rules:
-    - "DOMAIN-SUFFIX,example-overseas.com,Proxy"
-  extra_reject_rules:
-    - "DOMAIN-SUFFIX,annoying-ads.example,REJECT"
+traffic:
+  extras:
+    direct:
+      - "DOMAIN-SUFFIX,corp.example.com"
+    proxy:
+      - "DOMAIN-SUFFIX,example-overseas.com"
+    reject:
+      - "DOMAIN-SUFFIX,annoying-ads.example"
+    groups:
+      - target: "🛬 AI landing group"
+        rules:
+          - "DOMAIN-SUFFIX,openai.com"
+          - "DOMAIN-SUFFIX,anthropic.com"
 ```
+
+`groups` routes matching custom rules to a named mihomo policy group. A common setup is AI domains through a residential-exit group while YouTube / Netflix / GitHub continue to use the normal `Proxy` group.
 
 ### Edit Interactively
 
 ```bash
-gateway config
+sudo gateway
 ```
 
 Then go to:
 
-- `Rules and custom entries`
+- `Traffic & rules` → `Custom rules`
 
 That lets you edit rules without hand-writing YAML.
 

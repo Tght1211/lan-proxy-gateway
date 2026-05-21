@@ -75,7 +75,7 @@ Detailed walkthroughs (with screenshots): [docs/en/](docs/en/) — phone / switc
 | 🌐 **Built-in web dashboard** | Open `http://gatewayIP:19091/` to switch proxy sources, policy groups, nodes, run latency tests, inspect connected devices, and control TUN / proxy service independently |
 | 🔐 **Proxy service auth** | The LAN HTTP/SOCKS5 `mixed-port` can be enabled/disabled independently and optionally protected with username/password while TUN stays available |
 | ⚡ **Source supervisor** | Auto-fallbacks subscription/file sources to direct when broken; local single-proxy mode only monitors the port to avoid false switches |
-| 🎯 **Rule system** | Built-in LAN-direct, China-direct, Apple, Nintendo, ad-blocking, AI-service rules — fully editable |
+| 🎯 **Rule system** | Built-in LAN-direct, China-direct, Apple, Nintendo, ad-blocking, AI-service rules; custom rules can target `Proxy` or any named policy group, for example AI domains through a residential exit while YouTube keeps using the normal proxy group |
 | 📊 **Node latency probe** | Switch-node page concurrently measures latency and sorts by speed |
 | 🗒️ **Readable log view** | mihomo's English logs rendered in a folded, deduplicated view |
 

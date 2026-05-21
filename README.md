@@ -75,9 +75,11 @@ gateway start          # Windows（管理员终端，无需 sudo）
 | 🌐 **内嵌 Web 控制台** | 浏览器开 `http://gatewayIP:19091/`，在首页切代理源 / 切分组节点 / 测速 / 看接入设备 / 控制 TUN 与代理服务 |
 | 🔐 **代理服务认证** | 局域网 HTTP/SOCKS5 `mixed-port` 可独立开关，并可选设置用户名 / 密码；TUN 透明代理可同时开启 |
 | ⚡ **代理源 supervisor** | 订阅/文件源异常时自动切直连保命；本机单点代理只监控端口，避免误切 |
-| 🎯 **规则系统** | 内置 LAN 直连 / 中国直连 / Apple / Nintendo / 广告拦截，菜单可改 |
+| 🎯 **规则系统** | 内置 LAN 直连 / 中国直连 / Apple / Nintendo / 广告拦截；自定义规则可指定 `Proxy` 或任意策略组，例如 AI 域名走住宅 IP、YouTube 继续走普通代理 |
 | 📊 **节点测速** | 切节点页面自动并发测延迟，按速度升序 |
 | 🗒️ **中文日志视图** | mihomo 英文日志翻译成中文（`🟡 TCP 直连 xxx → 超时`） |
+
+![Gateway WebUI 自定义规则指定策略组](docs/assets/webui-custom-rules.png)
 
 ---
 

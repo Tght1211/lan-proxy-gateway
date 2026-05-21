@@ -62,9 +62,17 @@ type TrafficConfig struct {
 
 // ExtraRules lets the user add custom rules without touching rulesets.
 type ExtraRules struct {
-	Direct []string `yaml:"direct"`
-	Proxy  []string `yaml:"proxy"`
-	Reject []string `yaml:"reject"`
+	Direct []string        `yaml:"direct"`
+	Proxy  []string        `yaml:"proxy"`
+	Reject []string        `yaml:"reject"`
+	Groups []TargetedRules `yaml:"groups,omitempty"`
+}
+
+// TargetedRules routes custom rule bodies to a named mihomo policy group.
+// Example: target="🛬 AI落地节点", rules=["DOMAIN-SUFFIX,openai.com"].
+type TargetedRules struct {
+	Target string   `yaml:"target" json:"target"`
+	Rules  []string `yaml:"rules" json:"rules"`
 }
 
 // RulesetToggles enables/disables the built-in rule collections.

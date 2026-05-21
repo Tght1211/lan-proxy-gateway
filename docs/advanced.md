@@ -113,24 +113,32 @@ sudo gateway restart
 ### 自定义规则
 
 ```yaml
-rules:
-  extra_direct_rules:
-    - "DOMAIN-SUFFIX,corp.example.com,DIRECT"
-  extra_proxy_rules:
-    - "DOMAIN-SUFFIX,example-overseas.com,Proxy"
-  extra_reject_rules:
-    - "DOMAIN-SUFFIX,annoying-ads.example,REJECT"
+traffic:
+  extras:
+    direct:
+      - "DOMAIN-SUFFIX,corp.example.com"
+    proxy:
+      - "DOMAIN-SUFFIX,example-overseas.com"
+    reject:
+      - "DOMAIN-SUFFIX,annoying-ads.example"
+    groups:
+      - target: "🛬 AI落地节点"
+        rules:
+          - "DOMAIN-SUFFIX,openai.com"
+          - "DOMAIN-SUFFIX,anthropic.com"
 ```
+
+`groups` 用来把规则发到指定策略组。典型用法是 AI 域名走「住宅 IP 落地」组，YouTube / Netflix / GitHub 仍然走普通 `Proxy` 组。
 
 ### 交互式编辑
 
 ```bash
-gateway config
+sudo gateway
 ```
 
 进入:
 
-- `规则开关与自定义规则`
+- `分流 & 规则` → `自定义规则`
 
 就能不用手写 YAML 来编辑。
 

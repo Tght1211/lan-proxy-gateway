@@ -812,11 +812,12 @@ func (c *consoleUI) screenTraffic(ctx context.Context) {
 	}
 }
 
-// screenCustomRules 管理用户自定义规则（config.Traffic.Extras 的 Direct/Proxy/Reject）。
+// screenCustomRules 管理用户自定义规则（config.Traffic.Extras 的 Direct/Proxy/Reject/Groups）。
 // 这些规则在 traffic.Render 里**最先**被 emit，优先级高过所有内置 ruleset。
 func (c *consoleUI) screenCustomRules(ctx context.Context) {
 	type item struct {
-		verdict string // DIRECT / PROXY / REJECT
+		verdict string // DIRECT / PROXY / REJECT / GROUP
+		target  string
 		rule    string
 	}
 	for {
@@ -827,20 +828,27 @@ func (c *consoleUI) screenCustomRules(ctx context.Context) {
 		fmt.Fprintln(c.out)
 
 		var listed []item
-		dump := func(group string, list []string, verdict string) {
+		dump := func(group string, list []string, verdict string, target string) {
 			titleC.Fprintf(c.out, "  [%s] (%d)\n", group, len(list))
 			if len(list) == 0 {
 				dimC.Fprintln(c.out, "    (无)")
 				return
 			}
 			for _, r := range list {
-				listed = append(listed, item{verdict, r})
+				listed = append(listed, item{verdict: verdict, target: target, rule: r})
 				fmt.Fprintf(c.out, "    %2d  %s\n", len(listed), r)
 			}
 		}
-		dump("直连", ex.Direct, "DIRECT")
-		dump("走代理", ex.Proxy, "PROXY")
-		dump("拒绝", ex.Reject, "REJECT")
+		dump("直连", ex.Direct, "DIRECT", "")
+		dump("走代理 · Proxy", ex.Proxy, "PROXY", "")
+		dump("拒绝", ex.Reject, "REJECT", "")
+		for _, group := range ex.Groups {
+			target := strings.TrimSpace(group.Target)
+			if target == "" {
+				continue
+			}
+			dump("指定策略组 · "+target, group.Rules, "GROUP", target)
+		}
 
 		fmt.Fprintln(c.out)
 		titleC.Fprint(c.out, "  ── 操作 ── ")
@@ -861,7 +869,7 @@ func (c *consoleUI) screenCustomRules(ctx context.Context) {
 				continue
 			}
 			target := listed[idx-1]
-			c.deleteCustomRule(ctx, target.verdict, target.rule)
+			c.deleteCustomRule(ctx, target.verdict, target.target, target.rule)
 		default:
 			warnC.Fprintln(c.out, "无效操作（A 添加 / D <编号> 删除 / 0 返回）")
 		}
@@ -905,7 +913,8 @@ func (c *consoleUI) addCustomRule(ctx context.Context) {
 	fmt.Fprintln(c.out, "    1) 直连 DIRECT")
 	fmt.Fprintln(c.out, "    2) 走代理 Proxy")
 	fmt.Fprintln(c.out, "    3) 拒绝 REJECT")
-	verdict := c.ask("请选择 1-3", "2")
+	fmt.Fprintln(c.out, "    4) 指定策略组")
+	verdict := c.ask("请选择 1-4", "2")
 
 	ex := &c.app.Cfg.Traffic.Extras
 	var label string
@@ -916,6 +925,14 @@ func (c *consoleUI) addCustomRule(ctx context.Context) {
 	case "3":
 		ex.Reject = append(ex.Reject, rule)
 		label = "REJECT"
+	case "4":
+		target := c.askPolicyGroupTarget(ctx)
+		if target == "" {
+			warnC.Fprintln(c.out, "  策略组名为空，取消")
+			return
+		}
+		addTargetedRule(ex, target, rule)
+		label = target
 	default:
 		ex.Proxy = append(ex.Proxy, rule)
 		label = "Proxy"
@@ -924,7 +941,7 @@ func (c *consoleUI) addCustomRule(ctx context.Context) {
 }
 
 // deleteCustomRule 删除命中的某条。
-func (c *consoleUI) deleteCustomRule(ctx context.Context, verdict, rule string) {
+func (c *consoleUI) deleteCustomRule(ctx context.Context, verdict, target, rule string) {
 	remove := func(list []string) []string {
 		out := list[:0]
 		removed := false
@@ -945,8 +962,88 @@ func (c *consoleUI) deleteCustomRule(ctx context.Context, verdict, rule string) 
 		ex.Proxy = remove(ex.Proxy)
 	case "REJECT":
 		ex.Reject = remove(ex.Reject)
+	case "GROUP":
+		groups := ex.Groups[:0]
+		for _, group := range ex.Groups {
+			if group.Target == target {
+				group.Rules = remove(group.Rules)
+			}
+			if strings.TrimSpace(group.Target) != "" && len(group.Rules) > 0 {
+				groups = append(groups, group)
+			}
+		}
+		ex.Groups = groups
 	}
 	c.saveAndMaybeReload(ctx, fmt.Sprintf("  ✓ 已删：%s", rule))
+}
+
+func (c *consoleUI) askPolicyGroupTarget(ctx context.Context) string {
+	groups := c.knownPolicyGroups(ctx)
+	if len(groups) > 0 {
+		fmt.Fprintln(c.out, "\n  可用策略组：")
+		for i, name := range groups {
+			fmt.Fprintf(c.out, "    %2d) %s\n", i+1, name)
+		}
+		fmt.Fprintln(c.out, "     0) 手动输入")
+		choice := strings.TrimSpace(c.ask("请选择策略组编号，或直接输入组名", "1"))
+		if n, err := strconv.Atoi(choice); err == nil {
+			if n >= 1 && n <= len(groups) {
+				return groups[n-1]
+			}
+			if n != 0 {
+				return ""
+			}
+		} else if choice != "" {
+			return choice
+		}
+	}
+	return strings.TrimSpace(c.ask("  策略组名", "Proxy"))
+}
+
+func (c *consoleUI) knownPolicyGroups(ctx context.Context) []string {
+	defaults := []string{"Proxy", "🛫 AI起飞节点", "🛬 AI落地节点"}
+	seen := make(map[string]bool, len(defaults)+8)
+	out := make([]string, 0, len(defaults)+8)
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	for _, name := range defaults {
+		add(name)
+	}
+	if c.app.Engine == nil || !c.app.Engine.Running() {
+		return out
+	}
+	listCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	groups, err := c.app.Engine.API().ListProxyGroups(listCtx)
+	cancel()
+	if err != nil {
+		return out
+	}
+	sort.Slice(groups, func(i, j int) bool { return groups[i].Name < groups[j].Name })
+	for _, group := range groups {
+		add(group.Name)
+	}
+	return out
+}
+
+func addTargetedRule(ex *config.ExtraRules, target, rule string) {
+	target = strings.TrimSpace(target)
+	rule = strings.TrimSpace(rule)
+	if target == "" || rule == "" {
+		return
+	}
+	for i := range ex.Groups {
+		if ex.Groups[i].Target == target {
+			ex.Groups[i].Rules = append(ex.Groups[i].Rules, rule)
+			return
+		}
+	}
+	ex.Groups = append(ex.Groups, config.TargetedRules{Target: target, Rules: []string{rule}})
 }
 
 // switchGatewayMode 在 TUN 旁路由 和 端口模式 之间切换。

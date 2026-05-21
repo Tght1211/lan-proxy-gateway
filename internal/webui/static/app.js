@@ -12,6 +12,7 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
 let cachedState = null;
 let activeRuleVerdict = "direct";
+let activeRuleGroup = "";
 const panels = ["overview", "routing", "profile", "devices", "advanced"];
 
 // ─────────── Auth token (P0-1) ───────────
@@ -200,6 +201,7 @@ function render(s) {
   $("cntDirect").textContent = (s.rules?.direct || []).length;
   $("cntProxy").textContent  = (s.rules?.proxy  || []).length;
   $("cntReject").textContent = (s.rules?.reject || []).length;
+  $("cntGroup").textContent  = (s.rules?.groups || []).reduce((n, g) => n + ((g.rules || []).length), 0);
   renderRulesPane(s);
 
   // Script
@@ -716,21 +718,81 @@ function collectSource() {
 
 // ─────────── Custom Rules ───────────
 function renderRulesPane(s) {
+  const groupMode = activeRuleVerdict === "group";
+  $("ruleGroupTarget").hidden = !groupMode;
+  if (groupMode) {
+    syncRuleGroupSelect(s.rules || {});
+    const group = findActiveRuleGroup(s.rules || {});
+    $("ruleArea").value = ((group && group.rules) || []).join("\n");
+    return;
+  }
   const list = (s.rules && s.rules[activeRuleVerdict]) || [];
   $("ruleArea").value = list.join("\n");
 }
 
-function collectRules() {
-  // 当前 textarea 的内容写回 activeRuleVerdict 对应的 list；其它两类保留原状。
+function collectRules(targetOverride) {
+  // 当前 textarea 的内容写回 activeRuleVerdict 对应的 list；其它类别保留原状。
   const lines = $("ruleArea").value.split("\n").map(s => s.trim()).filter(Boolean);
-  const base = cachedState && cachedState.rules ? cachedState.rules : { direct: [], proxy: [], reject: [] };
+  const base = cachedState && cachedState.rules ? cachedState.rules : { direct: [], proxy: [], reject: [], groups: [] };
   const out = {
     direct: base.direct || [],
     proxy:  base.proxy  || [],
     reject: base.reject || [],
+    groups: (base.groups || []).map(g => ({
+      target: (g.target || "").trim(),
+      rules: Array.isArray(g.rules) ? g.rules.slice() : [],
+    })).filter(g => g.target && g.rules.length),
   };
+  if (activeRuleVerdict === "group") {
+    const target = (targetOverride || currentRuleGroupTarget()).trim();
+    if (!target) throw new Error("请先选择或填写目标策略组");
+    let found = false;
+    out.groups = out.groups.map(g => {
+      if (g.target !== target) return g;
+      found = true;
+      return { target, rules: lines };
+    }).filter(g => g.rules.length);
+    if (!found && lines.length) out.groups.push({ target, rules: lines });
+    activeRuleGroup = target;
+    return out;
+  }
   out[activeRuleVerdict] = lines;
   return out;
+}
+
+function policyGroupNames() {
+  const names = new Set(["Proxy", "🛫 AI起飞节点", "🛬 AI落地节点"]);
+  if (cachedState && cachedState.rules && Array.isArray(cachedState.rules.groups)) {
+    cachedState.rules.groups.forEach(g => { if (g.target) names.add(g.target); });
+  }
+  if (cachedProxies && cachedProxies.proxies) {
+    Object.values(cachedProxies.proxies)
+      .filter(p => ["Selector", "URLTest", "Fallback", "LoadBalance"].includes(p.type))
+      .forEach(p => { if (p.name) names.add(p.name); });
+  }
+  return Array.from(names).sort((a, b) => a.localeCompare(b));
+}
+
+function syncRuleGroupSelect(rules) {
+  const groups = rules.groups || [];
+  if (!activeRuleGroup && groups.length) activeRuleGroup = groups[0].target || "";
+  if (!activeRuleGroup) activeRuleGroup = "Proxy";
+  const names = policyGroupNames();
+  if (!names.includes(activeRuleGroup)) names.push(activeRuleGroup);
+  $("ruleGroupSelect").innerHTML = names.map(name =>
+    `<option value="${escapeHTML(name)}">${escapeHTML(name)}</option>`
+  ).join("");
+  $("ruleGroupSelect").value = names.includes(activeRuleGroup) ? activeRuleGroup : "Proxy";
+  $("ruleGroupCustom").value = names.includes(activeRuleGroup) ? "" : activeRuleGroup;
+}
+
+function currentRuleGroupTarget() {
+  return ($("ruleGroupCustom").value.trim() || $("ruleGroupSelect").value || "").trim();
+}
+
+function findActiveRuleGroup(rules) {
+  const target = currentRuleGroupTarget();
+  return (rules.groups || []).find(g => g.target === target) || null;
 }
 
 // ─────────── Script (preset chain / custom .js) ───────────
@@ -1055,6 +1117,7 @@ async function loadProxies() {
     cachedProxies = j;
     renderEgress();
     renderQuickGroups();
+    if (activeRuleVerdict === "group" && cachedState) renderRulesPane(cachedState);
     if (!j || !j.proxies) {
       groupsEl.innerHTML = `<p class="empty-state">mihomo 没有返回代理数据。</p>`;
       return;
@@ -1081,6 +1144,7 @@ async function loadProxies() {
     }
   } catch (e) {
     renderQuickGroups();
+    if (activeRuleVerdict === "group" && cachedState) renderRulesPane(cachedState);
     groupsEl.innerHTML = `<p class="empty-state">无法连接 mihomo API：${escapeHTML(e.message)}</p>`;
   }
 }
@@ -1418,10 +1482,41 @@ $("btnSaveSource").addEventListener("click", async () => {
 // Rule tabs
 $$("#ruleTabs button").forEach(b => {
   b.addEventListener("click", () => {
+    try {
+      if (cachedState) cachedState.rules = collectRules();
+    } catch (e) {
+      toast(e.message, "bad", 3000);
+      return;
+    }
     activeRuleVerdict = b.dataset.verdict;
     $$("#ruleTabs button").forEach(x => x.setAttribute("aria-selected", x === b ? "true" : "false"));
     if (cachedState) renderRulesPane(cachedState);
   });
+});
+
+$("ruleGroupSelect").addEventListener("change", () => {
+  const previous = activeRuleGroup || $("ruleGroupSelect").value;
+  try {
+    if (cachedState) cachedState.rules = collectRules(previous);
+  } catch (e) {
+    toast(e.message, "bad", 3000);
+    return;
+  }
+  activeRuleGroup = $("ruleGroupSelect").value;
+  $("ruleGroupCustom").value = "";
+  if (cachedState) renderRulesPane(cachedState);
+});
+
+$("ruleGroupCustom").addEventListener("change", () => {
+  const previous = activeRuleGroup || $("ruleGroupSelect").value;
+  try {
+    if (cachedState) cachedState.rules = collectRules(previous);
+  } catch (e) {
+    toast(e.message, "bad", 3000);
+    return;
+  }
+  activeRuleGroup = $("ruleGroupCustom").value.trim() || $("ruleGroupSelect").value;
+  if (cachedState) renderRulesPane(cachedState);
 });
 
 $("btnSaveRules").addEventListener("click", async () => {

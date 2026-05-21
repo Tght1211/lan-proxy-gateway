@@ -207,6 +207,7 @@ func (c *WebUIController) SetCustomRules(ctx context.Context, rs webui.CustomRul
 		Direct: rs.Direct,
 		Proxy:  rs.Proxy,
 		Reject: rs.Reject,
+		Groups: normalizeTargetedRules(rs.Groups),
 	}
 	return c.saveAndReload(ctx)
 }
@@ -808,7 +809,44 @@ func rulesToPayload(r config.ExtraRules) webui.CustomRules {
 		Direct: append([]string(nil), r.Direct...),
 		Proxy:  append([]string(nil), r.Proxy...),
 		Reject: append([]string(nil), r.Reject...),
+		Groups: normalizeTargetedRules(r.Groups),
 	}
+}
+
+func normalizeTargetedRules(groups []config.TargetedRules) []config.TargetedRules {
+	if len(groups) == 0 {
+		return nil
+	}
+	merged := make(map[string][]string)
+	order := make([]string, 0, len(groups))
+	for _, group := range groups {
+		target := strings.TrimSpace(group.Target)
+		if target == "" {
+			continue
+		}
+		if _, ok := merged[target]; !ok {
+			order = append(order, target)
+		}
+		for _, rule := range group.Rules {
+			rule = strings.TrimSpace(rule)
+			if rule == "" {
+				continue
+			}
+			merged[target] = append(merged[target], rule)
+		}
+	}
+	out := make([]config.TargetedRules, 0, len(order))
+	for _, target := range order {
+		rules := merged[target]
+		if len(rules) == 0 {
+			continue
+		}
+		out = append(out, config.TargetedRules{
+			Target: target,
+			Rules:  append([]string(nil), rules...),
+		})
+	}
+	return out
 }
 
 // buildConnectivity 把"设备接入指引"打成结构化数据。前端按场景渲染表格 / 卡片。

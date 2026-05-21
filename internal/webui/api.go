@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+
+	"github.com/tght/lan-proxy-gateway/internal/config"
 )
 
 // Snapshot 是 GET /api/status 返回给前端的完整状态。
@@ -96,9 +98,10 @@ type RulesetDescriptor struct {
 // CustomRules 是用户自己写的"硬"规则；优先级高于内置规则集。
 // 每条字符串就是 mihomo 规则原文（如 "DOMAIN-SUFFIX,corp.example.com"），不带 verdict。
 type CustomRules struct {
-	Direct []string `json:"direct"`
-	Proxy  []string `json:"proxy"`
-	Reject []string `json:"reject"`
+	Direct []string               `json:"direct"`
+	Proxy  []string               `json:"proxy"`
+	Reject []string               `json:"reject"`
+	Groups []config.TargetedRules `json:"groups,omitempty"`
 }
 
 // Connectivity 把"设备接入指引"打成结构化数据，避免前端去解析 ASCII 表格。

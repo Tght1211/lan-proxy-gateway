@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -63,9 +64,10 @@ func startWebUIDaemon(a *app.App) error {
 		return nil
 	}
 	base := fmt.Sprintf("http://127.0.0.1:%d/", a.Cfg.Runtime.Ports.WebUI)
-	if probeURL(base) {
+	if probeWebUIWithToken(a) {
 		return nil
 	}
+	stopWebUIDaemon(a.Paths)
 
 	if err := os.MkdirAll(a.Paths.Root, 0o755); err != nil {
 		return fmt.Errorf("create webui runtime dir: %w", err)
@@ -102,6 +104,23 @@ func startWebUIDaemon(a *app.App) error {
 		time.Sleep(150 * time.Millisecond)
 	}
 	return fmt.Errorf("Web 控制台后台进程已启动但未就绪；日志: %s", logPath)
+}
+
+func probeWebUIWithToken(a *app.App) bool {
+	if a == nil || a.Cfg.Runtime.Ports.WebUI <= 0 || strings.TrimSpace(a.Cfg.Runtime.WebUIToken) == "" {
+		return false
+	}
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/api/status", a.Cfg.Runtime.Ports.WebUI), nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Authorization", "Bearer "+a.Cfg.Runtime.WebUIToken)
+	resp, err := (&http.Client{Timeout: 800 * time.Millisecond}).Do(req)
+	if err != nil {
+		return false
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 func stopWebUIDaemon(paths config.Paths) {

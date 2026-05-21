@@ -104,3 +104,25 @@ func TestRenderExtrasRespected(t *testing.T) {
 		t.Fatalf("duplicate verdict appended:\n%s", out)
 	}
 }
+
+func TestRenderTargetedGroupExtras(t *testing.T) {
+	cfg := config.Default().Traffic
+	cfg.Extras.Groups = []config.TargetedRules{
+		{
+			Target: "🛬 AI落地节点",
+			Rules: []string{
+				"DOMAIN-SUFFIX,openai.com",
+				"IP-CIDR,1.2.3.0/24,no-resolve",
+			},
+		},
+	}
+	out := Render(cfg)
+	for _, want := range []string{
+		"DOMAIN-SUFFIX,openai.com,🛬 AI落地节点",
+		"IP-CIDR,1.2.3.0/24,🛬 AI落地节点,no-resolve",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing targeted group rule %q in:\n%s", want, out)
+		}
+	}
+}

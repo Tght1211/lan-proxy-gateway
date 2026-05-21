@@ -86,7 +86,8 @@ func New(addr, token string, ctrl Controller) *Server {
 //
 // 设计：
 //   - GET / 静态资源不在这里包，开放访问（页面要先加载才能取 token）
-//   - 任何 /api/* 调用必须带 `Authorization: Bearer <token>` 或 `X-Gateway-Token: <token>`
+//   - 本机 loopback 访问直接放行，方便在 gateway 主机上打开 http://127.0.0.1:19091/
+//   - 非本机 /api/* 调用必须带 `Authorization: Bearer <token>` 或 `X-Gateway-Token: <token>`
 //   - 用 `crypto/subtle.ConstantTimeCompare` 防计时侧信道
 //   - 401 返回 JSON `{"error":"unauthorized"}` 让前端能识别并跳到"请用带 token 的 URL"提示
 //
@@ -95,6 +96,10 @@ func (s *Server) requireToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.token == "" {
 			// token 空 = 测试模式，放行。生产路径在 cmd/start.go 必须传非空 token。
+			next(w, r)
+			return
+		}
+		if requestFromLoopback(r) {
 			next(w, r)
 			return
 		}
@@ -117,6 +122,15 @@ func (s *Server) requireToken(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+func requestFromLoopback(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }
 
 // Addr 返回实际监听地址（含端口），Start 之前是配置值，Start 之后会变成 Listener.Addr。

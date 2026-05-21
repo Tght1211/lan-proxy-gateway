@@ -39,6 +39,13 @@ func Render(t config.TrafficConfig) string {
 	emit(t.Extras.Reject, "REJECT")
 	emit(t.Extras.Direct, "DIRECT")
 	emit(t.Extras.Proxy, ProxyTag)
+	for _, group := range t.Extras.Groups {
+		target := strings.TrimSpace(group.Target)
+		if target == "" {
+			continue
+		}
+		emit(group.Rules, target)
+	}
 
 	switch t.Mode {
 	case config.ModeDirect:

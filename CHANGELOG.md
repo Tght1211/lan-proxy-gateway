@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented here.
 
+## v3.4.12 - 2026-05-21
+
+### Added
+
+- Added policy-group targeted custom rules. CLI and WebUI custom rules now support routing a rule to a specific mihomo policy group, so AI domains can go through a residential-exit group while YouTube or other global traffic stays on the normal `Proxy` group.
+- Added a WebUI screenshot to the README showing the new custom-rule group-targeting workflow.
+
+### Fixed
+
+- Fixed Gateway WebUI token drift between `gateway start`, the WebUI daemon, and the CLI menu. Missing `runtime.web_ui_token` values are now generated once and written back to `gateway.yaml`.
+- Fixed stale WebUI daemon reuse when a running daemon uses an old token. `gateway start` now probes `/api/status` with the current token and restarts the daemon if the token does not match.
+- Localhost WebUI API access no longer requires a token. LAN clients still require the token URL.
+
+### Tests
+
+- Added render coverage for custom rules targeting named policy groups.
+- Added config coverage for persisting generated WebUI tokens.
+
 ## v3.4.11 - 2026-05-21
 
 ### Fixed
