@@ -17,6 +17,71 @@ import (
 	"github.com/tght/lan-proxy-gateway/internal/platform"
 )
 
+// AIBackendStatus 是给 UI 看的后端摘要，永不含明文 key。
+type AIBackendStatus struct {
+	ID           string
+	Format       string
+	Model        string
+	Active       bool
+	Builtin      bool
+	HasKey       bool
+	APIKeyMasked string // "***" 或空；绝不是明文
+}
+
+// aiStatus 把 AI 后端脱敏成 UI 摘要。
+func (a *App) aiStatus() []AIBackendStatus {
+	out := make([]AIBackendStatus, 0, len(a.Cfg.AI.Backends))
+	for _, b := range a.Cfg.AI.Backends {
+		masked := ""
+		if b.APIKey != "" {
+			masked = "***"
+		}
+		out = append(out, AIBackendStatus{
+			ID:           b.ID,
+			Format:       b.Format,
+			Model:        b.Model,
+			Active:       b.ID == a.Cfg.AI.Active,
+			Builtin:      b.Builtin,
+			HasKey:       b.APIKey != "",
+			APIKeyMasked: masked,
+		})
+	}
+	return out
+}
+
+// AddRule 把一条规则按裁决（direct/proxy/reject）加到 Traffic.Extras，存盘并热重载。
+func (a *App) AddRule(ctx context.Context, verdict, rule string) error {
+	switch verdict {
+	case "direct":
+		a.Cfg.Traffic.Extras.Direct = append(a.Cfg.Traffic.Extras.Direct, rule)
+	case "proxy":
+		a.Cfg.Traffic.Extras.Proxy = append(a.Cfg.Traffic.Extras.Proxy, rule)
+	case "reject":
+		a.Cfg.Traffic.Extras.Reject = append(a.Cfg.Traffic.Extras.Reject, rule)
+	default:
+		return fmt.Errorf("不支持的裁决: %s（应为 direct/proxy/reject）", verdict)
+	}
+	if err := a.Save(); err != nil {
+		return err
+	}
+	if a.Engine != nil && a.Engine.Running() {
+		return a.Engine.Reload(ctx, config.EffectiveRuntimeConfig(a.Cfg))
+	}
+	return nil
+}
+
+// HealthText 给 AI 执行器一个一行健康摘要。
+func (a *App) HealthText() string {
+	h := a.Health()
+	if h.Healthy {
+		return "代理源健康"
+	}
+	if h.LastError != "" {
+		return "代理源异常: " + h.LastError
+	}
+	return "代理源状态未知"
+}
+
 // App wires together config, engine, gateway and platform.
 type App struct {
 	Cfg     *config.Config
