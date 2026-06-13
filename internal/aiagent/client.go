@@ -33,6 +33,3 @@ func NewClient(b config.AIBackend) (LLMClient, error) {
 		return nil, fmt.Errorf("不支持的后端 format: %q（应为 openai/anthropic）", b.Format)
 	}
 }
-
-// 临时占位：Task 5 用真实 anthropic-sdk-go 实现替换。
-func newAnthropicClient(b config.AIBackend) LLMClient { return newOpenAIClient(b) }
