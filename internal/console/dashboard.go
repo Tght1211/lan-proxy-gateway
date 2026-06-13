@@ -401,8 +401,9 @@ func drawDashboard(w io.Writer, snap dashboardSnapshot, running bool, spark *spa
 	}
 	// 稳定性健康条（绿）：每分钟测一次主出口组延迟，标题带距下次刷新倒计时。
 	if health != nil {
-		secsToNext := 60 - time.Now().Second() // 距下个整分钟
-		fmt.Fprintln(w, "  "+health.renderTitle(secsToNext))
+		// 倒计时与真实探测节奏同源（基于最近一次 record 的时刻），
+		// 不再用墙钟整分钟另算，避免显示与实际探测脱钩。
+		fmt.Fprintln(w, "  "+health.renderTitle(health.secsToNext()))
 		fmt.Fprintln(w, "  "+healthC.Sprint(health.renderBar()))
 		fmt.Fprintln(w, "  "+health.renderFooter())
 	}

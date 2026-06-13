@@ -70,8 +70,14 @@ func (e *Executor) runWrite(ctx context.Context, a Action) Result {
 		err = e.ctrl.SetSource(ctx, e.sourceFromAction(a))
 	case "add_rule":
 		err = e.ctrl.AddRule(ctx, a.Verdict, a.Rule)
-	case "start", "restart":
+	case "start":
 		err = e.ctrl.Start(ctx)
+	case "restart":
+		// App.Start 在网关已运行时是 no-op，故 restart 必须先 Stop 再 Start，
+		// 否则会静默不重启却回灌「执行成功」误导用户/agent。
+		if err = e.ctrl.Stop(); err == nil {
+			err = e.ctrl.Start(ctx)
+		}
 	case "stop":
 		err = e.ctrl.Stop()
 	default:

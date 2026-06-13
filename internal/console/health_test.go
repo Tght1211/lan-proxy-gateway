@@ -3,8 +3,31 @@ package console
 
 import (
 	"strings"
+	"sync"
 	"testing"
 )
+
+// TestHealthBarConcurrentRecordRender 固化 record(ticker goroutine) 与
+// render(主循环) 的并发安全。须配合 `go test -race` 才能抓到回归。
+func TestHealthBarConcurrentRecordRender(t *testing.T) {
+	h := newHealthBar(60)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			h.record(i%2 == 0)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			_ = h.renderBar()
+			_ = h.secsToNext()
+		}
+	}()
+	wg.Wait()
+}
 
 func TestHealthBarRecordsAndRenders(t *testing.T) {
 	h := newHealthBar(60)
