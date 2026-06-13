@@ -74,10 +74,20 @@ type consoleUI struct {
 	geo       *geoip.DB
 	resolver  *devices.Resolver
 	dashState dashboardState
+
+	// 终端图表：网速柱状图（每帧 push 下行速率）+ 每分钟测速健康条。
+	spark  *sparkline
+	health *healthBar
 }
 
 func newConsole(a *app.App, in io.Reader, out io.Writer) *consoleUI {
-	c := &consoleUI{app: a, in: bufio.NewReader(in), out: out}
+	c := &consoleUI{
+		app:    a,
+		in:     bufio.NewReader(in),
+		out:    out,
+		spark:  newSparkline(40),
+		health: newHealthBar(60),
+	}
 	// 打 country.mmdb。文件来自 EnsureGeodata；没下来就留 nil，Lookup 安全降级。
 	if a != nil && a.Engine != nil {
 		if db, err := geoip.Open(filepath.Join(a.Engine.Workdir(), "country.mmdb")); err == nil {
@@ -103,12 +113,14 @@ func (c *consoleUI) readLine() string {
 // --- Rendering helpers ---
 
 var (
-	titleC = color.New(color.FgCyan, color.Bold)
-	okC    = color.New(color.FgGreen, color.Bold)
-	warnC  = color.New(color.FgYellow)
-	dimC   = color.New(color.Faint)
-	badC   = color.New(color.FgRed, color.Bold)
-	bar    = "────────────────────────────────────────────────"
+	titleC  = color.New(color.FgCyan, color.Bold)
+	okC     = color.New(color.FgGreen, color.Bold)
+	warnC   = color.New(color.FgYellow)
+	dimC    = color.New(color.Faint)
+	badC    = color.New(color.FgRed, color.Bold)
+	speedC  = color.New(color.FgRed)   // 网速柱状图
+	healthC = color.New(color.FgGreen) // 稳定性健康条
+	bar     = "────────────────────────────────────────────────"
 )
 
 func (c *consoleUI) banner(title string) {
@@ -465,6 +477,9 @@ func (c *consoleUI) configureFile() bool {
 // 快捷键：M 菜单、N 切节点、T 重测代理源、Q 退出控制台（网关留后台）。
 
 func (c *consoleUI) main(ctx context.Context) error {
+	// 后台每分钟测一次主出口组延迟，记进健康条；ctx 取消时自动退出。
+	go c.runHealthTicker(ctx)
+
 	// 静态首页：画一次 dashboard，等用户输入。回车 / R 主动刷新，避免自动刷新
 	// 抢终端。想要更顺手的操作直接看首页给出的 Web 控制台地址，用浏览器做。
 	for {
@@ -510,8 +525,13 @@ func (c *consoleUI) drawDashboardOnce(ctx context.Context) {
 	}
 	snap := fetchDashboardSnapshot(ctx, cli, c.app.Cfg, localIP, c.geo, c.resolver, &c.dashState)
 
+	// 把本帧下行速率 push 进网速柱状图（拉不到数据 downRate 为 0，自然画成空柱）。
+	if c.spark != nil {
+		c.spark.push(snap.downRate)
+	}
+
 	// 代理源异常告警（supervisor 维护的状态），叠在仪表盘顶部警示。
-	drawDashboard(c.out, snap, running)
+	drawDashboard(c.out, snap, running, c.spark, c.health)
 	if running {
 		webPort := c.app.Cfg.Runtime.Ports.WebUI
 		token := c.app.Cfg.Runtime.WebUIToken

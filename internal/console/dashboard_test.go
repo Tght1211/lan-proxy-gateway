@@ -94,7 +94,7 @@ func TestDrawDashboardHopCollapsesWhenNoChain(t *testing.T) {
 		proxySrc: "机场订阅",
 		takeoff:  hop,
 		landing:  hop,
-	}, true)
+	}, true, nil, nil)
 	out := buf.String()
 	if !strings.Contains(out, "出口节点") {
 		t.Fatalf("expected single-hop label '出口节点': %s", out)
@@ -117,7 +117,7 @@ func TestDrawDashboardHopShowsBothWhenChain(t *testing.T) {
 		proxySrc: "机场订阅",
 		takeoff:  proxyHop{name: "airport-node", flag: "🇯🇵"},
 		landing:  proxyHop{name: "residential", flag: "🇺🇸", hint: "1.2.3.4:443"},
-	}, true)
+	}, true, nil, nil)
 	out := buf.String()
 	for _, want := range []string{"🛫 起飞", "airport-node", "🛬 落地", "residential"} {
 		if !strings.Contains(out, want) {
@@ -142,7 +142,7 @@ func TestDrawDashboardWarnsOnMixedPortDown(t *testing.T) {
 		takeoff:       proxyHop{name: "a"},
 		landing:       proxyHop{name: "a"},
 		mixedPortDown: true,
-	}, true)
+	}, true, nil, nil)
 	out := buf.String()
 	if !strings.Contains(out, "代理端口不通") || !strings.Contains(out, "LAN 设备") {
 		t.Fatalf("expected mixed-port-down warning: %s", out)

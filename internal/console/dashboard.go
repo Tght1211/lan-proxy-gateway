@@ -357,7 +357,7 @@ func isRegionalIndicator(r rune) bool {
 
 // drawDashboard 把 snapshot 画到终端。保持紧凑：没 mihomo / 拉取失败时也给一
 // 行占位，让用户知道控制台活着、问题在 mihomo。
-func drawDashboard(w io.Writer, snap dashboardSnapshot, running bool) {
+func drawDashboard(w io.Writer, snap dashboardSnapshot, running bool, spark *sparkline, health *healthBar) {
 	fmt.Fprintln(w)
 	titleC.Fprintln(w, bar)
 	if running {
@@ -394,6 +394,18 @@ func drawDashboard(w io.Writer, snap dashboardSnapshot, running bool) {
 		humanBytes(snap.downRate), humanBytes(snap.upRate), snap.connCount)
 	dimC.Fprintf(w, "  本次累计  ↓ %s   ↑ %s  （mihomo 启动起）\n",
 		humanBytes(float64(snap.downTotal)), humanBytes(float64(snap.upTotal)))
+
+	// 网速柱状图（红）：把最近若干帧下行速率画成 Unicode 区块柱。
+	if spark != nil {
+		fmt.Fprintf(w, "  %s\n", speedC.Sprint(spark.render()))
+	}
+	// 稳定性健康条（绿）：每分钟测一次主出口组延迟，标题带距下次刷新倒计时。
+	if health != nil {
+		secsToNext := 60 - time.Now().Second() // 距下个整分钟
+		fmt.Fprintln(w, "  "+health.renderTitle(secsToNext))
+		fmt.Fprintln(w, "  "+healthC.Sprint(health.renderBar()))
+		fmt.Fprintln(w, "  "+health.renderFooter())
+	}
 
 	// 出口 / 链式代理展示
 	fmt.Fprintln(w)
