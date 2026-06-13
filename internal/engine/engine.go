@@ -116,7 +116,15 @@ func (e *Engine) startRendered(ctx context.Context, cfg *configpkg.Config, rende
 		var err error
 		data, err = Render(ctx, cfg, e.workdir)
 		if err != nil {
-			return err
+			// 降级兜底：渲染失败（订阅源临时挂、增强脚本小错等）时，若 workdir 里
+			// 有上次成功写入的 config.yaml，就用它把网关拉起来，而不是整个起不来。
+			// 这样单点失败不再拖垮启动；用户改好后重启即用新配置。
+			if prev, rerr := os.ReadFile(e.ConfigPath()); rerr == nil && len(prev) > 0 {
+				fmt.Fprintf(os.Stderr, "warning: 渲染新配置失败（%v），降级使用上次可用的 config.yaml 启动\n", err)
+				data = prev
+			} else {
+				return err
+			}
 		}
 	}
 	if err := os.WriteFile(e.ConfigPath(), data, 0o600); err != nil {
