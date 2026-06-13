@@ -22,16 +22,12 @@ var restartCmd = &cobra.Command{
 			return fmt.Errorf("尚未完成初始化，请先运行 `gateway install` 或直接运行 `gateway` 进入向导")
 		}
 		color.Yellow("正在停止…")
-		stopWebUIDaemon(a.Paths)
 		if err := a.Stop(); err != nil {
 			return err
 		}
 		color.Yellow("正在启动…")
 		if err := a.Start(cmd.Context()); err != nil {
 			return err
-		}
-		if err := startWebUIDaemon(a); err != nil {
-			color.Yellow("Web 控制台后台启动失败（不影响代理本体）：%v", err)
 		}
 		color.Green("✔ 网关已重启")
 		color.New(color.Faint).Println(a.Engine.LogPath())

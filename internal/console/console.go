@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -124,9 +123,9 @@ var (
 )
 
 func (c *consoleUI) banner(title string) {
-	// 进任意屏前都先把磁盘上的 gateway.yaml 重读一遍：让"用户在 Web 控制台改了东西
-	// 之后切回 CLI 菜单"立刻看到新值，避免 CLI 拿着内存里的旧 Cfg 显示陈旧数据，
-	// 或更糟糕——基于旧值做 toggle 把 Web 端刚改的设置回退掉。
+	// 进任意屏前都先把磁盘上的 gateway.yaml 重读一遍：让"用户在外部（另一个终端 /
+	// 手动编辑 gateway.yaml）改了东西之后切回菜单"立刻看到新值，避免 CLI 拿着内存里
+	// 的旧 Cfg 显示陈旧数据，或更糟糕——基于旧值做 toggle 把外部刚改的设置回退掉。
 	//
 	// LoadFrom 失败时（罕见：被外部进程改坏 / 用户手动 rm）保留内存值，不影响菜单。
 	if c.app != nil && c.app.Paths.ConfigFile != "" {
@@ -139,39 +138,6 @@ func (c *consoleUI) banner(title string) {
 	titleC.Fprintln(c.out, bar)
 	titleC.Fprintf(c.out, "  %s\n", title)
 	titleC.Fprintln(c.out, bar)
-	c.printWebUIHint()
-}
-
-// printWebUIHint 在每个 banner 下方提示一行 "Web 控制台 http://192.168.x.x:19091"，
-// 让 CLI 用户知道还有 Web 入口 —— 不强求切换，单纯告诉。
-// 端口为 0（被禁用）则不打印。
-func (c *consoleUI) printWebUIHint() {
-	if c.app == nil {
-		return
-	}
-	port := c.app.Cfg.Runtime.Ports.WebUI
-	if port <= 0 {
-		return
-	}
-	ip := ""
-	if c.app.Gateway != nil {
-		ip = c.app.Gateway.Info().IP
-	}
-	if ip == "" {
-		ip = "localhost"
-	}
-	dimC.Fprintf(c.out, "  Web 控制台 → %s   （CLI / Web 双开，gateway.yaml 实时同步）\n", webUIURL(ip, port, c.app.Cfg.Runtime.WebUIToken))
-}
-
-func webUIURL(host string, port int, token string) string {
-	if host == "" {
-		host = "localhost"
-	}
-	frag := ""
-	if token != "" {
-		frag = "#token=" + token
-	}
-	return fmt.Sprintf("http://%s:%d/%s", host, port, frag)
 }
 
 func (c *consoleUI) prompt(label string) string {
@@ -481,7 +447,7 @@ func (c *consoleUI) main(ctx context.Context) error {
 	go c.runHealthTicker(ctx)
 
 	// 静态首页：画一次 dashboard，等用户输入。回车 / R 主动刷新，避免自动刷新
-	// 抢终端。想要更顺手的操作直接看首页给出的 Web 控制台地址，用浏览器做。
+	// 抢终端。所有配置操作都在终端菜单里完成（M 进菜单）。
 	for {
 		c.drawDashboardOnce(ctx)
 		raw := c.readLine()
@@ -533,24 +499,14 @@ func (c *consoleUI) drawDashboardOnce(ctx context.Context) {
 	// 代理源异常告警（supervisor 维护的状态），叠在仪表盘顶部警示。
 	drawDashboard(c.out, snap, running, c.spark, c.health)
 	if running {
-		webPort := c.app.Cfg.Runtime.Ports.WebUI
-		token := c.app.Cfg.Runtime.WebUIToken
 		apiPort := c.app.Cfg.Runtime.Ports.API
-		fmt.Fprintln(c.out)
-		titleC.Fprintln(c.out, "  Web 控制台（推荐在浏览器操作）")
-		if webPort > 0 {
-			fmt.Fprintf(c.out, "    本机    %s\n", webUIURL("127.0.0.1", webPort, token))
-			if localIP != "" {
-				fmt.Fprintf(c.out, "    局域网  %s\n", webUIURL(localIP, webPort, token))
-			}
-			dimC.Fprintln(c.out, "    这里可以改代理源、切模式、管理接入能力。")
-		}
 		if apiPort > 0 {
+			fmt.Fprintln(c.out)
+			titleC.Fprintln(c.out, "  Mihomo 完整控制台（mihomo 引擎自带面板：切节点 / 看流量）")
 			if localIP != "" {
-				dimC.Fprintf(c.out, "    Mihomo 完整控制台  http://%s:%d/ui/\n", localIP, apiPort)
-			} else {
-				dimC.Fprintf(c.out, "    Mihomo 完整控制台  http://127.0.0.1:%d/ui/\n", apiPort)
+				dimC.Fprintf(c.out, "    http://%s:%d/ui/\n", localIP, apiPort)
 			}
+			dimC.Fprintf(c.out, "    http://127.0.0.1:%d/ui/\n", apiPort)
 		}
 	}
 	h := c.app.Health()
@@ -1147,7 +1103,7 @@ func (c *consoleUI) screenTrafficAdvanced(ctx context.Context) {
 		fmt.Fprintln(c.out, "  1  开关 DNS 代理        （只用手机/电脑填 17890 时可关；改网关设备才需要）")
 		fmt.Fprintln(c.out, "  2  修改 DNS 监听端口    （默认 53；改了 LAN 设备就基本解析不了，不建议动）")
 		fmt.Fprintln(c.out, "  3  修改 mixed 端口      （HTTP+SOCKS5，默认 17890，避开 Clash 7890；也是局域网代理端口）")
-		fmt.Fprintln(c.out, "  4  修改 API 端口        （默认 19090，避开 Clash 9090；Web 控制台也走这个）")
+		fmt.Fprintln(c.out, "  4  修改 API 端口        （默认 19090，避开 Clash 9090；mihomo 控制台 /ui 也走这个）")
 		fmt.Fprintln(c.out)
 		titleC.Fprintln(c.out, "  ── 操作 ── 0 返回（或按 Q）")
 		switch c.prompt("选择：> ") {
@@ -1281,44 +1237,17 @@ func (c *consoleUI) screenSource(ctx context.Context) {
 		renderRow("3", "本地配置文件", probes.file)
 		renderRow("4", "暂不配置", sourceSlot{value: dimC.Sprint("全部走直连")})
 
-		// Gateway 自带 Web 控制台跟源类型无关：只要服务在跑，UI 就能访问
-		// （单点代理 / 订阅 / 本地文件一视同仁）。过去只对 subscription+file
-		// 显示，导致选「单点代理」的人看不到 URL，误以为没这功能。
-		if c.app.Engine != nil && c.app.Engine.Running() && c.app.Cfg.Runtime.Ports.WebUI > 0 {
-			webPort := c.app.Cfg.Runtime.Ports.WebUI
+		// mihomo 自带的 external-ui 控制台（切节点 / 看流量），跟源类型无关：
+		// 只要服务在跑就能访问。配置改动统一走 CLI 菜单。
+		if c.app.Engine != nil && c.app.Engine.Running() && c.app.Cfg.Runtime.Ports.API > 0 {
 			apiPort := c.app.Cfg.Runtime.Ports.API
-			token := c.app.Cfg.Runtime.WebUIToken
 			localIP := c.app.Status().Gateway.LocalIP
-			probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			var wg sync.WaitGroup
-			var markLocal, markLAN string
-			wg.Add(2)
-			go func() {
-				defer wg.Done()
-				markLocal = probeHTTP(probeCtx, fmt.Sprintf("http://127.0.0.1:%d/", webPort))
-			}()
-			go func() {
-				defer wg.Done()
-				if localIP == "" {
-					markLAN = ""
-					return
-				}
-				markLAN = probeHTTP(probeCtx, fmt.Sprintf("http://%s:%d/", localIP, webPort))
-			}()
-			wg.Wait()
-			cancel()
-
 			fmt.Fprintln(c.out)
-			titleC.Fprintln(c.out, "  ── Gateway Web 控制台（浏览器打开，改配置 / 切模式 / 管接入）──")
-			urlLocal := webUIURL("127.0.0.1", webPort, token)
-			fmt.Fprintf(c.out, "    本机    %-36s  %s\n", urlLocal, markLocal)
+			titleC.Fprintln(c.out, "  ── Mihomo 完整控制台（mihomo 引擎自带面板：切节点 / 看流量）──")
 			if localIP != "" {
-				urlLAN := webUIURL(localIP, webPort, token)
-				fmt.Fprintf(c.out, "    局域网  %-36s  %s  %s\n", urlLAN, markLAN, dimC.Sprint("（手机 / 平板也能用）"))
+				dimC.Fprintf(c.out, "    http://%s:%d/ui/\n", localIP, apiPort)
 			}
-			if apiPort > 0 {
-				dimC.Fprintf(c.out, "    Mihomo 完整控制台  http://127.0.0.1:%d/ui/\n", apiPort)
-			}
+			dimC.Fprintf(c.out, "    http://127.0.0.1:%d/ui/\n", apiPort)
 		}
 
 		// 操作按键：放最下面贴近 prompt，和其它页面一致
@@ -1484,33 +1413,6 @@ func truncateMiddle(s string, n int) string {
 	head := n / 2
 	tail := n - head - 1
 	return s[:head] + "…" + s[len(s)-tail:]
-}
-
-// probeHTTP 做一次 GET 并把结果格式化成 ✓ 200 / ⚠ HTTP 404 / ✗ 连接失败…
-// 给 Web 控制台地址的连通性提示用。
-func probeHTTP(ctx context.Context, url string) string {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return badC.Sprint("✗ " + err.Error())
-	}
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		msg := err.Error()
-		if len(msg) > 50 {
-			msg = msg[:47] + "…"
-		}
-		return badC.Sprint("✗ " + msg)
-	}
-	defer resp.Body.Close()
-	switch {
-	case resp.StatusCode == 200:
-		return okC.Sprint("✓")
-	case resp.StatusCode == 404:
-		return warnC.Sprint("⚠ 404")
-	default:
-		return badC.Sprintf("✗ %d", resp.StatusCode)
-	}
 }
 
 // probeMark 把 error 格式化成 ✓ / ✗ 简要原因，不超过 40 字。

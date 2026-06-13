@@ -162,17 +162,13 @@ type RuntimeConfig struct {
 	ProxyService ProxyServiceConfig `yaml:"proxy_service"`
 	APISecret    string             `yaml:"api_secret"`
 	LogLevel     string             `yaml:"log_level"`
-	WebUIToken   string             `yaml:"web_ui_token"`
 }
 
-// RuntimePorts are the listen ports exposed by mihomo and the gateway WebUI.
+// RuntimePorts are the listen ports exposed by mihomo.
 type RuntimePorts struct {
 	Mixed int `yaml:"mixed"`
 	Redir int `yaml:"redir"`
 	API   int `yaml:"api"`
-	// WebUI 是 gateway 自己的 HTTP 控制台（不是 mihomo 的 /ui）。0 = 不监听。
-	// 默认 19091，避开 mihomo external-controller 的 19090。
-	WebUI int `yaml:"web_ui"`
 }
 
 // ProxyServiceConfig controls the LAN-facing mixed-port proxy service.
@@ -191,14 +187,6 @@ func (p ProxyServiceConfig) IsEnabled() bool {
 }
 
 func BoolPtr(v bool) *bool { return &v }
-
-// RuntimeConfig.WebUIToken 是 WebUI 鉴权令牌。WebUI 默认监听 0.0.0.0:19091（方便 LAN
-// 上手机/平板访问），如果没有 token，**任何同网段设备都可以改本机配置**，更糟的是
-// 通过 SetScript 指向恶意 .js 实现 RCE。token 在 Normalize 时自动生成一次写入
-// gateway.yaml，CLI 启动横幅和 `gateway webui` 子命令都会把含 token 的完整 URL 打印给你。
-//
-// 校验形式：HTTP header `Authorization: Bearer <token>`；前端从 URL 片段 `#token=...`
-// 读取一次后存进 sessionStorage 并清掉 URL 里的 token，避免被浏览器历史/截图泄漏。
 
 // Default returns a fresh config with sensible defaults for first-time users.
 // Defaults: LAN gateway on, TUN on, rule mode, adblock on, external proxy at 127.0.0.1:7890.
@@ -240,7 +228,7 @@ func Default() *Config {
 			},
 		},
 		Runtime: RuntimeConfig{
-			Ports:        RuntimePorts{Mixed: 17890, Redir: 17892, API: 19090, WebUI: 19091},
+			Ports:        RuntimePorts{Mixed: 17890, Redir: 17892, API: 19090},
 			ProxyService: ProxyServiceConfig{Enabled: BoolPtr(true)},
 			LogLevel:     "warning",
 		},
@@ -295,7 +283,7 @@ func UsesLocalExternalProxy(cfg *Config) bool {
 //
 // TUN 开启 + local external proxy (源是 127.0.0.1)：强制 BypassLocal=true，
 // 避免 TUN strict-route 把上游 Clash Verge / Mihomo Party 的出向也劫持成
-// 自循环。这里不能强制打开 TUN，否则 WebUI 里关闭透明代理会被状态快照改回开启。
+// 自循环。这里不能强制打开 TUN，否则用户在菜单里关闭透明代理会被状态快照改回开启。
 func EffectiveRuntimeConfig(cfg *Config) *Config {
 	if cfg == nil {
 		return nil

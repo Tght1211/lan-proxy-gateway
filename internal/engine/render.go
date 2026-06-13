@@ -6,7 +6,6 @@ package engine
 import (
 	"context"
 	"fmt"
-	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -24,8 +23,7 @@ type renderOptions struct {
 }
 
 // Render builds the final mihomo YAML for the given config.
-// Side effects: materialize 可能下订阅 / 读用户 yaml，也会把内嵌 Web UI
-// 释放到 workdir/ui/，这样 Start 和 Reload 两条路径都能自动部署 UI。
+// Side effects: materialize 可能下订阅 / 读用户 yaml。
 func Render(ctx context.Context, cfg *configpkg.Config, workDir string) ([]byte, error) {
 	cfg = configpkg.EffectiveRuntimeConfig(cfg)
 	return renderWithOptions(ctx, cfg, workDir, renderOptions{})
@@ -33,12 +31,6 @@ func Render(ctx context.Context, cfg *configpkg.Config, workDir string) ([]byte,
 
 func renderWithOptions(ctx context.Context, cfg *configpkg.Config, workDir string, opts renderOptions) ([]byte, error) {
 	cfg = configpkg.EffectiveRuntimeConfig(cfg)
-	// 先把 Web UI 释放好，mihomo external-ui 生效后浏览器访问 /ui 立即可用。
-	// 失败只打 warning，别因为 UI 问题阻塞核心 render。
-	if err := deployWebUI(workDir); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: 部署 Web 控制台失败: %v\n", err)
-	}
-
 	frag, err := source.MaterializeWithOptions(ctx, cfg.Source, workDir, source.MaterializeOptions{
 		SubscriptionProxyURL: opts.subscriptionProxyURL,
 		AutoGroups:           cfg.Traffic.AutoGroups,

@@ -1,8 +1,6 @@
 package config
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -222,9 +220,6 @@ func Normalize(cfg *Config) {
 	if cfg.Runtime.Ports.API == 0 {
 		cfg.Runtime.Ports.API = 19090
 	}
-	if cfg.Runtime.Ports.WebUI == 0 {
-		cfg.Runtime.Ports.WebUI = 19091
-	}
 	if cfg.Runtime.ProxyService.Enabled == nil {
 		cfg.Runtime.ProxyService.Enabled = BoolPtr(true)
 	}
@@ -233,17 +228,6 @@ func Normalize(cfg *Config) {
 	}
 	if cfg.Runtime.LogLevel == "" {
 		cfg.Runtime.LogLevel = "warning"
-	}
-	if strings.TrimSpace(cfg.Runtime.WebUIToken) == "" {
-		// 首次启动 / 用户清空了 token：用 crypto/rand 生成 16 字节 (128 位) hex，
-		// 32 字符 ascii，URL 安全，长度足以抵御暴力枚举。rand.Read 不会失败（标准库
-		// 用 /dev/urandom），万一失败用一个明显异常的占位让用户立刻发现。
-		var buf [16]byte
-		if _, err := rand.Read(buf[:]); err == nil {
-			cfg.Runtime.WebUIToken = hex.EncodeToString(buf[:])
-		} else {
-			cfg.Runtime.WebUIToken = "INSECURE_RAND_FAILED_REGENERATE"
-		}
 	}
 	normalizeAI(cfg)
 }

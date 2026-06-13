@@ -1,8 +1,6 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -204,62 +202,8 @@ func TestEffectiveRuntimeConfig_ForwardWithLocalExternalProxy(t *testing.T) {
 	}
 }
 
-func TestNormalize_AutoGenWebUIToken(t *testing.T) {
-	cfg := &Config{}
-	Normalize(cfg)
-	if cfg.Runtime.WebUIToken == "" {
-		t.Fatal("Normalize 必须自动生成 WebUIToken，不能留空")
-	}
-	if len(cfg.Runtime.WebUIToken) != 32 {
-		t.Fatalf("WebUIToken 应是 32 字符 hex；got len=%d", len(cfg.Runtime.WebUIToken))
-	}
-	// Normalize 再跑一次不应覆盖已存在的 token（否则用户保留的 token 会丢）。
-	saved := cfg.Runtime.WebUIToken
-	Normalize(cfg)
-	if cfg.Runtime.WebUIToken != saved {
-		t.Fatalf("Normalize 不应覆盖已有 token；before=%q after=%q", saved, cfg.Runtime.WebUIToken)
-	}
-}
-
-func TestLoadPersistsGeneratedWebUIToken(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "gateway.yaml")
-	data := []byte(`
-version: 2
-gateway:
-  enabled: true
-traffic:
-  mode: rule
-source:
-  type: none
-runtime:
-  ports:
-    mixed: 17890
-    redir: 17892
-    api: 19090
-    web_ui: 19091
-`)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	cfg, migrated, normalized, err := loadFrom(path)
-	if err != nil {
-		t.Fatalf("loadFrom: %v", err)
-	}
-	if len(migrated) != 0 {
-		t.Fatalf("unexpected migration notes: %v", migrated)
-	}
-	if !normalized {
-		t.Fatal("missing web_ui_token should mark config as normalized")
-	}
-	if cfg.Runtime.WebUIToken == "" {
-		t.Fatal("expected generated web_ui_token")
-	}
-}
-
 func TestEffectiveRuntimeConfigForwardModeDoesNotForceOffTUN(t *testing.T) {
-	// forward 只表示网关层使用端口转发策略；TUN 是独立能力，WebUI 允许两者同时开。
+	// forward 只表示网关层使用端口转发策略；TUN 是独立能力，两者允许同时开。
 	cfg := Default()
 	cfg.Gateway.Enabled = true
 	cfg.Gateway.Mode = GatewayModeForward
