@@ -469,7 +469,8 @@ func (c *consoleUI) main(ctx context.Context) error {
 	// 抢终端。想要更顺手的操作直接看首页给出的 Web 控制台地址，用浏览器做。
 	for {
 		c.drawDashboardOnce(ctx)
-		choice := strings.ToLower(strings.TrimSpace(c.readLine()))
+		raw := c.readLine()
+		choice := strings.ToLower(strings.TrimSpace(raw))
 		switch choice {
 		case "", "r":
 			// 回车 / R → 重新拉数据再画一次
@@ -484,7 +485,8 @@ func (c *consoleUI) main(ctx context.Context) error {
 		case "q", "exit", "quit":
 			return nil
 		default:
-			warnC.Fprintln(c.out, "无效选项（回车 / R 刷新 · M 菜单 · N 切节点 · T 重测 · Q 退出）")
+			// 非命令 → 交给 AI 配网助手（用原始行保留大小写/中文）
+			c.handleNaturalLanguage(ctx, strings.TrimSpace(raw))
 		}
 
 		select {
@@ -538,6 +540,9 @@ func (c *consoleUI) drawDashboardOnce(ctx context.Context) {
 	} else if !h.Healthy && h.LastError != "" {
 		warnC.Fprintln(c.out)
 		warnC.Fprintf(c.out, "  ⚠ 代理源健康探测失败（未切直连）：%s\n", h.LastError)
+	}
+	if c.aiAvailable() {
+		dimC.Fprintln(c.out, "\n  💬 直接输入一句话，让 AI 配网助手帮你（如：帮我设置订阅源 https://...）")
 	}
 	fmt.Fprint(c.out, "\n请选择：> ")
 }
