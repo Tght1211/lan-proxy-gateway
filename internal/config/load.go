@@ -245,6 +245,7 @@ func Normalize(cfg *Config) {
 			cfg.Runtime.WebUIToken = "INSECURE_RAND_FAILED_REGENERATE"
 		}
 	}
+	normalizeAI(cfg)
 }
 
 // Validate checks the config is internally consistent.
