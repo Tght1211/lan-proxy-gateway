@@ -21,7 +21,9 @@ type AIBackend struct {
 // 内置免费后端：OpenAI 格式，开箱即用。key 随包提供，可被薅，必要时换值即可。
 const (
 	BuiltinAIBackendID      = "free-openrouter"
-	builtinAIBackendBaseURL = "http://load.hulupet.cn/proxy/openrouter-2"
+	// base_url 遵循 OpenAI 惯例：含 /v1，客户端再拼 /chat/completions。
+	// 实测 {base}/v1/chat/completions 才是正确的 OpenAI 兼容端点。
+	builtinAIBackendBaseURL = "http://load.hulupet.cn/proxy/openrouter-2/v1"
 	builtinAIBackendAPIKey  = "sk-_yEsRLhQjzTQ9UPPgswHL_xbclZRazIJIqRqsWw1GkFBY-P8"
 	builtinAIBackendModel   = "openrouter/free"
 )
