@@ -544,6 +544,8 @@ func (c *consoleUI) screenMenu(ctx context.Context) (exitConsole bool) {
 			if c.shutdownGateway() {
 				return true
 			}
+		case "7":
+			c.screenAIBackends(ctx)
 		case "", "0", "q", "back", "exit", "quit":
 			return false
 		default:
@@ -562,6 +564,7 @@ func (c *consoleUI) drawMainMenu() {
 	fmt.Fprintln(c.out, "  3  代理 & 订阅        换代理 · 切节点 · 连通测试 · 全局扩展脚本")
 	fmt.Fprintln(c.out, "  4  启动 / 重启 / 停止")
 	fmt.Fprintln(c.out, "  5  看日志")
+	fmt.Fprintln(c.out, "  7  AI 助手后端        配置/切换 AI 配网助手的大模型（内置免费可用）")
 	fmt.Fprintln(c.out, "  6  关闭 gateway 并退出（停 mihomo）")
 	fmt.Fprintln(c.out, "  Q  返回首页（mihomo 留在后台继续跑）")
 	fmt.Fprint(c.out, "\n请选择：> ")
