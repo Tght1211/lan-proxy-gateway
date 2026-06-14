@@ -16,16 +16,19 @@ type fakeController struct {
 	srcSet   *config.SourceConfig
 }
 
-func (f *fakeController) Status() app.Status                                       { return f.status }
-func (f *fakeController) HealthText() string                                       { return "健康" }
-func (f *fakeController) SetMode(_ context.Context, m string) error                { f.setMode = m; return nil }
-func (f *fakeController) ToggleTUN(context.Context) error                          { f.tunCalls++; return nil }
-func (f *fakeController) ToggleAdblock(context.Context) error                      { return nil }
-func (f *fakeController) SetGatewayMode(context.Context, string) error             { return nil }
-func (f *fakeController) SetSource(_ context.Context, s config.SourceConfig) error { f.srcSet = &s; return nil }
-func (f *fakeController) AddRule(context.Context, string, string) error            { return nil }
-func (f *fakeController) Start(context.Context) error                              { return nil }
-func (f *fakeController) Stop() error                                              { return nil }
+func (f *fakeController) Status() app.Status                           { return f.status }
+func (f *fakeController) HealthText() string                           { return "健康" }
+func (f *fakeController) SetMode(_ context.Context, m string) error    { f.setMode = m; return nil }
+func (f *fakeController) ToggleTUN(context.Context) error              { f.tunCalls++; return nil }
+func (f *fakeController) ToggleAdblock(context.Context) error          { return nil }
+func (f *fakeController) SetGatewayMode(context.Context, string) error { return nil }
+func (f *fakeController) SetSource(_ context.Context, s config.SourceConfig) error {
+	f.srcSet = &s
+	return nil
+}
+func (f *fakeController) AddRule(context.Context, string, string) error { return nil }
+func (f *fakeController) Start(context.Context) error                   { return nil }
+func (f *fakeController) Stop() error                                   { return nil }
 
 func TestExecuteReadActionInline(t *testing.T) {
 	f := &fakeController{status: app.Status{Mode: "rule", Running: true}}

@@ -9,10 +9,10 @@ import (
 // Action 是 agent 输出的一个网关动作。一轮最多一个。
 type Action struct {
 	Action  string `json:"action"`
-	Type    string `json:"type,omitempty"`    // set_source: subscription/file/external/remote/none
-	URL     string `json:"url,omitempty"`     // set_source subscription
-	Path    string `json:"path,omitempty"`    // set_source file
-	Server  string `json:"server,omitempty"`  // set_source external/remote
+	Type    string `json:"type,omitempty"`   // set_source: subscription/file/external/remote/none
+	URL     string `json:"url,omitempty"`    // set_source subscription
+	Path    string `json:"path,omitempty"`   // set_source file
+	Server  string `json:"server,omitempty"` // set_source external/remote
 	Port    int    `json:"port,omitempty"`
 	Kind    string `json:"kind,omitempty"`    // http/socks5
 	Mode    string `json:"mode,omitempty"`    // set_mode / set_gateway_mode
