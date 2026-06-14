@@ -122,6 +122,13 @@ var (
 	bar     = "────────────────────────────────────────────────"
 )
 
+// clearScreen 把光标移到左上角并清屏，让实时首页原地重绘（btop / k9s 风格），
+// 而不是每帧往下滚。只在自动刷新的首页用；滚动式子菜单不调它。
+// ANSI \033[H 回 home，\033[2J 清屏，\033[3J 连 scrollback 一起清。
+func (c *consoleUI) clearScreen() {
+	fmt.Fprint(c.out, "\033[H\033[2J\033[3J")
+}
+
 func (c *consoleUI) banner(title string) {
 	// 进任意屏前都先把磁盘上的 gateway.yaml 重读一遍：让"用户在外部（另一个终端 /
 	// 手动编辑 gateway.yaml）改了东西之后切回菜单"立刻看到新值，避免 CLI 拿着内存里
@@ -446,15 +453,37 @@ func (c *consoleUI) main(ctx context.Context) error {
 	// 后台每分钟测一次主出口组延迟，记进健康条；ctx 取消时自动退出。
 	go c.runHealthTicker(ctx)
 
-	// 静态首页：画一次 dashboard，等用户输入。回车 / R 主动刷新，避免自动刷新
-	// 抢终端。所有配置操作都在终端菜单里完成（M 进菜单）。
+	// 实时首页：每 2 秒自动重绘仪表盘，网速柱 / 健康条 / 速率随之滚动「活」起来，
+	// 一有输入立刻让位处理命令。输入用一个常驻读取 goroutine 喂进 channel，与刷新
+	// ticker 在 select 里竞争 —— 这样自动刷新和阻塞读 stdin 不互相抢终端。
+	lines := make(chan string, 1)
+	pendingRead := false
+	refresh := time.NewTicker(2 * time.Second)
+	defer refresh.Stop()
+
 	for {
+		c.clearScreen() // 原地重绘，实时首页不往下滚
 		c.drawDashboardOnce(ctx)
-		raw := c.readLine()
+		// 保证恰好有一个待命的读取 goroutine（重绘时它还阻塞在读，则不再起新的）。
+		if !pendingRead {
+			pendingRead = true
+			go func() { lines <- c.readLine() }()
+		}
+
+		var raw string
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-refresh.C:
+			continue // 定时自动重绘，让图表动起来
+		case raw = <-lines:
+			pendingRead = false
+		}
+
 		choice := strings.ToLower(strings.TrimSpace(raw))
 		switch choice {
 		case "", "r":
-			// 回车 / R → 重新拉数据再画一次
+			// 回车 / R → 立即重新拉数据再画一次
 		case "m", "menu":
 			if c.screenMenu(ctx) {
 				return nil

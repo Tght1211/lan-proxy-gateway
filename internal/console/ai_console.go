@@ -45,6 +45,9 @@ func (c *consoleUI) handleNaturalLanguage(ctx context.Context, line string) {
 	if err != nil {
 		warnC.Fprintln(c.out, err.Error())
 	}
+	// 暂停让用户看清 AI 回复，再回到会自动清屏重绘的实时首页。
+	dimC.Fprint(c.out, "\n按回车返回实时面板…")
+	c.readLine()
 }
 
 // screenAIBackends 是 AI 配网助手的后端管理页：列出 / 切换 / 新增 / 删除 / 测试。
