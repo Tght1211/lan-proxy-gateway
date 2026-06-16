@@ -229,7 +229,6 @@ func Normalize(cfg *Config) {
 	if cfg.Runtime.LogLevel == "" {
 		cfg.Runtime.LogLevel = "warning"
 	}
-	normalizeAI(cfg)
 }
 
 // Validate checks the config is internally consistent.

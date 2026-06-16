@@ -68,8 +68,8 @@ func (c *consoleUI) main(ctx context.Context) error {
 		case lower == "q" || lower == "exit" || lower == "quit":
 			return nil
 		default:
-			// 直接打字（非命令）= 进 AI 连续对话，这行作为第一条消息
-			c.screenAIChat(ctx, raw)
+			warnC.Fprintln(c.out, "未识别。输入 / 看命令 · m 菜单 · q 退出")
+			c.pause()
 		}
 
 		select {
@@ -120,11 +120,7 @@ func (c *consoleUI) drawDashboardOnce(ctx context.Context) {
 		warnC.Fprintf(c.out, "  ⚠ 代理源健康探测失败（未切直连）：%s\n", h.LastError)
 	}
 	fmt.Fprintln(c.out)
-	if c.aiAvailable() {
-		dimC.Fprintln(c.out, "  tips: 直接打字和 AI 助手连续对话  ·  输入 / 看命令  ·  q 退出")
-	} else {
-		dimC.Fprintln(c.out, "  tips: 输入 / 看命令  ·  m 菜单  ·  q 退出")
-	}
+	dimC.Fprintln(c.out, "  tips: 输入 / 看命令  ·  m 菜单  ·  q 退出")
 	titleC.Fprint(c.out, "\n› ")
 }
 
@@ -149,8 +145,6 @@ func (c *consoleUI) screenMenu(ctx context.Context) (exitConsole bool) {
 			if c.shutdownGateway() {
 				return true
 			}
-		case "7":
-			c.screenAIBackends(ctx)
 		case "", "0", "q", "back", "exit", "quit":
 			return false
 		default:
@@ -169,7 +163,6 @@ func (c *consoleUI) drawMainMenu() {
 	fmt.Fprintln(c.out, "  3  代理 & 订阅        换代理 · 切节点 · 连通测试 · 全局扩展脚本")
 	fmt.Fprintln(c.out, "  4  启动 / 重启 / 停止")
 	fmt.Fprintln(c.out, "  5  看日志")
-	fmt.Fprintln(c.out, "  7  AI 助手后端        配置/切换 AI 配网助手的大模型（内置免费可用）")
 	fmt.Fprintln(c.out, "  6  关闭 gateway 并退出（停 mihomo）")
 	fmt.Fprintln(c.out, "  Q  返回首页（mihomo 留在后台继续跑）")
 	dimC.Fprintln(c.out, "\n  tips: 输入编号选择  ·  q 返回首页")

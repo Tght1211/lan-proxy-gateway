@@ -21,7 +21,6 @@ type Config struct {
 	Traffic TrafficConfig `yaml:"traffic"`
 	Source  SourceConfig  `yaml:"source"`
 	Runtime RuntimeConfig `yaml:"runtime"`
-	AI      AIConfig      `yaml:"ai"`
 }
 
 // GatewayConfig drives the LAN gateway (the "main" feature).
