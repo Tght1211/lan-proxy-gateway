@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/fatih/color"
@@ -10,15 +11,22 @@ import (
 	"github.com/tght/lan-proxy-gateway/internal/gateway"
 )
 
+var statusJSON bool
+
 var statusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "查看当前运行状态",
+	Short: "查看当前运行状态（--json 输出机器可读）",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		a, err := app.New()
 		if err != nil {
 			return err
 		}
 		s := a.Status()
+		if statusJSON {
+			b, _ := json.MarshalIndent(s, "", "  ")
+			fmt.Println(string(b))
+			return nil
+		}
 		title := color.New(color.FgCyan, color.Bold)
 		title.Println("== lan-proxy-gateway · 状态 ==")
 		fmt.Printf("  配置:   %v (%s)\n", s.Configured, s.ConfigFile)

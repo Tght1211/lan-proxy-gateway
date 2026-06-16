@@ -193,28 +193,69 @@ func (a *App) SetGatewayMode(ctx context.Context, mode string) error {
 // SetSource replaces the source config wholesale, saves and reloads.
 func (a *App) SetSource(ctx context.Context, src config.SourceConfig) error {
 	a.Cfg.Source = src
+	return a.saveAndReload(ctx)
+}
+
+// saveAndReload 存盘后，若 mihomo 在跑则热重载。所有改配置的 facade 方法共用。
+func (a *App) saveAndReload(ctx context.Context) error {
 	if err := a.Save(); err != nil {
 		return err
 	}
-	if a.Engine.Running() {
+	if a.Engine != nil && a.Engine.Running() {
 		return a.Engine.Reload(ctx, config.EffectiveRuntimeConfig(a.Cfg))
 	}
 	return nil
 }
 
+// AddRule 把一条规则按裁决（direct/proxy/reject）追加到 Traffic.Extras，存盘+热重载。
+func (a *App) AddRule(ctx context.Context, verdict, rule string) error {
+	switch verdict {
+	case "direct":
+		a.Cfg.Traffic.Extras.Direct = append(a.Cfg.Traffic.Extras.Direct, rule)
+	case "proxy":
+		a.Cfg.Traffic.Extras.Proxy = append(a.Cfg.Traffic.Extras.Proxy, rule)
+	case "reject":
+		a.Cfg.Traffic.Extras.Reject = append(a.Cfg.Traffic.Extras.Reject, rule)
+	default:
+		return fmt.Errorf("不支持的裁决: %s（应为 direct/proxy/reject）", verdict)
+	}
+	return a.saveAndReload(ctx)
+}
+
+// RemoveRule 按裁决+从 0 起的索引删一条自定义规则，存盘+热重载。
+func (a *App) RemoveRule(ctx context.Context, verdict string, index int) error {
+	var list *[]string
+	switch verdict {
+	case "direct":
+		list = &a.Cfg.Traffic.Extras.Direct
+	case "proxy":
+		list = &a.Cfg.Traffic.Extras.Proxy
+	case "reject":
+		list = &a.Cfg.Traffic.Extras.Reject
+	default:
+		return fmt.Errorf("不支持的裁决: %s（应为 direct/proxy/reject）", verdict)
+	}
+	if index < 0 || index >= len(*list) {
+		return fmt.Errorf("索引越界: %d（%s 共 %d 条）", index, verdict, len(*list))
+	}
+	*list = append((*list)[:index], (*list)[index+1:]...)
+	return a.saveAndReload(ctx)
+}
+
 // Status builds a read-only snapshot for UI rendering.
+// json tags 让 `gateway status --json` 输出规范的 snake_case，便于脚本/agent 解析。
 type Status struct {
-	Configured  bool
-	Running     bool
-	Mode        string
-	Adblock     bool
-	TUN         bool
-	GatewayMode string
-	Source      string
-	Gateway     gateway.Status
-	Ports       config.RuntimePorts
-	MihomoBin   string
-	ConfigFile  string
+	Configured  bool                `json:"configured"`
+	Running     bool                `json:"running"`
+	Mode        string              `json:"mode"`
+	Adblock     bool                `json:"adblock"`
+	TUN         bool                `json:"tun"`
+	GatewayMode string              `json:"gateway_mode"`
+	Source      string              `json:"source"`
+	Gateway     gateway.Status      `json:"gateway"`
+	Ports       config.RuntimePorts `json:"ports"`
+	MihomoBin   string              `json:"mihomo_bin"`
+	ConfigFile  string              `json:"config_file"`
 }
 
 // Status returns the current runtime status (no blocking network calls).

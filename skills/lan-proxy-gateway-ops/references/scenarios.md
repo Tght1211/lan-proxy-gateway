@@ -1,67 +1,66 @@
-# Scenarios
+# Scenarios — headless recipes
 
-## LAN Gateway Onboarding
+All commands are non-interactive. Read state with `--json`, change with `config`/`node`, verify by re-reading. Only `start`/`stop`/`restart` need root.
 
-Goal: let other LAN devices use this machine as gateway/DNS.
+## Point the gateway at a subscription, then pick a node
 
-Suggested flow:
+```bash
+gateway config source --type subscription --url "https://example.com/sub"
+gateway config mode rule
+sudo gateway start            # needs root: brings up TUN + forwarding
+gateway node list             # see groups + nodes (needs running)
+gateway node switch "Proxy" "🇺🇸 US-01"
+gateway status --json         # verify running + source
+```
 
-1. `gateway config`
-2. Enable TUN in runtime settings
-3. `gateway start`
-4. In the runtime TUI, open device instructions or run `gateway status`
+## Chain behind a local Clash / Verge (no airport subscription)
 
-## AI Chains Mode Onboarding
+```bash
+gateway config source --type external --server 127.0.0.1 --port 7890 --kind http
+gateway config tun on
+sudo gateway start
+```
+The gateway forwards LAN traffic into the local proxy client at 127.0.0.1:7890.
 
-Goal: Claude / ChatGPT / Codex / Cursor traffic uses residential egress.
+## Route specific domains a certain way
 
-Suggested flow:
+```bash
+gateway config rule add proxy DOMAIN-SUFFIX,openai.com
+gateway config rule add direct DOMAIN-SUFFIX,internal.corp
+gateway config rule list --json          # find the index to remove
+gateway config rule rm proxy 0
+```
+Rules hot-reload immediately if the gateway is running.
 
-1. `gateway chains`
-2. Confirm `extension.mode = chains`
-3. `gateway start`
-4. In runtime TUI, use `/chains` and `/status` to verify ingress and egress
+## Local-machine bypass (share LAN, don't proxy this host)
 
-## Policy Group / Node Switching
+Keep TUN for LAN devices but avoid capturing the host's own traffic — set the
+gateway to forward mode (host traffic untouched, only forwarded LAN traffic is proxied):
 
-Goal: change airport or strategy-group node from the CLI runtime.
+```bash
+gateway config gateway-mode forward      # restarts mihomo
+gateway status --json                     # confirm gateway_mode + running
+```
 
-Suggested flow:
+## Quick health / recovery check
 
-1. `gateway start`
-2. Open the runtime TUI
-3. Use `/groups` or `Ctrl+P`
-4. Choose the strategy group, then choose a node
+```bash
+gateway status --json                     # running? mode? source?
+gateway config show --json                # source url, rules, tun, dns
+# if "Running": false →
+sudo gateway start
+```
 
-## Local Machine Bypass
+## First-time setup on a fresh machine
 
-Goal: keep LAN sharing on, but avoid proxying the gateway machine’s own traffic.
+```bash
+gateway install                           # downloads mihomo + GeoIP, guided setup
+gateway config source --type subscription --url "https://example.com/sub"
+sudo gateway start
+gateway status --json
+```
 
-Suggested flow:
+## Privilege handling
 
-1. `gateway config`
-2. Open `局域网共享 / TUN / 端口`
-3. Enable `本机绕过代理`
-4. `gateway restart`
-5. Validate with `gateway status`
-
-## Health Check And Recovery
-
-Goal: verify mihomo, TUN, API, and network egress.
-
-Suggested flow:
-
-1. `gateway status`
-2. `gateway health`
-3. `gateway start` if not running
-4. `/logs` in the runtime TUI if the user needs recent runtime output
-
-## Permission Preparation
-
-Goal: make AI-driven terminal operation less blocked by privilege prompts.
-
-Suggested flow:
-
-1. Check whether root is required for the requested operation
-2. Prefer project-supported permission setup or passwordless elevation path when available
-3. Keep read-only commands non-invasive and run them without elevation
+- `status`, `config *`, `node *` → no root, run freely.
+- `start` / `stop` / `restart` → root. With passwordless sudo run `sudo gateway start`; otherwise ask the user to run it. Don't pipe a sudo password.

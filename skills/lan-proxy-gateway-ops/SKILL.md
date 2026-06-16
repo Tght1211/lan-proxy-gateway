@@ -1,54 +1,71 @@
 ---
 name: lan-proxy-gateway-ops
-description: Use when operating lan-proxy-gateway for LAN sharing, chains mode, policy-group switching, local-bypass mode, health checks, or scenario-based setup from an AI client. This skill maps user intents to the right gateway CLI flows and tells the agent when to use status, config, chains, groups, logs, and permission-related commands.
+description: Use when operating or configuring the lan-proxy-gateway CLI (the `gateway` binary) non-interactively — setting the proxy source/subscription, switching nodes, toggling TUN/adblock/traffic mode, adding routing rules, reading status, or starting/stopping the LAN gateway from a script or AI agent without driving the interactive TUI.
 ---
 
 # LAN Proxy Gateway Ops
 
-Use this skill when the user wants to operate `lan-proxy-gateway` through conversation instead of manually remembering CLI commands.
+## Overview
 
-## Quick Start
+`lan-proxy-gateway` (binary: `gateway`) turns a Mac/Linux/Windows machine into a LAN transparent proxy gateway on top of mihomo. It can be driven **entirely from the command line** — no interactive TUI required. Every `config` write saves `gateway.yaml` and **hot-reloads mihomo if it is running**, so changes apply live.
 
-1. Start with `gateway status` or `gateway config show` to understand the current state.
-2. If the user is setting up from scratch, prefer `gateway config` and `gateway chains`.
-3. If the user is already running the gateway, prefer the runtime TUI after `gateway start`.
-4. If the user wants to switch nodes or policy groups, use the TUI group picker or inspect proxy groups through the mihomo API-backed flows.
-5. If the user mentions “本机不要走代理”, use the local-bypass scenario.
+This skill is the command reference for operating it headlessly.
 
-## Scenario Routing
+## Workflow
 
-Read [references/scenarios.md](references/scenarios.md) and choose the closest scenario:
+1. **Read** current state: `gateway status --json` and `gateway config show --json`.
+2. **Change** config with `gateway config ...` (or `gateway node ...` at runtime).
+3. **Verify** by re-reading status/config.
 
-- LAN gateway onboarding
-- AI chains mode onboarding
-- Policy-group / node switching
-- Local-machine bypass while keeping LAN sharing
-- Health check and log-based recovery
-- Permission / non-root control preparation
+All read + `config` commands work **without root**. Only `start`/`stop`/`restart` need root.
 
-## Command Preferences
+## Command Reference
 
-- Prefer plain `gateway <command>` first.
-- If a command requires elevated privileges, explain that the project may need root for TUN, IP forwarding, or firewall changes.
-- If the environment already supports passwordless elevation, plain `gateway start` / `gateway stop` / `gateway restart` should be preferred over teaching the user a long workaround.
-- For runtime operation, prefer the full-screen TUI after `gateway start`; it is the primary control surface.
+### Read state (no root, machine-readable with `--json`)
+- `gateway status --json` — running, mode, TUN, adblock, source type, ports
+- `gateway config show --json` — full config incl. source url/path/server, custom rules
+- `gateway node list --json` — proxy groups, their nodes, and the current pick *(needs the gateway running)*
 
-## High-Value Flows
+`--json` output uses stable **snake_case** keys (`running`, `gateway_mode`, `tun`, …). `node`/`config show` errors are printed to stderr with a non-zero exit code (e.g. `网关未运行，先 gateway start`).
 
-- `gateway start`
-  Use for the main runtime console, slash commands, policy-group switching, logs, and device onboarding.
+### Set the proxy source
+- `gateway config source --type subscription --url <URL>`
+- `gateway config source --type file --path <clash.yaml>`
+- `gateway config source --type external --server 127.0.0.1 --port 7890 --kind http`  *(chain behind a local Clash/Verge)*
+- `gateway config source --type remote --server <host> --port <p> --kind socks5 --user <u> --pass <pw>`
+- `gateway config source --type none`  *(all direct)*
 
-- `gateway config`
-  Use when the user wants guided configuration without editing YAML.
+### Toggle behavior
+- `gateway config mode <rule|global|direct>`
+- `gateway config tun <on|off>`
+- `gateway config adblock <on|off>`
+- `gateway config gateway-mode <tun|forward>`  *(restarts mihomo)*
 
-- `gateway chains`
-  Use for residential chain setup and AI-safe outbound routing.
+### Custom routing rules
+- `gateway config rule add <direct|proxy|reject> <RULE>` — `<RULE>` is any mihomo rule body: `DOMAIN-SUFFIX,openai.com`, `DOMAIN,api.foo.com`, `IP-CIDR,10.0.0.0/8`, `PROCESS-NAME,Cursor`, `GEOIP,CN`, etc.
+- `gateway config rule list --json`
+- `gateway config rule rm <direct|proxy|reject> <index>` — index comes from `rule list`
 
-- `gateway status`
-  Use to verify gateway health, current node, airport ingress, and residential egress.
+### Switch nodes at runtime (needs the gateway running)
+- `gateway node list`
+- `gateway node switch "<group>" "<node>"` — quote names; groups/nodes contain spaces & emoji
 
-## Do Not Assume
+### Lifecycle
+- `gateway install` — first-run wizard: downloads mihomo + GeoIP, guides initial setup
+- `gateway start` / `gateway stop` / `gateway restart` — **needs root** (TUN, IP forwarding, firewall)
+- `gateway service install|uninstall|status` — OS service for auto-start on boot
 
-- Do not assume the current machine should proxy its own traffic. Check whether `runtime.tun.bypass_local` is enabled.
-- Do not assume chains mode is enabled just because a residential proxy is configured. Check `extension.mode`.
-- Do not assume the user wants to edit YAML directly; prefer guided CLI flows first.
+## Privileges
+
+`start`/`stop`/`restart` change the host network stack (TUN device, IP forwarding, pf/iptables) and need root. `status`, `config *`, and `node *` do **not**. If passwordless `sudo` is available, run `sudo gateway start` directly; otherwise tell the user to run it themselves. Never assume the machine should proxy its own traffic — check `gateway config show` (`tun`, `gateway_mode`) first.
+
+## Common Mistakes
+
+- Driving the interactive TUI (`gateway` with no args) by piping keystrokes — fragile. Use the headless `config`/`node` commands above instead.
+- Running `node list/switch` when the gateway is stopped — they need mihomo's running API; start first.
+- Forgetting to quote group/node names in `node switch` — they contain spaces and emoji.
+- Editing `gateway.yaml` by hand while the gateway runs — prefer `config` commands so the change hot-reloads cleanly.
+
+## Scenarios
+
+For end-to-end recipes (LAN onboarding, point to a subscription then pick a node, local-machine bypass, health/recovery), read [references/scenarios.md](references/scenarios.md).
