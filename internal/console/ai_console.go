@@ -17,37 +17,85 @@ func (c *consoleUI) aiAvailable() bool {
 	return c.app != nil && c.app.Cfg.AI.Enabled && len(c.app.Cfg.AI.Backends) > 0
 }
 
-// handleNaturalLanguage 把一句话交给 AI 配网助手跑一轮。
-func (c *consoleUI) handleNaturalLanguage(ctx context.Context, line string) {
-	if !c.aiAvailable() {
-		warnC.Fprintln(c.out, "无效选项（回车 / R 刷新 · M 菜单 · N 切节点 · T 重测 · Q 退出）")
-		return
+// ensureAISession 懒建持久 AI 会话（连续对话的关键：跨多轮复用同一 Session
+// 以保留上下文）。已存在则直接复用。写操作走确认式 confirm 回调。
+func (c *consoleUI) ensureAISession() error {
+	if c.aiSession != nil {
+		return nil
 	}
 	backend := c.app.Cfg.AI.ActiveBackend()
 	llm, err := aiagent.NewClient(backend)
 	if err != nil {
-		warnC.Fprintln(c.out, "AI 后端不可用: "+err.Error())
-		return
+		return err
 	}
 	confirm := func(plan string) bool {
-		fmt.Fprintln(c.out, "\nAI 准备执行：")
-		fmt.Fprintln(c.out, "  "+plan)
-		fmt.Fprint(c.out, "确认? [y/N] ")
+		fmt.Fprintln(c.out, "\n  AI 准备执行：")
+		okC.Fprintln(c.out, "    "+plan)
+		fmt.Fprint(c.out, "  确认? [y/N] ")
 		ans := strings.ToLower(strings.TrimSpace(c.readLine()))
 		return ans == "y" || ans == "yes"
 	}
 	exec := aiagent.NewExecutor(c.app, confirm)
-	sess := aiagent.NewSession(llm, exec)
+	c.aiSession = aiagent.NewSession(llm, exec)
+	return nil
+}
 
-	fmt.Fprintln(c.out, "\n🤖 ")
-	_, err = sess.Handle(ctx, line, func(s string) { fmt.Fprint(c.out, s) })
-	fmt.Fprintln(c.out)
-	if err != nil {
-		warnC.Fprintln(c.out, err.Error())
+// screenAIChat 是和 AI 配网助手的「连续对话」屏：持久会话、可一直追问，
+// 进来后暂停实时面板（不被自动清屏冲掉）。first 非空时作为第一条消息。
+//   - /exit、/back、q、空回车两次 → 返回实时面板
+//   - /new、/clear → 清空对话上下文
+func (c *consoleUI) screenAIChat(ctx context.Context, first string) {
+	if !c.aiAvailable() {
+		warnC.Fprintln(c.out, "AI 助手未启用。进 / → /ai 配置后端，或确认 ai.enabled=true。")
+		c.pause()
+		return
 	}
-	// 暂停让用户看清 AI 回复，再回到会自动清屏重绘的实时首页。
-	dimC.Fprint(c.out, "\n按回车返回实时面板…")
-	c.readLine()
+	if err := c.ensureAISession(); err != nil {
+		warnC.Fprintln(c.out, "AI 后端不可用: "+err.Error())
+		c.pause()
+		return
+	}
+
+	c.clearScreen()
+	c.banner("AI 配网助手 · 连续对话")
+	b := c.app.Cfg.AI.ActiveBackend()
+	dimC.Fprintf(c.out, "  当前后端: %s (%s)\n", b.ID, b.Model)
+	dimC.Fprintln(c.out, "  直接说话即可连续追问 ·  /new 清空上下文  ·  /exit 返回实时面板")
+
+	line := first
+	emptyStreak := 0
+	for {
+		if strings.TrimSpace(line) == "" {
+			titleC.Fprint(c.out, "\n› ")
+			line = c.readLine()
+		}
+		t := strings.TrimSpace(line)
+		line = ""
+		switch strings.ToLower(t) {
+		case "":
+			// 连按两次空回车 = 返回面板（避免误退）
+			emptyStreak++
+			if emptyStreak >= 2 {
+				return
+			}
+			continue
+		case "/exit", "/back", "/quit", "/q", "q":
+			return
+		case "/new", "/clear":
+			c.aiSession = nil
+			_ = c.ensureAISession()
+			okC.Fprintln(c.out, "  ✓ 已清空对话上下文，重新开始。")
+			emptyStreak = 0
+			continue
+		}
+		emptyStreak = 0
+		fmt.Fprint(c.out, "\n🤖 ")
+		_, err := c.aiSession.Handle(ctx, t, func(s string) { fmt.Fprint(c.out, s) })
+		fmt.Fprintln(c.out)
+		if err != nil {
+			warnC.Fprintln(c.out, "  "+err.Error())
+		}
+	}
 }
 
 // screenAIBackends 是 AI 配网助手的后端管理页：列出 / 切换 / 新增 / 删除 / 测试。

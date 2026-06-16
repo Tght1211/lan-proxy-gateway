@@ -23,6 +23,7 @@ import (
 
 	"github.com/fatih/color"
 
+	"github.com/tght/lan-proxy-gateway/internal/aiagent"
 	"github.com/tght/lan-proxy-gateway/internal/app"
 	"github.com/tght/lan-proxy-gateway/internal/config"
 	"github.com/tght/lan-proxy-gateway/internal/devices"
@@ -65,6 +66,10 @@ type consoleUI struct {
 	// 终端图表：网速柱状图（每帧 push 下行速率）+ 每分钟测速健康条。
 	spark  *sparkline
 	health *healthBar
+
+	// aiSession 是持久的 AI 配网对话会话；跨多轮复用以保留上下文（连续对话）。
+	// 懒初始化（ensureAISession）；/new 或切后端时置 nil 重建。
+	aiSession *aiagent.Session
 }
 
 func newConsole(a *app.App, in io.Reader, out io.Writer) *consoleUI {

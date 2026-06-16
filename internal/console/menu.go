@@ -47,23 +47,29 @@ func (c *consoleUI) main(ctx context.Context) error {
 			pendingRead = false
 		}
 
-		choice := strings.ToLower(strings.TrimSpace(raw))
-		switch choice {
-		case "", "r":
+		raw = strings.TrimSpace(raw)
+		lower := strings.ToLower(raw)
+		switch {
+		case raw == "" || lower == "r":
 			// 回车 / R → 立即重新拉数据再画一次
-		case "m", "menu":
+		case strings.HasPrefix(raw, "/"):
+			// 斜杠命令（/ 看清单，/status、/node… 直接执行）
+			if c.handleSlash(ctx, raw) {
+				return nil
+			}
+		case lower == "m" || lower == "menu":
 			if c.screenMenu(ctx) {
 				return nil
 			}
-		case "n":
+		case lower == "n":
 			c.screenSwitchNode(ctx)
-		case "t":
+		case lower == "t":
 			c.screenSource(ctx)
-		case "q", "exit", "quit":
+		case lower == "q" || lower == "exit" || lower == "quit":
 			return nil
 		default:
-			// 非命令 → 交给 AI 配网助手（用原始行保留大小写/中文）
-			c.handleNaturalLanguage(ctx, strings.TrimSpace(raw))
+			// 直接打字（非命令）= 进 AI 连续对话，这行作为第一条消息
+			c.screenAIChat(ctx, raw)
 		}
 
 		select {
@@ -113,10 +119,13 @@ func (c *consoleUI) drawDashboardOnce(ctx context.Context) {
 		warnC.Fprintln(c.out)
 		warnC.Fprintf(c.out, "  ⚠ 代理源健康探测失败（未切直连）：%s\n", h.LastError)
 	}
+	fmt.Fprintln(c.out)
 	if c.aiAvailable() {
-		dimC.Fprintln(c.out, "\n  💬 直接输入一句话，让 AI 配网助手帮你（如：帮我设置订阅源 https://...）")
+		dimC.Fprintln(c.out, "  tips: 直接打字和 AI 助手连续对话  ·  输入 / 看命令  ·  q 退出")
+	} else {
+		dimC.Fprintln(c.out, "  tips: 输入 / 看命令  ·  m 菜单  ·  q 退出")
 	}
-	fmt.Fprint(c.out, "\n请选择：> ")
+	titleC.Fprint(c.out, "\n› ")
 }
 
 // screenMenu 是旧版主菜单折成的「操作抽屉」。返回 true 表示用户在里头关了
@@ -163,7 +172,8 @@ func (c *consoleUI) drawMainMenu() {
 	fmt.Fprintln(c.out, "  7  AI 助手后端        配置/切换 AI 配网助手的大模型（内置免费可用）")
 	fmt.Fprintln(c.out, "  6  关闭 gateway 并退出（停 mihomo）")
 	fmt.Fprintln(c.out, "  Q  返回首页（mihomo 留在后台继续跑）")
-	fmt.Fprint(c.out, "\n请选择：> ")
+	dimC.Fprintln(c.out, "\n  tips: 输入编号选择  ·  q 返回首页")
+	titleC.Fprint(c.out, "› ")
 }
 
 // printStatus 在主菜单顶部显示 3 件最关键的信息：
