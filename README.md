@@ -7,7 +7,7 @@
 
 > **把一台电脑变成整屋的代理网关** —— 一台机器配好代理，整屋设备（手机 / Switch / PS5 / Apple TV / 智能电视）一起用，**不用每台都装代理 App**。
 
-中文菜单 · 一键安装 · 内嵌 Gateway Web 控制台。基于 [mihomo](https://github.com/MetaCubeX/mihomo)（Clash.Meta）。English: [README_EN.md](README_EN.md)
+中文菜单 · 一键安装 · 实时终端面板。基于 [mihomo](https://github.com/MetaCubeX/mihomo)（Clash.Meta）。English: [README_EN.md](README_EN.md)
 
 ```mermaid
 flowchart LR
@@ -72,14 +72,13 @@ gateway start          # Windows（管理员终端，无需 sudo）
 | 🌐 **LAN 透明网关** | 设备改网关 + DNS 就接管（macOS/Linux）；不能改网关的设备走 HTTP 代理（全平台） |
 | 🔗 **三种代理源** | 机场订阅 URL / 本地 `.yaml` / 本机已在跑的 Clash 端口（二次代理）；本机单点上游仍支持 `17890` 共享和改网关透明代理 |
 | 🏠 **链式代理预设** | 一键「机场起飞 + 住宅 IP 落地」，AI 网站看到的是家庭宽带 ASN |
-| 🌐 **内嵌 Web 控制台** | 浏览器开 `http://gatewayIP:19091/`，在首页切代理源 / 切分组节点 / 测速 / 看接入设备 / 控制 TUN 与代理服务 |
+| 📟 **实时终端面板** | 首页自动刷新（btop 风格）：网速柱状图 + 稳定性健康条 + 接入设备一屏看全；`/` 斜杠命令快速导航（`/status`、`/node`、`/source`…） |
+| 🤖 **脚本 / Agent 友好** | 全套无交互命令 `gateway config` / `gateway node` / `gateway status --json`，配 [`skills/lan-proxy-gateway-ops`](skills/lan-proxy-gateway-ops)，可被 Claude Code 等 agent 完整驱动 |
 | 🔐 **代理服务认证** | 局域网 HTTP/SOCKS5 `mixed-port` 可独立开关，并可选设置用户名 / 密码；TUN 透明代理可同时开启 |
 | ⚡ **代理源 supervisor** | 订阅/文件源异常时自动切直连保命；本机单点代理只监控端口，避免误切 |
 | 🎯 **规则系统** | 内置 LAN 直连 / 中国直连 / Apple / Nintendo / 广告拦截；自定义规则可指定 `Proxy` 或任意策略组，例如 AI 域名走住宅 IP、YouTube 继续走普通代理 |
 | 📊 **节点测速** | 切节点页面自动并发测延迟，按速度升序 |
 | 🗒️ **中文日志视图** | mihomo 英文日志翻译成中文（`🟡 TCP 直连 xxx → 超时`） |
-
-![Gateway WebUI 自定义规则指定策略组](docs/assets/webui-custom-rules.png)
 
 ---
 
