@@ -48,8 +48,30 @@ egress:
 	if cfg.Egress.Mode != EgressProxy {
 		t.Fatalf("mode = %q", cfg.Egress.Mode)
 	}
-	if cfg.DNS.Port != 53 || cfg.Runtime.APIPort != 19090 {
+	if cfg.DNS.Port != 53 || cfg.Runtime.APIPort != 19090 || !cfg.QUICBlock {
 		t.Fatalf("defaults not applied: %+v", cfg)
+	}
+}
+
+func TestParseIgnoresExperimentalUDPFieldsAndKeepsQUICBlocked(t *testing.T) {
+	cfg, err := Parse([]byte(`
+version: 4
+egress:
+  mode: proxy
+  proxy:
+    type: http
+    host: 127.0.0.1
+    port: 7897
+udp:
+  mode: block
+runtime:
+  udp_port: 17893
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.QUICBlock {
+		t.Fatal("proxy config without quic_block must retain the safe default")
 	}
 }
 

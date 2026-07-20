@@ -199,6 +199,7 @@ func startFakeHTTPProxy(t *testing.T, statusLine string, preamble string, wantAu
 					return
 				}
 				authed := false
+				hostHeaders := 0
 				for {
 					h, err := br.ReadString('\n')
 					if err != nil {
@@ -207,15 +208,22 @@ func startFakeHTTPProxy(t *testing.T, statusLine string, preamble string, wantAu
 					if h == "\r\n" {
 						break
 					}
+					if strings.HasPrefix(strings.ToLower(h), "host:") {
+						hostHeaders++
+					}
 					if wantAuth != "" && strings.HasPrefix(h, "Proxy-Authorization: Basic "+wantAuth) {
 						authed = true
 					}
+				}
+				if hostHeaders != 1 {
+					fmt.Fprintf(conn, "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
+					return
 				}
 				if wantAuth != "" && !authed {
 					fmt.Fprintf(conn, "HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n")
 					return
 				}
-				fmt.Fprintf(conn, "%s\r\nContent-Length: 0\r\n\r\n", statusLine)
+				fmt.Fprintf(conn, "%s\r\n\r\n", statusLine)
 				if preamble != "" {
 					// bytes that belong to the tunnel, sent immediately so the
 					// client's bufio reader likely buffers them with the headers

@@ -48,7 +48,6 @@ func (d *httpConnectDialer) DialContext(ctx context.Context, network, addr strin
 		Method: http.MethodConnect,
 		Host:   addr,
 		Header: http.Header{
-			"Host":             []string{addr},
 			"User-Agent":       []string{"lan-proxy-gateway"},
 			"Proxy-Connection": []string{"Keep-Alive"},
 		},
