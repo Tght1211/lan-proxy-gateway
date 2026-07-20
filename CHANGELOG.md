@@ -1,5 +1,19 @@
 # Changelog
 
+## v4.0.3 - 2026-07-21
+
+### Fixed
+
+- Fixed HTTP CONNECT requests containing duplicate `Host` headers, which caused some mixed HTTP/SOCKS proxy endpoints to close every LAN connection with `unexpected EOF`.
+- Fixed successful HTTP CONNECT tunnels being closed through the response body lifecycle when the upstream returned a standard bodyless `200 Connection established` response.
+- Added regression coverage for strict CONNECT header handling, bodyless successful responses, and safe loading of configurations left by pre-release UDP experiments.
+
+### Documentation
+
+- Added real-device Fast.com and Nintendo Switch results, including YouTube access through the LAN gateway.
+- Clarified that gateway and the external proxy do not require TUN, that QUIC falls back to TCP in proxy mode, and that node selection and routing remain the external proxy software's responsibility.
+- Corrected phone and PlayStation setup guidance for DNS, NAT expectations, and external routing rules.
+
 ## v4.0.2 - 2026-07-20
 
 ### Fixed
