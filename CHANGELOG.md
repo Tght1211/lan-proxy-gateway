@@ -1,5 +1,12 @@
 # Changelog
 
+## v4.0.1 - 2026-07-20
+
+### Fixed
+
+- Enabled fake-IP by default in proxy mode while keeping DNS hijacking disabled. The relay now passes original domains to Clash/sing-box instead of forwarding potentially polluted local DNS results as destination IPs.
+- Fixed sites such as YouTube failing when the external proxy depends on domain-based rules.
+
 ## v4.0.0 - 2026-07-20
 
 ### Breaking changes
@@ -12,7 +19,7 @@
 
 - Added an in-process transparent TCP relay with direct, SOCKS5, and HTTP CONNECT egress.
 - Added native macOS pf and Linux iptables rule management.
-- Added an IPv4 DNS forwarder with `fake_ip: true` and `hijack: false`: external proxy software receives domains without globally intercepting DNS.
+- Added an IPv4 DNS forwarder. v4.0.1 corrects its proxy-mode defaults so external proxy software receives domains without globally intercepting DNS.
 - Proxy mode blocks QUIC so browsers fall back to TCP; other UDP remains direct.
 - Added detached daemon lifecycle, hot configuration reload, status API, and precise firewall cleanup.
 

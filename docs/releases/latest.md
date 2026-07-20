@@ -1,6 +1,8 @@
-# lan-proxy-gateway v4.0.0
+# lan-proxy-gateway v4.0.1
 
 v4 is a complete rewrite focused on one job: using an always-on macOS or Linux computer as a lightweight LAN bypass gateway while reusing an existing Clash, Mihomo, or sing-box proxy endpoint.
+
+v4.0.1 fixes the proxy-mode DNS default before publishing release binaries: fake-IP is enabled so original domains reach external proxy rules, while DNS hijacking remains disabled for Android/ColorOS compatibility. This fixes YouTube and other domain-routed sites resolving locally to incorrect or polluted destination IPs.
 
 ## Important upgrade notice
 
