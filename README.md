@@ -31,7 +31,7 @@ English: [README_EN.md](README_EN.md)
 
 - 希望项目自身提供代理线路、订阅解析、节点选择或规则分流。
 - 希望部署在 Windows、普通路由器或 OpenWrt 上。
-- 需要代理游戏、语音等 UDP 流量，或需要 IPv6 透明代理。
+- 需要代理游戏、语音、STUN 等通用 UDP 流量，或需要 IPv6 透明代理。
 
 ## 工作流程
 
@@ -77,7 +77,25 @@ sequenceDiagram
     I-->>D: TCP 响应经原路径返回
 ```
 
-gateway 不提供代理线路，也不判断哪些网站应该走哪个节点；它只确保局域网 TCP 和原始域名可靠地交给现有代理软件。
+gateway 不提供代理线路，也不判断哪些网站应该走哪个节点；它只确保局域网 TCP 和原始域名可靠地交给现有代理软件。代理模式会拒绝 QUIC（UDP/443），让客户端立即回退到可被代理的 TCP；项目及外部代理均不要求开启 TUN。
+
+## 实际效果
+
+同一上游代理下，PC 直接使用第三方代理约为 `320 Mbps`，局域网手机经 gateway 测得约 `400 Mbps`。测速会随时段和节点波动，这组结果用于说明 gateway 没有形成固定的带宽上限；它不表示 gateway 能让物理网络变快。
+
+| PC 直接使用第三方代理 | 手机经 LAN gateway 使用同一代理 |
+|---|---|
+| <img src="docs/images/direct-proxy-fast-test.jpg" alt="PC 直接代理 Fast.com 320 Mbps" width="480"> | <img src="docs/images/gateway-phone-fast-test.jpg" alt="手机经过旁路由 Fast.com 400 Mbps" width="300"> |
+
+Switch 只需把网关和 DNS 指向运行 gateway 的主机，即可复用同一 SOCKS5/HTTP 代理。下面是实际设备接入后的连接测试：下载约 `72.0 Mbps`、上传约 `8.9 Mbps`。
+
+![Switch 通过旁路由连接后的网络测速](docs/images/switch-speed-test.jpg)
+
+配置代理出口后，Switch 可直接访问 YouTube；当外部代理节点对 Nintendo 下载源线路更好时，游戏下载速度也会有明显改善。
+
+![Switch 通过旁路由代理访问 YouTube](docs/images/switch-youtube.jpg)
+
+实际速度、NAT 类型和内容可用性取决于 Wi-Fi、运营商、外部代理软件、节点及其分流规则；gateway 本身不提供线路或流媒体解锁能力。
 
 ## 从 v3 升级到 v4
 
@@ -150,7 +168,7 @@ sudo gateway stop
 
 Android/ColorOS 还应关闭“私人 DNS”。代理模式使用 fake-IP 保留域名，让 Clash/sing-box 负责解析和规则匹配；默认不劫持设备发往其他 DNS 的查询，避免部分 Android/ColorOS 浏览器异常。
 
-启用系统代理后，旁路由的 TCP 也会转发到同一代理端口。UDP/443 会被拒绝以促使浏览器回退到 TCP，其他 UDP 仍直连。
+启用系统代理后，旁路由的 TCP 也会转发到同一代理端口。UDP/443 会被拒绝以促使浏览器回退到 TCP，其他 UDP 仍直连。整个方案不需要 gateway 或第三方代理开启 TUN。
 
 ## macOS 系统代理
 
@@ -185,7 +203,7 @@ gateway update [version]         # 完整重构迁移，执行前会提示确认
 - macOS 使用 pf，Linux 使用 iptables。
 - 当前只支持 macOS 和 Linux，不提供 Windows 构建。
 - 不以普通路由器/OpenWrt 为部署目标；宿主机应是完整、常驻的电脑系统。
-- 不提供订阅、节点、规则集、WebUI、流量图表和 UDP 代理。
+- 不提供订阅、节点、规则集、WebUI、流量图表、UDP 代理和 TUN 模式。
 
 ## License
 

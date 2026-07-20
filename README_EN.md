@@ -27,7 +27,7 @@ This project is for users who:
 - want phones, TVs, and consoles to reuse that proxy software by changing only gateway and DNS settings;
 - prefer a focused gateway that does not duplicate subscriptions, nodes, or routing rules.
 
-It is not intended for Windows, consumer routers/OpenWrt, built-in proxy services, UDP proxying, or IPv6 transparent routing.
+It is not intended for Windows, consumer routers/OpenWrt, built-in proxy services, general game/voice UDP proxying, or IPv6 transparent routing.
 
 ## How it works
 
@@ -62,6 +62,26 @@ sequenceDiagram
     P->>I: Open outbound connection
     I-->>D: Return TCP traffic
 ```
+
+Gateway neither provides proxy nodes nor chooses routes. It reliably hands LAN TCP traffic and original domains to the existing proxy software. In proxy mode, QUIC (UDP/443) is rejected so clients immediately fall back to proxyable TCP. Neither gateway nor the external proxy needs TUN mode.
+
+## Real-device results
+
+With the same upstream proxy, Fast.com measured about `320 Mbps` on a PC using the third-party proxy directly and about `400 Mbps` on a LAN phone using gateway. Speed tests fluctuate with time and node conditions; this comparison demonstrates that gateway does not impose a fixed throughput ceiling, not that it can make the physical connection faster.
+
+| PC using the third-party proxy directly | LAN phone using the same proxy through gateway |
+|---|---|
+| <img src="docs/images/direct-proxy-fast-test.jpg" alt="PC direct proxy Fast.com result: 320 Mbps" width="480"> | <img src="docs/images/gateway-phone-fast-test.jpg" alt="Phone through gateway Fast.com result: 400 Mbps" width="300"> |
+
+A Switch can reuse the configured HTTP/SOCKS5 endpoint by pointing its gateway and DNS at the gateway host. This real-device connection test measured approximately `72.0 Mbps` down and `8.9 Mbps` up.
+
+![Nintendo Switch network test through the gateway](docs/images/switch-speed-test.jpg)
+
+With the proxy egress enabled, the Switch can access YouTube. Game downloads can also improve when the external proxy node has a better route to Nintendo's download servers.
+
+![Nintendo Switch accessing YouTube through the gateway](docs/images/switch-youtube.jpg)
+
+Throughput, NAT type, content availability, and download improvements depend on Wi-Fi, ISP, external proxy software, node quality, and routing rules. Gateway itself provides neither proxy nodes nor streaming-unlock services.
 
 ## Upgrading from v3 to v4
 
@@ -103,7 +123,7 @@ gateway status
 
 On each LAN device, set both Gateway/Router and DNS 1 to the gateway host's LAN IPv4 address. Leave DNS 2 empty. Disable Private DNS on Android/ColorOS.
 
-Proxy mode uses fake-IP so the relay can pass original domains to Clash/sing-box for resolution and rule matching. DNS queries sent to other resolvers are not hijacked. UDP/443 is rejected so browsers fall back to TCP, while other UDP remains direct.
+Proxy mode uses fake-IP so the relay can pass original domains to Clash/sing-box for resolution and rule matching. DNS queries sent to other resolvers are not hijacked. UDP/443 is rejected so browsers fall back to TCP, while other UDP remains direct. This setup does not require TUN mode in gateway or the third-party proxy.
 
 ## macOS system proxy
 
@@ -121,7 +141,7 @@ See [docs/commands.md](docs/commands.md) and [docs/architecture.md](docs/archite
 ## Scope
 
 - Gateway mode supports macOS and Linux, focused on IPv4 TCP.
-- No subscriptions, node selection, rule sets, WebUI, traffic dashboard, or UDP proxying.
+- No subscriptions, node selection, rule sets, WebUI, traffic dashboard, UDP proxying, or TUN mode.
 - Only macOS and Linux builds are provided.
 - Consumer routers and OpenWrt are not deployment targets; use a complete always-on computer OS.
 
