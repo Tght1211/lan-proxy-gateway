@@ -15,7 +15,7 @@ egress:
     password: ""
 ```
 
-DNS、防火墙和运行端口属于旁路由内部配置。推荐默认值为 `fake_ip: false`、`hijack: false`，即返回真实 IP，且不拦截设备主动发往其他 DNS 的查询。
+DNS、防火墙和运行端口属于旁路由内部配置。推荐默认值为 `fake_ip: true`、`hijack: false`：代理模式保留原始域名给 Clash/sing-box 解析和分流，但不拦截设备主动发往其他 DNS 的查询。
 
 常见代理软件入口：
 

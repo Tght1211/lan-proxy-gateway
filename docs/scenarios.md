@@ -52,7 +52,7 @@ gateway system-proxy off                                            # 切直连
 在**设备**上：
 
 ```bash
-dig example.com          # 默认返回真实 IP
+dig example.com          # 代理模式返回 fake-IP，直连模式返回真实 IP
 curl ifconfig.me         # 代理模式显示上游出口 IP；直连模式显示家里宽带 IP
 curl --http3 -I https://www.google.com   # 代理模式应快速失败并回退 TCP
 ```

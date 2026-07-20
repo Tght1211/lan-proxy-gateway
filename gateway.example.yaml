@@ -27,8 +27,9 @@ dns:
   enabled: true
   port: 53
   upstreams: ["223.5.5.5", "119.29.29.29"]
-  # 保守默认：返回真实 IP，且只响应设备主动发到网关的 DNS 查询。
-  fake_ip: false
+  # 代理模式返回 fake-IP，让 relay 把原始域名交给 Clash/sing-box 解析和分流。
+  fake_ip: true
+  # 不劫持设备发往其他 DNS 的查询，避免部分 Android/ColorOS 浏览器异常。
   hijack: false
   # 追加不做 fake-ip 的域名后缀（内置: lan/local/localhost/internal/home.arpa）
   fake_ip_filter: []

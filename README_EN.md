@@ -64,7 +64,7 @@ gateway status
 
 On each LAN device, set both Gateway/Router and DNS 1 to the gateway host's LAN IPv4 address. Leave DNS 2 empty. Disable Private DNS on Android/ColorOS.
 
-The conservative DNS defaults return real IP addresses and do not hijack queries sent to other DNS servers. Proxy mode relays TCP; UDP/443 is rejected so browsers fall back to TCP, while other UDP remains direct.
+Proxy mode uses fake-IP so the relay can pass original domains to Clash/sing-box for resolution and rule matching. DNS queries sent to other resolvers are not hijacked. UDP/443 is rejected so browsers fall back to TCP, while other UDP remains direct.
 
 ## macOS system proxy
 

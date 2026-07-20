@@ -120,13 +120,13 @@ func TestDNSOptionsFakeIPOnlyInProxyMode(t *testing.T) {
 	}
 	cfg.Egress.Mode = config.EgressProxy
 	opts = dnsOptions(cfg, nil)
-	if opts.FakeIPEnabled {
-		t.Fatal("proxy mode must not fake-ip by default")
-	}
-	cfg.DNS.FakeIP = true
-	opts = dnsOptions(cfg, nil)
 	if !opts.FakeIPEnabled {
-		t.Fatal("explicit fake_ip=true must be honored in proxy mode")
+		t.Fatal("proxy mode must fake-ip by default")
+	}
+	cfg.DNS.FakeIP = false
+	opts = dnsOptions(cfg, nil)
+	if opts.FakeIPEnabled {
+		t.Fatal("explicit fake_ip=false must be honored")
 	}
 }
 

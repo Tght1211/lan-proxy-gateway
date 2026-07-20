@@ -17,7 +17,7 @@ This release is not configuration-compatible with v3.
 
 - Transparent IPv4 TCP relay with direct, SOCKS5, and HTTP CONNECT egress.
 - Native macOS pf and Linux iptables integration.
-- Built-in DNS forwarder with real-IP, non-hijacking defaults for device compatibility.
+- Built-in DNS forwarder with proxy-mode fake-IP and DNS hijacking disabled: domains reach external proxy rules without intercepting other resolvers.
 - macOS system proxy configuration through `networksetup`, synchronized with LAN gateway egress.
 - Linux LAN proxy endpoint configuration without desktop integration.
 - One-level terminal UI for start/stop, proxy configuration, device parameters, and recent logs.

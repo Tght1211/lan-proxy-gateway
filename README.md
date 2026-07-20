@@ -97,7 +97,7 @@ sudo gateway stop
 | DNS 1 | 与网关相同 |
 | DNS 2 | 留空；设备强制要求时填 DNS 1 |
 
-Android/ColorOS 还应关闭“私人 DNS”。默认 DNS 配置返回真实 IP，不劫持设备发往其他 DNS 的查询，这是实机兼容性更好的设置。
+Android/ColorOS 还应关闭“私人 DNS”。代理模式使用 fake-IP 保留域名，让 Clash/sing-box 负责解析和规则匹配；默认不劫持设备发往其他 DNS 的查询，避免部分 Android/ColorOS 浏览器异常。
 
 启用系统代理后，旁路由的 TCP 也会转发到同一代理端口。UDP/443 会被拒绝以促使浏览器回退到 TCP，其他 UDP 仍直连。
 

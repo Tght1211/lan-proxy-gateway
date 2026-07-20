@@ -86,7 +86,7 @@ func Default() *Config {
 			Enabled:   true,
 			Port:      53,
 			Upstreams: []string{"223.5.5.5", "119.29.29.29"},
-			FakeIP:    false,
+			FakeIP:    true,
 			Hijack:    false,
 		},
 		QUICBlock: true,

@@ -37,7 +37,7 @@ func (c *consoleUI) onboard(_ context.Context) error {
 		}
 	}
 
-	fmt.Fprintln(c.out, "  ✓ LAN DNS 使用真实 IP，不劫持设备的其他 DNS")
+	fmt.Fprintln(c.out, "  ✓ 代理模式保留域名给代理软件，不劫持设备的其他 DNS")
 	fmt.Fprintln(c.out, "  ✓ 代理规则和节点由系统代理对应的软件处理")
 
 	if err := c.app.Save(); err != nil {

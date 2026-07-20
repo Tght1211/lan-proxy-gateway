@@ -11,8 +11,8 @@ import (
 func TestDefaultValidAndRoundtrip(t *testing.T) {
 	cfg := Default()
 	Normalize(cfg)
-	if cfg.DNS.FakeIP || cfg.DNS.Hijack {
-		t.Fatal("conservative defaults must not enable fake-ip or DNS hijacking")
+	if !cfg.DNS.FakeIP || cfg.DNS.Hijack {
+		t.Fatal("proxy-safe defaults must enable fake-ip without DNS hijacking")
 	}
 	if err := Validate(cfg); err != nil {
 		t.Fatalf("default config invalid: %v", err)

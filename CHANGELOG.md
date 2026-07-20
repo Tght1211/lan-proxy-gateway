@@ -12,7 +12,7 @@
 
 - Added an in-process transparent TCP relay with direct, SOCKS5, and HTTP CONNECT egress.
 - Added native macOS pf and Linux iptables rule management.
-- Added an IPv4 DNS forwarder with conservative defaults: `fake_ip: false` and `hijack: false`.
+- Added an IPv4 DNS forwarder with `fake_ip: true` and `hijack: false`: external proxy software receives domains without globally intercepting DNS.
 - Proxy mode blocks QUIC so browsers fall back to TCP; other UDP remains direct.
 - Added detached daemon lifecycle, hot configuration reload, status API, and precise firewall cleanup.
 
