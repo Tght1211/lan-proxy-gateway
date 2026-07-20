@@ -1,5 +1,12 @@
 # Changelog
 
+## v4.0.2 - 2026-07-20
+
+### Fixed
+
+- Fixed the relay incorrectly terminating every long-lived TCP connection after two minutes. The drain timeout now starts only after one direction reaches EOF, preventing video streams such as YouTube from being interrupted and reconnected.
+- Preserved Go's optimized TCP copy path, including zero-copy `splice` on Linux, by recording transfer totals after each copy direction completes instead of wrapping every write.
+
 ## v4.0.1 - 2026-07-20
 
 ### Fixed

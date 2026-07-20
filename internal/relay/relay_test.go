@@ -362,6 +362,36 @@ func TestPipeHalfClose(t *testing.T) {
 	}
 }
 
+func TestPipeDrainTimeoutStartsAfterFirstDirectionFinishes(t *testing.T) {
+	client, a := net.Pipe()
+	upstream, b := net.Pipe()
+	defer client.Close()
+	defer upstream.Close()
+
+	tc := NewTracker().Open("1.1.1.1", "h", 443, true)
+	done := make(chan struct{})
+	go func() {
+		pipeWithDrainTimeout(a, b, tc, 40*time.Millisecond)
+		close(done)
+	}()
+
+	// The timeout must not cap the total lifetime of a healthy connection.
+	time.Sleep(80 * time.Millisecond)
+	select {
+	case <-done:
+		t.Fatal("pipe stopped before either direction reached EOF")
+	default:
+	}
+
+	_ = client.Close()
+	_ = upstream.Close()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pipe did not stop after both directions closed")
+	}
+}
+
 func TestTrackerConcurrent(t *testing.T) {
 	tr := NewTracker()
 	var wg sync.WaitGroup

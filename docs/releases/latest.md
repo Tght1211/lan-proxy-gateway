@@ -1,8 +1,8 @@
-# lan-proxy-gateway v4.0.1
+# lan-proxy-gateway v4.0.2
 
 v4 is a complete rewrite focused on one job: using an always-on macOS or Linux computer as a lightweight LAN bypass gateway while reusing an existing Clash, Mihomo, or sing-box proxy endpoint.
 
-v4.0.1 fixes the proxy-mode DNS default before publishing release binaries: fake-IP is enabled so original domains reach external proxy rules, while DNS hijacking remains disabled for Android/ColorOS compatibility. This fixes YouTube and other domain-routed sites resolving locally to incorrect or polluted destination IPs.
+v4.0.2 fixes long-running video traffic being interrupted by the relay after two minutes and restores the optimized TCP copy path. v4.0.1 previously fixed proxy-mode DNS defaults so original domains reach external proxy rules without globally hijacking DNS.
 
 ## Important upgrade notice
 
@@ -17,6 +17,8 @@ This release is not configuration-compatible with v3.
 
 ## Highlights
 
+- Long-lived TCP streams are no longer subject to an unconditional two-minute lifetime cap.
+- TCP forwarding keeps Go's optimized copy path, including zero-copy `splice` on Linux.
 - Transparent IPv4 TCP relay with direct, SOCKS5, and HTTP CONNECT egress.
 - Native macOS pf and Linux iptables integration.
 - Built-in DNS forwarder with proxy-mode fake-IP and DNS hijacking disabled: domains reach external proxy rules without intercepting other resolvers.
