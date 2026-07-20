@@ -76,11 +76,14 @@ func (d *httpConnectDialer) DialContext(ctx context.Context, network, addr strin
 		conn.Close()
 		return nil, fmt.Errorf("http: 读取 CONNECT 响应失败: %w", err)
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
+		resp.Body.Close()
 		conn.Close()
 		return nil, fmt.Errorf("http: 代理拒绝 CONNECT: %s", resp.Status)
 	}
+	// A successful CONNECT response transitions this socket into the tunnel.
+	// Closing resp.Body may close that socket for proxies without an explicit
+	// zero-length body, so ownership stays with the connection returned below.
 	_ = conn.SetDeadline(time.Time{})
 	// The bufio reader may have already buffered bytes belonging to the
 	// tunneled stream — they must be drained before the raw conn.
