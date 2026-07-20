@@ -1,34 +1,41 @@
-# lan-proxy-gateway v4.0.3
+# lan-proxy-gateway v4.0.4
 
-这是 v4 重构后的稳定版本，面向常驻 Mac mini 和 Linux 小主机：局域网设备只需把网关与 DNS 指向宿主机，即可复用现有 Clash、Mihomo、sing-box 或其他 HTTP/SOCKS5 代理软件。
+这是 v4 的正式稳定版本，面向常驻 Mac mini 和低功耗 Linux 小主机。Switch、PS5、Apple TV、iPhone、Android 和电视无需安装代理 App，只需配置静态 IP、网关和 DNS，即可共享宿主机现有的 Clash、Mihomo、sing-box 或其他 HTTP/SOCKS5 代理。
 
-## 本次修复
+## 小白接入体验
 
-- 修复 HTTP CONNECT 重复发送 `Host` 请求头的问题。部分 mixed 代理端口此前会直接关闭连接，日志表现为 `unexpected EOF`，导致局域网设备无法访问互联网。
-- 修复标准 `200 Connection established` 成功响应没有消息体时，gateway 错误关闭响应对象并连带关闭代理隧道的问题。
-- HTTP 代理出口已使用 PigLite mixed 端口完成真实 TLS 握手和局域网设备验证。
-- 保留 v4.0.2 的长连接修复：YouTube 等视频连接不会再被固定两分钟超时强制中断。
-- 保留 Go 优化的 TCP 数据复制路径，Linux 可继续使用零拷贝 `splice`。
+- `gateway status` 和终端菜单现在直接按设备页面逐项打印配置，不再只给一个抽象的“本机 IP”。
+- 自动给出同网段设备 IP 建议值，默认优先使用 `.112`，并避开 gateway 电脑和路由器地址。
+- 输出完整包含：手动/静态 IP、设备 IP、子网掩码、Android 前缀长度、网关、DNS 设置、首选/备用 DNS、设备代理和 Android 私人 DNS。
+- 明确只有“设备 IP”是手机或游戏机自己的地址且每台不同；网关和两个 DNS 都填 gateway 电脑 IP。
+- 推荐 IP 只是建议值，使用前仍需确认未占用，建议在路由器中固定。
 
-## 文档与实际设备验证
+## README 与设备教程
 
-- README 新增 PC 直连代理、手机经过 gateway 的 Fast.com 对比截图。
-- 新增 Nintendo Switch 网络测试与通过旁路由访问 YouTube 的实机截图。
-- 修正手机与 PlayStation 配置文档中的 DNS、NAT 和分流说明。
-- 明确 gateway 与第三方代理均不需要开启 TUN。
-- gateway 不提供节点、订阅、流媒体解锁或分流规则；YouTube、Googlevideo 等流量最终走哪个节点，由第三方代理软件决定。
+- README 重新按“准备、安装、设备配置、代理出口、验证”组织，新用户可以从顶部直接完成接入。
+- 新增带标注的 Nintendo Switch 与 Android 静态网络设置实图。
+- 加入可直接复制给 Codex、Claude Code 等终端 AI 的 Prompt，让 AI 自动检查、安装、启动并输出填写清单。
+- 新增 Clash Verge 同机示例：地址通常为 `127.0.0.1`，端口示例为 `7897`，实际值必须以代理软件界面为准。
+- 统一 Switch、PS5、手机、电视、Apple TV 和 FAQ 的 DNS 说明，删除旧文档中的冲突配置。
+- 修复 README 中 Star History 动态图片报错导致的破图，改用 GitHub Stargazer 数据生成仓库内曲线图，并保留在线入口。
+
+## 稳定性说明
+
+- 网络转发核心沿用已完成真实局域网验证的 v4.0.3：HTTP CONNECT 隧道、长连接和 Linux 零拷贝路径保持不变。
+- 代理模式继续拒绝 QUIC（UDP/443），让浏览器和 YouTube 回退到可代理的 TCP；gateway 与第三方代理均无需开启 TUN。
+- gateway 不提供节点、订阅或流媒体解锁，最终速度和可用性由第三方代理软件的节点及分流规则决定。
 
 ## 升级说明
 
-### 从 v4.0.0 / v4.0.1 / v4.0.2 升级
+### 从任意 v4.0.x 升级
 
 可直接执行：
 
 ```bash
-sudo gateway update v4.0.3
+gateway update v4.0.4
 ```
 
-现有 v4 配置可以继续使用。升级后建议执行 `sudo gateway restart`，确保旧进程和长连接全部切换到新版本。
+现有 v4 配置可以继续使用。升级后建议执行 `sudo gateway restart`，再运行 `gateway status` 查看新的设备填写清单。
 
 ### 从 v3 升级
 

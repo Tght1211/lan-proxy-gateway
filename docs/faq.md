@@ -4,7 +4,7 @@
 > 按顺序检查：① `gateway status` 确认 running=true；② 设备的**网关和 DNS 都**填了电脑的 IP（只改网关不改 DNS 等于没接入）；③ 设备 IP 前三段和电脑一致（如都是 `192.168.1.x`）；④ `sudo gateway restart` 重启一次；⑤ 看 `~/.config/lan-proxy-gateway/gateway.log` 有没有报错（比如 53 端口被占）。
 
 **Q：只改网关不改 DNS 行不行？**
-> 不建议。按设备接入参数把网关和 DNS 1 都填成本机 IP，DNS 2 留空，能避免不同设备对自动 DNS 的处理差异。默认不会劫持设备发往其他 DNS 的查询。
+> 不建议。按 `gateway status` 打印的设备参数，把网关、DNS 1 和 DNS 2 都填成本机 IP；设备不允许两个 DNS 重复时，DNS 2 才留空。默认不会劫持设备发往其他 DNS 的查询。
 
 **Q：配了上游代理，国外网站还是慢？**
 > 那是上游代理的节点问题，跟本工具无关——去你的 clash / sing-box 里换节点。本工具只负责把流量原样送过去。

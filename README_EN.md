@@ -5,7 +5,9 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)]()
 [![License](https://img.shields.io/github/license/Tght1211/lan-proxy-gateway)](LICENSE)
 
-Turn an always-on macOS/Linux computer into a LAN bypass gateway, and manage the host's macOS system proxy. The intended hosts are low-power Mac mini and small Linux computers with an existing Clash/sing-box service locally or elsewhere on the LAN.
+Turn a Mac mini or small Linux computer into a LAN gateway. Switch, PS5, Apple TV, iPhone, and other devices can share an existing Clash/sing-box proxy without installing proxy apps: configure only a static IP, gateway, and DNS.
+
+The project targets low-power, always-on computers and can also manage the host's macOS system proxy. It reuses an existing Clash, Mihomo, or sing-box service locally or elsewhere on the LAN; it does not provide proxy nodes.
 
 The project intentionally has two responsibilities:
 
@@ -121,7 +123,7 @@ gateway status
 
 ```
 
-On each LAN device, set both Gateway/Router and DNS 1 to the gateway host's LAN IPv4 address. Leave DNS 2 empty. Disable Private DNS on Android/ColorOS.
+Use a manual/static address on each LAN device. The device IP must be an unused address in the same subnet and must differ between devices. Set Gateway/Router, DNS 1, and DNS 2 to the gateway host's LAN IPv4 address; leave DNS 2 empty only when the device rejects duplicate values. Use prefix length `24` on Android (`255.255.255.0` elsewhere), disable Private DNS, and leave the device-level proxy disabled. Treat the IP suggested by `gateway status` as a recommendation and reserve or verify it before use.
 
 Proxy mode uses fake-IP so the relay can pass original domains to Clash/sing-box for resolution and rule matching. DNS queries sent to other resolvers are not hijacked. UDP/443 is rejected so browsers fall back to TCP, while other UDP remains direct. This setup does not require TUN mode in gateway or the third-party proxy.
 
@@ -151,4 +153,6 @@ See [docs/commands.md](docs/commands.md) and [docs/architecture.md](docs/archite
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Tght1211/lan-proxy-gateway&type=Date)](https://star-history.com/#Tght1211/lan-proxy-gateway&Date)
+[![Star History Chart](docs/images/star-history.svg)](https://star-history.com/#Tght1211/lan-proxy-gateway&Date)
+
+[Open the online Star History](https://star-history.com/#Tght1211/lan-proxy-gateway&Date). The embedded repository-local chart is generated from GitHub Stargazer data so a third-party image outage cannot leave the README broken.

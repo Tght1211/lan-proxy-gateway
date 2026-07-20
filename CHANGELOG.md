@@ -1,5 +1,21 @@
 # Changelog
 
+## v4.0.4 - 2026-07-21
+
+### Device onboarding
+
+- Added a same-subnet device IP recommendation to `gateway status`, preferring `.112` while avoiding the gateway host and router addresses.
+- Changed terminal guidance to mirror device network fields: manual/static IP, subnet mask, Android prefix length, gateway/router, both DNS fields, device proxy, and Android Private DNS.
+- Clarified that the device IP is unique per device while gateway and DNS all use the gateway host address.
+
+### Documentation
+
+- Reorganized the README around prerequisites, installation, first-time setup, proxy configuration, and verification.
+- Added annotated Nintendo Switch and Android network-setting screenshots.
+- Added a copy-ready prompt for terminal-capable AI tools to install, configure, verify, and print device settings safely.
+- Unified DNS guidance across Switch, PS5, phones, TVs, Apple TV, and the FAQ.
+- Replaced the failing dynamic Star History image with a repository-local chart generated from GitHub Stargazer data.
+
 ## v4.0.3 - 2026-07-21
 
 ### Fixed
