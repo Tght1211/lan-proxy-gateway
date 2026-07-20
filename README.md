@@ -1,5 +1,10 @@
 # LAN Proxy Gateway
 
+[![Release](https://img.shields.io/github/v/release/Tght1211/lan-proxy-gateway)](https://github.com/Tght1211/lan-proxy-gateway/releases)
+[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev/)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)]()
+[![License](https://img.shields.io/github/license/Tght1211/lan-proxy-gateway)](LICENSE)
+
 把常驻的 macOS/Linux 电脑变成局域网旁路由，并在 macOS 上管理本机系统代理。典型宿主机是低功耗 Mac mini 或迷你 Linux 主机，且本机或局域网内已有 Clash/sing-box 等代理服务。
 
 项目只保留两条主线：
@@ -27,6 +32,52 @@ English: [README_EN.md](README_EN.md)
 - 希望项目自身提供代理线路、订阅解析、节点选择或规则分流。
 - 希望部署在 Windows、普通路由器或 OpenWrt 上。
 - 需要代理游戏、语音等 UDP 流量，或需要 IPv6 透明代理。
+
+## 工作流程
+
+```mermaid
+flowchart LR
+    subgraph LAN[局域网设备]
+        PHONE[手机 / 平板]
+        TV[电视 / Apple TV]
+        GAME[Switch / PS5]
+    end
+
+    subgraph HOST[常驻 Mac mini / Linux 小主机]
+        DNS[DNS 服务<br/>代理模式返回 fake-IP]
+        FW[pf / iptables<br/>捕获转发 TCP]
+        RELAY[透明 TCP Relay<br/>还原原始域名]
+    end
+
+    PROXY[外部代理软件<br/>Clash / Mihomo / sing-box]
+    RULES[代理软件负责<br/>节点与分流规则]
+    NET[互联网]
+
+    LAN -->|网关 + DNS 指向宿主机| DNS
+    LAN --> FW --> RELAY
+    DNS -. fake-IP 与域名映射 .-> RELAY
+    RELAY -->|SOCKS5 / HTTP CONNECT| PROXY
+    PROXY --> RULES --> NET
+```
+
+```mermaid
+sequenceDiagram
+    participant D as 局域网设备
+    participant G as gateway
+    participant P as Clash / sing-box
+    participant I as 目标网站
+
+    D->>G: 查询 www.youtube.com
+    G-->>D: 返回 fake-IP
+    D->>G: 连接 fake-IP:443
+    G->>G: 恢复域名 www.youtube.com
+    G->>P: SOCKS5/HTTP CONNECT + 域名
+    P->>P: 应用节点和分流规则
+    P->>I: 建立出口连接
+    I-->>D: TCP 响应经原路径返回
+```
+
+gateway 不提供代理线路，也不判断哪些网站应该走哪个节点；它只确保局域网 TCP 和原始域名可靠地交给现有代理软件。
 
 ## 从 v3 升级到 v4
 
@@ -139,3 +190,7 @@ gateway update [version]         # 完整重构迁移，执行前会提示确认
 ## License
 
 [MIT](LICENSE) © 2025-2026 [Tght1211](https://github.com/Tght1211)
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Tght1211/lan-proxy-gateway&type=Date)](https://star-history.com/#Tght1211/lan-proxy-gateway&Date)
