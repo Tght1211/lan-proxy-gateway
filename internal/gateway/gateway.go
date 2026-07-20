@@ -1,27 +1,35 @@
 // Package gateway owns the main feature: turning this host into a LAN gateway.
 //
-// It wraps the OS-specific bits (IP forwarding, NAT, interface detection) behind
-// a small high-level API so callers just say "Enable()" / "Disable()" without
-// needing to know about sysctl/iptables/netsh.
+// It orchestrates IP forwarding (via internal/platform) and the firewall rule
+// set (via internal/firewall) behind a small high-level API, and persists a
+// runtime state file so a later `gateway stop` process only rolls back what
+// we actually changed (issue #5 lesson: never slam ip_forward back to 0 if
+// the user had it on before us).
 package gateway
 
 import (
-	"errors"
 	"fmt"
 
+	"github.com/tght/lan-proxy-gateway/internal/firewall"
 	"github.com/tght/lan-proxy-gateway/internal/platform"
 )
 
 // Gateway represents the LAN-gateway subsystem.
 type Gateway struct {
 	plat      platform.Platform
+	fw        firewall.Manager
 	info      platform.NetworkInfo
-	statePath string // 可选；空字符串表示不写状态文件（测试或老调用方）
+	statePath string // 可选；空字符串表示不写状态文件（测试）
 }
 
-// New creates a Gateway bound to the current platform.
+// New creates a Gateway bound to the current platform and firewall backend.
 func New() *Gateway {
-	return &Gateway{plat: platform.Current()}
+	return &Gateway{plat: platform.Current(), fw: firewall.New()}
+}
+
+// newForTest injects fakes.
+func newForTest(plat platform.Platform, fw firewall.Manager) *Gateway {
+	return &Gateway{plat: plat, fw: fw}
 }
 
 // SetStatePath 让 app 层把 runtime.state 的位置交给 gateway。
@@ -43,19 +51,19 @@ func (g *Gateway) Detect() error {
 	return nil
 }
 
-// Enable turns on IP forwarding and, where applicable, NAT / pf-redirect rules.
-//
-// mode selects the gateway strategy:
-//   - "tun" (default): IP forward + NAT; mihomo TUN handles traffic capture.
-//   - "forward": IP forward + pf/iptables redirect forwarded TCP to redirPort;
-//     host traffic stays untouched.
-//
-// redirPort is only used in "forward" mode (mihomo's redir-port).
-func (g *Gateway) Enable(mode string, redirPort int) error {
+// Enable turns on IP forwarding and applies the firewall rule set
+// (idempotent full-sync; safe to re-run for live reconfiguration).
+func (g *Gateway) Enable(fwCfg firewall.Config) error {
 	if g.info.Interface == "" {
 		if err := g.Detect(); err != nil {
 			return fmt.Errorf("detect network: %w", err)
 		}
+	}
+	if fwCfg.Iface == "" {
+		fwCfg.Iface = g.info.Interface
+	}
+	if fwCfg.GatewayIP == "" {
+		fwCfg.GatewayIP = g.info.IP
 	}
 	priorForward, _ := g.plat.IPForwardEnabled()
 	existing, _ := readRuntimeState(g.statePath)
@@ -64,71 +72,42 @@ func (g *Gateway) Enable(mode string, redirPort int) error {
 		return fmt.Errorf("enable IP forwarding: %w", err)
 	}
 
-	if mode == "forward" {
-		// Best-effort: on Linux, pf/iptables redirect enables redir-port based
-		// transparent proxy. On macOS redir-port is not supported by mihomo,
-		// so we skip and fall back to TUN with bypass_local.
-		if err := g.plat.ConfigurePFRedirect(g.info.Interface, redirPort); err != nil && !errors.Is(err, platform.ErrNotSupported) {
-			return fmt.Errorf("configure pf redirect: %w", err)
-		}
-	}
-	if err := g.plat.ConfigureNAT(g.info.Interface); err != nil {
-		return fmt.Errorf("configure NAT: %w", err)
+	report, err := g.fw.Apply(fwCfg)
+	if err != nil {
+		return fmt.Errorf("apply firewall rules: %w", err)
 	}
 
 	state := runtimeState{
-		NATInterface:       g.info.Interface,
+		Iface:              g.info.Interface,
 		WeEnabledIPForward: existing.WeEnabledIPForward || !priorForward,
-		GatewayMode:        mode,
+		WeEnabledPF:        existing.WeEnabledPF || report.WeEnabledPF,
+		FirewallApplied:    true,
 	}
 	_ = writeRuntimeState(g.statePath, state)
 	return nil
 }
 
-// Disable is the inverse of Enable, best-effort.
-//
-// Order matters:
-//  1. UnconfigureNAT — remove the MASQUERADE rule we added in Enable
-//  2. DisableIPForward — only if state says we were the ones who flipped it
-//  3. PostStopCleanup — scrub leftover TUN strict-route ip rules from
-//     mihomo (Linux only, no-op elsewhere). Issue #5: mihomo killed
-//     by SIGKILL leaves `pref 9000+ from all unreachable` rules behind
-//     which can break Docker DNAT for non-port-preserving port mappings.
-//
-// issue #5 关键修复：之前 Disable() 一律 DisableIPForward() 把 ip_forward 打回 0，
-// 把那些 gateway start 之前就已经在用 ip_forward=1 的 docker 用户撞断了
-// （局域网访问 docker 暴露的端口立刻超时）。现在只有 state 文件里记着"是我们打开的"
-// 才回退，原本就是 1 的保持 1 不动。
-//
-// 另一个修复：原本 Disable() 在 g.info.Interface=="" 时直接跳过 UnconfigureNAT。
-// 但 `gateway stop` 是独立进程，info 一直是空的 → MASQUERADE 永远删不掉，留尾。
-// 现在优先用 state 里的 NATInterface，再 fallback 到 Detect()。
+// Disable is the inverse of Enable, best-effort: remove our firewall rules,
+// restore ip_forward only if we flipped it, disable pf only if we enabled it.
 func (g *Gateway) Disable() error {
 	state, _ := readRuntimeState(g.statePath)
 
-	if state.GatewayMode == "forward" {
-		_ = g.plat.UnconfigurePFRedirect()
-	}
-
-	iface := state.NATInterface
-	if iface == "" && g.info.Interface != "" {
-		iface = g.info.Interface
-	}
-	if iface == "" {
-		if err := g.Detect(); err == nil {
-			iface = g.info.Interface
-		}
-	}
-	if iface != "" {
-		_ = g.plat.UnconfigureNAT(iface)
+	var fwErr error
+	if state.FirewallApplied || state.Iface != "" {
+		fwErr = g.fw.Remove()
 	}
 
 	var disableErr error
 	if state.WeEnabledIPForward {
 		disableErr = g.plat.DisableIPForward()
 	}
-	_ = g.plat.PostStopCleanup()
+	if state.WeEnabledPF {
+		_ = firewall.DisablePF()
+	}
 	_ = removeRuntimeState(g.statePath)
+	if fwErr != nil {
+		return fwErr
+	}
 	return disableErr
 }
 

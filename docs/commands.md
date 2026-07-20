@@ -1,125 +1,61 @@
-# 完整命令说明
+# 命令说明
 
-## 常用起步命令
+## 控制面板
 
-| 命令 | 说明 | 需要管理员权限 |
-|---|---|:---:|
-| `gateway install` | 初始化向导: 下载 mihomo、录入订阅、生成配置文件 | 否 |
-| `gateway config` | 交互式配置中心: 代理来源 / 局域网共享 / 规则 / 扩展 | 否 |
-| `gateway config show` | 查看当前配置摘要 | 否 |
-| `sudo gateway start` | 启动网关，并默认进入菜单式 CLI 控制台 | 是 |
-| `sudo gateway console` | 不重启网关，重新进入菜单式 CLI 控制台 | 是 |
-| `sudo gateway stop` | 停止网关 | 是 |
-| `sudo gateway restart` | 重启网关，并默认回到菜单式 CLI 控制台 | 是 |
-| `gateway status` | 查看运行状态、入口节点、普通出口、住宅出口 | 否 |
+`sudo gateway` 不带参数时打开静态控制面板。启停旁路由和修改 macOS 系统代理需要管理员权限：
 
-## 运行中控制台
+```text
+1  启动/停止旁路由
+2  设置代理（SOCKS5 / HTTP / 直连）
+3  查看设备参数
+4  查看最近日志
+Q  退出
+```
 
-`gateway start` 在交互终端中成功启动后，会直接进入菜单式 CLI 控制台。启动后先看到首页菜单，再按编号进入各个工作台。
+面板只有一层菜单：生命周期按当前状态直接启停，日志只显示最近 40 行。它不自动刷新，也不包含流量图、设备列表、连接表或 DNS 高级设置。
 
-支持:
-
-- 首页菜单: 运行状态、节点、订阅、网络、规则、扩展、配置中心、日志、升级提示
-- 节点工作台: 进入后会展示每个节点延时，支持 `T` 主动重测一遍并按低延时排序
-- 订阅 / 代理来源工作台: 新建、切换、重命名订阅，或调整 url / file 来源
-- 网络工作台: 切换 TUN、本机绕过代理
-- 规则工作台: 切换局域网直连、国内直连、Apple、Nintendo、国外代理、广告拦截
-- 扩展工作台: 管理 `chains / script / off`、chains 的 `rule / global`、住宅代理和机场出口组
-- 完整配置中心: 仍可通过菜单打开 `gateway config`
-- 旧版 `--tui` 入口已移除；如果仍传入会直接提示改用默认控制台
-
-这让它更像一个持续运行的 CLI 系统，而不是“一次性打印信息就退出”的命令。
-
-## 配置与切换
-
-| 命令 | 说明 |
-|---|---|
-| `gateway switch` | 查看当前代理来源和扩展模式 |
-| `gateway switch url` | 切换到订阅链接模式 |
-| `gateway switch file /path/to/config.yaml` | 切换到本地 Clash / mihomo 配置文件模式 |
-| `gateway switch extension` | 查看当前扩展模式 |
-| `gateway switch extension chains` | 启用内置链式代理 |
-| `gateway switch extension script /path/to/script.js` | 启用 JS 扩展脚本 |
-| `gateway switch extension off` | 关闭扩展模式 |
-| `gateway chains` | 打开链式代理向导 |
-| `gateway chains status` | 查看链式代理当前配置 |
-| `gateway chains disable` | 关闭链式代理模式 |
-
-## 局域网共享 / TUN / 本机绕过
-
-| 命令 | 说明 |
-|---|---|
-| `gateway tun on` | 开启 TUN 透明代理模式 |
-| `gateway tun off` | 关闭 TUN 模式 |
-
-现在更推荐直接通过 `gateway config` 来统一调整:
-
-- `runtime.tun.enabled`
-- `runtime.tun.bypass_local`
-- 运行端口
-- API 密钥
-
-其中 `bypass_local` 的用途是:
-
-- 当前这台电脑自己尽量不走科学上网
-- 局域网其他设备继续通过它共享网关能力
-
-## 策略组与节点切换
-
-有两种方式:
-
-1. Web 面板: `http://你的局域网IP:9090/ui`
-2. 菜单式 CLI 控制台:
-   - 启动网关
-   - 进入 `节点与策略组`
-   - 选择节点分组
-   - 查看每个节点延时；如需主动刷新，输入 `T`
-   - 按延时排序后选择节点并回车切换
-
-这让它更接近一个 CLI 版的 Clash Verge Rev 工作台。
-
-## 健康检查与维护
-
-| 命令 | 说明 | 需要管理员权限 |
-|---|---|:---:|
-| `sudo gateway health` | 健康检查；异常时尝试修复 | 是 |
-| `sudo gateway update` / `sudo gateway update latest` | 升级到最新版本，自动尝试镜像下载 | 是 |
-| `sudo gateway update v3.4.3` | 更新或回退到指定版本；也可写 `3.4.3` | 是 |
-| `gateway permission print` | 打印 sudoers 配置片段 | 否 |
-| `sudo gateway permission install` | 安装免密控制规则，之后可普通权限触发自动提权 | 是 |
-| `gateway permission status` | 查看权限控制状态 | 否 |
-
-## 服务管理
-
-| 命令 | 说明 | 需要管理员权限 |
-|---|---|:---:|
-| `sudo gateway service install` | 安装开机自启；Windows 下底层使用计划任务 | 是 |
-| `sudo gateway service uninstall` | 卸载开机自启 | 是 |
-
-## AI Skill
-
-| 命令 | 说明 |
-|---|---|
-| `gateway skill` | 查看可供 AI 客户端安装的 skill 信息 |
-| `gateway skill path` | 输出 skill 目录路径 |
-
-skill 的目标是让 AI 客户端能直接按场景调用这个系统，例如:
-
-- 开通局域网共享
-- 配置 chains
-- 切换策略组
-- 打开本机绕过
-- 做健康检查和日志排障
-
-## 全局参数
-
-| 参数 | 说明 | 默认值 |
-|---|---|---|
-| `--config <路径>` | 指定配置文件路径 | `./gateway.yaml` |
-| `--data-dir <路径>` | 指定运行数据目录 | `./data` |
-
-示例:
+## 旁路由生命周期
 
 ```bash
-sudo gateway start --config /etc/gateway/gateway.yaml --data-dir /var/lib/gateway
+sudo gateway install             # 初始化、启动、可选安装系统服务
+sudo gateway start               # 启动后台守护进程
+sudo gateway start --foreground  # 前台运行
+sudo gateway restart
+sudo gateway stop
+gateway status [--json]
 ```
+
+守护进程日志位于 `~/.config/lan-proxy-gateway/gateway.log`。启动需要管理员权限，因为程序需要启用 IPv4 转发、监听 53 端口并配置 pf/iptables。
+
+## macOS 系统代理
+
+```bash
+gateway system-proxy status [--json]
+gateway system-proxy on --type socks5 --host 127.0.0.1 --port 7897
+gateway system-proxy on --type http --host 127.0.0.1 --port 7897
+gateway system-proxy off
+```
+
+这些命令通过 `networksetup` 修改 macOS 网络服务。HTTP 模式同时设置 HTTP 和 HTTPS 代理；启用 HTTP 或 SOCKS5 时会关闭另一种模式，并把同一地址同步为旁路由上游。执行 `off` 时旁路由切回直连。
+
+是否能访问特定外网取决于该地址背后的代理服务和节点。gateway 不实现规则或节点选择。
+
+## 开机自启
+
+```bash
+sudo gateway service install
+sudo gateway service uninstall
+gateway service status
+```
+
+macOS 使用 launchd，Linux 使用 systemd。
+
+## 更新与重构迁移
+
+```bash
+gateway update              # 推荐：下载阶段保留当前用户的代理环境
+sudo gateway update         # 也可用，但 sudo 可能清除 HTTP_PROXY/HTTPS_PROXY
+gateway update --yes        # 自动化场景，确认并跳过迁移询问
+```
+
+当前版本是完整重构。更新命令会先明确提示：mihomo、订阅、节点、规则集、WebUI 和旧控制台已移除；旧配置会备份，升级后需要重新初始化。未确认时不会下载或替换二进制。

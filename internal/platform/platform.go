@@ -1,6 +1,6 @@
 // Package platform hides the OS differences behind a single interface.
 //
-// Each platform file (darwin/linux/windows) implements Platform. Callers
+// Each platform file (darwin/linux) implements Platform. Callers
 // (gateway layer, engine, cobra commands) never touch OS specifics directly.
 package platform
 
@@ -22,39 +22,24 @@ type NetworkInfo struct {
 }
 
 // Platform is the OS-specific runtime facade.
+// Firewall/NAT rules are owned by internal/firewall, not this interface.
 type Platform interface {
 	// Network
 	DetectNetwork() (NetworkInfo, error)
 	EnableIPForward() error
 	DisableIPForward() error
 	IPForwardEnabled() (bool, error)
-	ConfigureNAT(iface string) error
-	UnconfigureNAT(iface string) error
-
-	// PF/iptables redirect for "forward" gateway mode: only intercept
-	// forwarded traffic from other LAN devices, leaving host traffic alone.
-	ConfigurePFRedirect(iface string, redirPort int) error
-	UnconfigurePFRedirect() error
-
-	// PostStopCleanup runs after the mihomo engine has been signaled to stop.
-	// Defensive cleanup for OS state mihomo may have left behind when killed
-	// abruptly (SIGKILL after grace timeout, crash, OOM). On Linux this scrubs
-	// any leftover TUN strict-route ip rules whose pref looks like mihomo's
-	// signature (high pref + unreachable action). No-op on darwin / windows.
-	// Best-effort: errors are returned but callers usually log and continue.
-	PostStopCleanup() error
 
 	// Process plumbing
-	ResolveMihomoPath(preferred string) (string, error)
 	IsAdmin() (bool, error)
 
-	// Service lifecycle (M1: implemented on darwin; stubs on linux/windows)
+	// Service lifecycle
 	InstallService(binPath string) error
 	UninstallService() error
 	ServiceStatus() (string, error)
 
 	// 本机系统 DNS：把跑 gateway 这台电脑的系统 DNS 切到 127.0.0.1，
-	// 好让本机浏览器 / App 的域名查询走 mihomo（否则 DomainSuffix 规则对本机无效）。
+	// 好让本机的域名查询也走 gateway 自己的 DNS 服务。
 	// 返回错误或 ErrNotSupported。
 	SetLocalDNSToLoopback() error
 	RestoreLocalDNS() error
@@ -62,7 +47,7 @@ type Platform interface {
 }
 
 // Current returns the Platform for the running OS.
-// Concrete implementations are in platform_{darwin,linux,windows}.go.
+// Concrete implementations are in platform_{darwin,linux}.go.
 func Current() Platform {
 	return current()
 }

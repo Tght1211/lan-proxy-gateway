@@ -1,159 +1,141 @@
 # LAN Proxy Gateway
 
-[![Release](https://img.shields.io/github/v/release/Tght1211/lan-proxy-gateway)](https://github.com/Tght1211/lan-proxy-gateway/releases)
-[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev/)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)]()
-[![License](https://img.shields.io/github/license/Tght1211/lan-proxy-gateway)](LICENSE)
+把常驻的 macOS/Linux 电脑变成局域网旁路由，并在 macOS 上管理本机系统代理。典型宿主机是低功耗 Mac mini 或迷你 Linux 主机，且本机或局域网内已有 Clash/sing-box 等代理服务。
 
-> **把一台电脑变成整屋的代理网关** —— 一台机器配好代理，整屋设备（手机 / Switch / PS5 / Apple TV / 智能电视）一起用，**不用每台都装代理 App**。
+项目只保留两条主线：
 
-中文菜单 · 一键安装 · 实时终端面板。基于 [mihomo](https://github.com/MetaCubeX/mihomo)（Clash.Meta）。English: [README_EN.md](README_EN.md)
+- **旁路由**：LAN 设备把网关和 DNS 指向本机，TCP 流量可直连或转发到一个 HTTP/SOCKS5 上游。
+- **macOS 系统代理**：开启或关闭系统 HTTP+HTTPS / SOCKS5 代理。
 
-```mermaid
-flowchart LR
-    subgraph LAN["🏠 家里局域网"]
-        direction TB
-        S[🎮 Switch / PS5 / Apple TV]
-        M[📱 iPhone / Android / 电视盒]
-        PC[💻 其他电脑]
-    end
-    GW["🖥️ 跑 gateway 的电脑<br/>mihomo · TUN · 规则分流"]
-    SRC["🌐 代理源<br/>订阅 / 本地配置 / 单点代理"]
-    LAN -- "改网关 或 设代理" --> GW --> SRC
+需要 VLESS、Trojan、订阅或规则分流时，请在本机运行 Clash、Mihomo 或 sing-box，再把它的 HTTP/SOCKS5 端口配置为上游。本项目不实现这些协议，也不管理节点和订阅。
 
-    style LAN fill:#fff5e6,stroke:#ff9900
-    style GW fill:#e6f3ff,stroke:#0066cc
-    style SRC fill:#e6ffe6,stroke:#00aa00
-```
+**是否能访问特定外网，完全取决于所配置的代理服务和节点。gateway 本身不提供代理线路。** 启用系统代理时，旁路由设备会复用同一个代理地址，流量规则全部由代理软件处理。
 
----
+English: [README_EN.md](README_EN.md)
 
-## ⚡ 3 分钟上手
+## 适合谁
 
-### 1. 安装
+适合：
+
+- 有一台长期在线、低功耗的 Mac mini 或迷你 Linux 主机。
+- 已经运行 Clash、Mihomo、sing-box，或局域网内已有可用的 HTTP/SOCKS5 代理端点。
+- 希望手机、电视、游戏机等设备只改网关和 DNS，就复用同一个代理软件出口。
+- 希望网关程序只负责稳定转发，不重复管理订阅、节点和规则。
+
+不适合：
+
+- 希望项目自身提供代理线路、订阅解析、节点选择或规则分流。
+- 希望部署在 Windows、普通路由器或 OpenWrt 上。
+- 需要代理游戏、语音等 UDP 流量，或需要 IPv6 透明代理。
+
+## 从 v3 升级到 v4
+
+v4 是完整重构，不是兼容性小升级。执行 `gateway update` 前请注意：
+
+- mihomo 内核、订阅、节点、规则集、WebUI、旧终端面板和 Windows 支持均已移除。
+- 旧 `gateway.yaml` 会备份为 `gateway.yaml.pre-v4.bak*`，首次运行 v4 时需要重新初始化。
+- 代理线路、节点和分流规则必须迁移到独立运行的 Clash、Mihomo 或 sing-box。
+- 建议先备份 `~/.config/lan-proxy-gateway/`，确认第三方代理的 HTTP/SOCKS5 地址和端口。
 
 ```bash
-# macOS / Linux
+gateway update
+```
+
+更新命令会显示上述迁移说明，并在确认前保持旧版本不变。
+
+## 安装
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.sh | bash
-
-# Windows（管理员 PowerShell）
-irm https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.ps1 | iex
 ```
 
-装完自动进入配置向导（问代理源 → 启动 → 问开机自启）。国内访问 GitHub 慢可设 `GITHUB_MIRROR=https://你的镜像/`，或在已跑着 Clash 的机器上 `export HTTP_PROXY=http://127.0.0.1:7897` 再跑。
-
-### 2. 启动
+也可以从源码构建：
 
 ```bash
-sudo gateway start     # macOS / Linux
-gateway start          # Windows（管理员终端，无需 sudo）
+make build
+sudo make install
 ```
 
-控制台会显示**本机 LAN IP**和**代理端口**，下一步要填的就是这两个。
+## 终端控制面板
 
-### 3. 接入设备
+```bash
+sudo gateway
+```
 
-| 你的设备 | 选哪种 | 填什么 |
-|---|---|---|
-| 🎮 **Switch / PS5 / Apple TV / 智能电视** | 改网关 *(仅 macOS / Linux)* | 网关 + DNS = gateway 电脑 IP |
-| 📱 **iPhone / Android / 浏览器** | 设代理 | HTTP 代理：`gateway IP : 17890` |
-| 💻 **本机也走规则** | TUN | 菜单开 TUN 自动生效；macOS 按 `L` 一键切 DNS |
+```text
+1  启动/停止旁路由（按当前状态直接执行）
+2  设置代理（SOCKS5 / HTTP / 直连）
+3  查看设备参数
+4  查看最近日志
+Q  退出
+```
 
-> ⚠️ **Windows 家用版限制**：没有 RRAS / ICS 受限，**改网关方式走不通**。所有设备只能走「设代理」方式；Switch / PS5 等不能设代理的设备**在 Windows 上无解**，请改用 Linux / macOS 主机或软路由。
+启动旁路由需要管理员权限；控制面板会给出对应的 `sudo gateway start` 提示。系统代理通过 macOS `networksetup` 配置，并同步为旁路由的上游出口。
 
-详细步骤（含 Switch/PS5/电视截图）：[docs/device-setup.md](docs/device-setup.md)
+## 旁路由
 
----
+首次初始化并启动：
 
-## ✨ 核心能力
+```bash
+sudo gateway install
+```
 
-| 能力 | 说明 |
+也可分步执行：
+
+```bash
+sudo gateway start
+gateway status
+sudo gateway stop
+```
+
+设置 LAN 设备网络参数：
+
+| 项目 | 值 |
 |---|---|
-| 🌐 **LAN 透明网关** | 设备改网关 + DNS 就接管（macOS/Linux）；不能改网关的设备走 HTTP 代理（全平台） |
-| 🔗 **三种代理源** | 机场订阅 URL / 本地 `.yaml` / 本机已在跑的 Clash 端口（二次代理）；本机单点上游仍支持 `17890` 共享和改网关透明代理 |
-| 🏠 **链式代理预设** | 一键「机场起飞 + 住宅 IP 落地」，AI 网站看到的是家庭宽带 ASN |
-| 📟 **实时终端面板** | 首页自动刷新（btop 风格）：网速柱状图 + 稳定性健康条 + 接入设备一屏看全；`/` 斜杠命令快速导航（`/status`、`/node`、`/source`…） |
-| 🤖 **脚本 / Agent 友好** | 全套无交互命令 `gateway config` / `gateway node` / `gateway status --json`，配 [`skills/lan-proxy-gateway-ops`](skills/lan-proxy-gateway-ops)，可被 Claude Code 等 agent 完整驱动 |
-| 🔐 **代理服务认证** | 局域网 HTTP/SOCKS5 `mixed-port` 可独立开关，并可选设置用户名 / 密码；TUN 透明代理可同时开启 |
-| ⚡ **代理源 supervisor** | 订阅/文件源异常时自动切直连保命；本机单点代理只监控端口，避免误切 |
-| 🎯 **规则系统** | 内置 LAN 直连 / 中国直连 / Apple / Nintendo / 广告拦截；自定义规则可指定 `Proxy` 或任意策略组，例如 AI 域名走住宅 IP、YouTube 继续走普通代理 |
-| 📊 **节点测速** | 切节点页面自动并发测延迟，按速度升序 |
-| 🗒️ **中文日志视图** | mihomo 英文日志翻译成中文（`🟡 TCP 直连 xxx → 超时`） |
+| IP 地址 | 当前局域网内未占用的静态地址 |
+| 网关 / 路由器 | 运行 gateway 的电脑局域网 IP |
+| DNS 1 | 与网关相同 |
+| DNS 2 | 留空；设备强制要求时填 DNS 1 |
 
----
+Android/ColorOS 还应关闭“私人 DNS”。默认 DNS 配置返回真实 IP，不劫持设备发往其他 DNS 的查询，这是实机兼容性更好的设置。
 
-## 🎯 适合谁
+启用系统代理后，旁路由的 TCP 也会转发到同一代理端口。UDP/443 会被拒绝以促使浏览器回退到 TCP，其他 UDP 仍直连。
 
-- 🎮 **想给 Switch / PS5 / Apple TV / 智能电视用代理**：这些设备没代理 App 可装，只能改网关。典型玩法：Switch 联机加速（Splatoon 3 / 马车 / 怪猎）、eShop / PSN 商店下载加速、Steam / Epic 下载加速
-- 📱 **iPhone / iPad 不想装 VPN App**：家里电脑做一台共享代理，手机 Wi-Fi 改下代理就能用
-- 👨‍👩‍👧 **全家多台设备共用一份订阅**：订阅只放在 gateway 这台，其他设备零配置接入
-- 🔁 **给 Clash Verge / V2RayN / Mihomo Party 补功能**：复用现有客户端的节点池，给它套上「链式代理 + 整屋 LAN 共享 + TUN 网关」三件套，原客户端不用换不用动
-
-完整玩法 + 流量路径图：[docs/scenarios.md](docs/scenarios.md)
-
----
-
-## 🆚 跟 Clash Verge 的「局域网共享」有啥区别
-
-| 项目 | Clash Verge LAN 共享 | LAN Proxy Gateway |
-|---|---|---|
-| 代理层级 | 应用层 HTTP 代理 | 网络层透明代理 + TUN |
-| 设备配置 | 每台填代理 IP:Port | 改网关 + DNS 即可（无代理设置的设备唯一解） |
-| Switch / PS5 / 电视 | 多数不支持代理设置 → 用不了 | ✅ 原生支持 |
-| App 是否能察觉 | 容易被探测 | 接近真路由器 |
-| 链式代理 | ❌ | ✅ 一键预设 |
-
----
-
-## 📚 文档导航
-
-**接入设备**
-
-- [device-setup.md](docs/device-setup.md) — 三种接入方式对比 + 详细步骤
-- [phone-setup.md](docs/phone-setup.md) · [switch-setup.md](docs/switch-setup.md) · [ps5-setup.md](docs/ps5-setup.md) · [appletv-setup.md](docs/appletv-setup.md) · [tv-setup.md](docs/tv-setup.md)
-
-**玩法 & 排错**
-
-- [scenarios.md](docs/scenarios.md) — 典型场景（含 AI 住宅 IP 链式代理招牌教程）
-- [faq.md](docs/faq.md) — 常见问题
-
-**命令 & 配置**
-
-- [commands.md](docs/commands.md) — 完整命令行 + 主菜单一览
-- [advanced.md](docs/advanced.md) — 配置文件 schema / 进阶调优
-
-**项目结构**
-
-- [architecture.md](docs/architecture.md) — 三层架构 / 跨平台实现 / 目录结构
-- [release-process.md](docs/release-process.md) · [versioning.md](docs/versioning.md)
-
----
-
-## 🔄 升级 / 回退
+## macOS 系统代理
 
 ```bash
-gateway update                 # 升级到最新（推荐：不预先 sudo）
-gateway update latest          # 同上，显式指定 latest
-gateway update v3.4.3          # 升级或回退到指定版本
+gateway system-proxy status
+gateway system-proxy on --type socks5 --host 127.0.0.1 --port 7897
+gateway system-proxy on --type http --host 127.0.0.1 --port 7897
+gateway system-proxy off
 ```
 
-> v3.4.9 起，推荐**不预先 sudo**：程序会自己在用户身份下完成版本查询和下载（保留你的 `HTTPS_PROXY` 等代理变量），再在替换二进制阶段请求 sudo。`sudo gateway update` 仍然可用，但 macOS 默认 sudoers 会剥掉代理变量，导致拉不到 GitHub。
+`http` 模式同时配置 HTTP 和 HTTPS Web Proxy；`socks5` 模式配置 SOCKS Firewall Proxy。启用一种模式时会关闭另一种模式，并同步旁路由出口；执行 `off` 时旁路由切回直连。
 
-第一次升到 v3.4.4 之前的版本，或没有 `gateway update` 子命令时，跑安装脚本即可（覆盖式安装，会保留 `gateway.yaml`）：
+## 常用命令
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.sh | sudo bash
+sudo gateway                    # 控制面板（启停和 macOS 代理需要管理员权限）
+sudo gateway install            # 初始化、启动、可选开机自启
+sudo gateway start|stop|restart
+gateway status [--json]
+gateway system-proxy status [--json]
+gateway system-proxy on --type socks5|http --host HOST --port PORT
+gateway system-proxy off
+gateway service install|uninstall|status
+gateway update [version]         # 完整重构迁移，执行前会提示确认
 ```
 
----
+详细命令见 [docs/commands.md](docs/commands.md)，实现结构见 [docs/architecture.md](docs/architecture.md)。
 
-## 📜 License
+## 范围
+
+- 旁路由支持 macOS 和 Linux，IPv4 TCP 为主。
+- macOS 使用 pf，Linux 使用 iptables。
+- 当前只支持 macOS 和 Linux，不提供 Windows 构建。
+- 不以普通路由器/OpenWrt 为部署目标；宿主机应是完整、常驻的电脑系统。
+- 不提供订阅、节点、规则集、WebUI、流量图表和 UDP 代理。
+
+## License
 
 [MIT](LICENSE) © 2025-2026 [Tght1211](https://github.com/Tght1211)
-基于 [mihomo](https://github.com/MetaCubeX/mihomo) 内核 + [metacubexd](https://github.com/MetaCubeX/metacubexd) 控制台。
-
-## ⭐ Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=Tght1211/lan-proxy-gateway&type=Date)](https://star-history.com/#Tght1211/lan-proxy-gateway&Date)
-
-觉得有用就点个 Star ⭐ 支持一下吧～

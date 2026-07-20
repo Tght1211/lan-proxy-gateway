@@ -76,64 +76,6 @@ func (linuxPlatform) IPForwardEnabled() (bool, error) {
 	return strings.TrimSpace(string(data)) == "1", nil
 }
 
-// ConfigureNAT adds an iptables MASQUERADE rule idempotently.
-func (linuxPlatform) ConfigureNAT(iface string) error {
-	if iface == "" {
-		return fmt.Errorf("empty interface name")
-	}
-	if !commandExists("iptables") {
-		return fmt.Errorf("iptables 未安装")
-	}
-	// Check if rule already exists.
-	check := exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-o", iface, "-j", "MASQUERADE")
-	if err := check.Run(); err == nil {
-		return nil // already present
-	}
-	_, err := run("iptables", "-t", "nat", "-A", "POSTROUTING", "-o", iface, "-j", "MASQUERADE")
-	return err
-}
-
-func (linuxPlatform) UnconfigureNAT(iface string) error {
-	if iface == "" {
-		return nil
-	}
-	_, _ = run("iptables", "-t", "nat", "-D", "POSTROUTING", "-o", iface, "-j", "MASQUERADE")
-	return nil
-}
-
-// ConfigurePFRedirect 在 Linux 上**未实现**：Linux iptables REDIRECT 的完整实现
-// （含 LOCAL 排除、comment 标记精准清理）原本是 Docker 部署任务的副产品。该用户
-// 选择移除 Docker 支持，所以这条路径回到 stub —— Linux 用户跑 forward 模式会拿
-// 到 ErrNotSupported，Gateway.Enable 会用 errors.Is 兜住并退化成只跑 mihomo
-// mixed-port + DNS，等价于 "代理服务" 模式。
-//
-// 想恢复真正的 Linux 透明旁路由，参见 git log 里 "Docker deployment" 这条 commit
-// 之前的实现。
-func (linuxPlatform) ConfigurePFRedirect(iface string, redirPort int) error {
-	return ErrNotSupported
-}
-
-func (linuxPlatform) UnconfigurePFRedirect() error {
-	return ErrNotSupported
-}
-
-func (linuxPlatform) ResolveMihomoPath(preferred string) (string, error) {
-	if preferred != "" {
-		if _, err := os.Stat(preferred); err == nil {
-			return preferred, nil
-		}
-	}
-	for _, p := range []string{"/usr/local/bin/mihomo", "/usr/bin/mihomo"} {
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
-	}
-	if p, err := exec.LookPath("mihomo"); err == nil {
-		return p, nil
-	}
-	return "", fmt.Errorf("未找到 mihomo，请先运行 `gateway install`")
-}
-
 func (linuxPlatform) IsAdmin() (bool, error) {
 	return os.Geteuid() == 0, nil
 }

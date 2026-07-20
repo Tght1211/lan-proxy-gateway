@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -44,6 +43,7 @@ var updateMirrors = []string{
 var (
 	updatePrefetchedAsset string
 	updatePrefetchedTag   string
+	updateConfirmed       bool
 )
 
 var updateCmd = &cobra.Command{
@@ -66,6 +66,7 @@ var updateCmd = &cobra.Command{
 func init() {
 	updateCmd.Flags().StringVar(&updatePrefetchedAsset, "prefetched-asset", "", "")
 	updateCmd.Flags().StringVar(&updatePrefetchedTag, "prefetched-tag", "", "")
+	updateCmd.Flags().BoolVarP(&updateConfirmed, "yes", "y", false, "确认完整重构迁移并跳过提示")
 	_ = updateCmd.Flags().MarkHidden("prefetched-asset")
 	_ = updateCmd.Flags().MarkHidden("prefetched-tag")
 }
@@ -88,13 +89,7 @@ func runUpdate(ctx context.Context, requested string) error {
 	}
 
 	admin, _ := platform.Current().IsAdmin()
-	if !admin && runtime.GOOS == "windows" {
-		color.Red("此操作需要管理员权限。")
-		color.Yellow("请关闭当前窗口，右键 PowerShell → 以管理员身份运行，再执行：")
-		fmt.Printf("  gateway update %s\n", requested)
-		return errors.New("admin required")
-	}
-	if admin && runtime.GOOS != "windows" && os.Getenv("SUDO_USER") != "" && proxyEnvMissing() {
+	if admin && os.Getenv("SUDO_USER") != "" && proxyEnvMissing() {
 		color.Yellow("提示：通过 sudo 启动会清除 HTTPS_PROXY 等代理变量。")
 		color.Yellow("如下载失败，请改用：gateway update %s（不要预先 sudo，程序会按需切换 sudo 并保留代理）。", requested)
 	}
@@ -136,6 +131,10 @@ func prepareUpdateBinary(ctx context.Context, requested string) (string, string,
 		color.Green("已是目标版本，无需更新")
 		return tag, "", nil
 	}
+	printMigrationNotice()
+	if !updateConfirmed && !askYesNo("确认已了解以上变化并继续更新吗？", false) {
+		return "", "", fmt.Errorf("已取消更新；旧版本仍保持不变")
+	}
 
 	asset, err := gatewayReleaseAsset(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
@@ -148,9 +147,7 @@ func prepareUpdateBinary(ctx context.Context, requested string) (string, string,
 	if err != nil {
 		return "", "", err
 	}
-	if runtime.GOOS != "windows" {
-		_ = os.Chmod(tmpPath, 0o755)
-	}
+	_ = os.Chmod(tmpPath, 0o755)
 	if out, err := exec.Command(tmpPath, "--version").Output(); err == nil {
 		if text := strings.TrimSpace(string(out)); text != "" {
 			color.Green("下载完成: %s", text)
@@ -163,12 +160,7 @@ func prepareUpdateBinary(ctx context.Context, requested string) (string, string,
 
 // installUpdateBinary 接管 stop / 替换 / restart，要求当前进程已具备 admin。
 func installUpdateBinary(ctx context.Context, target, tmpPath string) error {
-	keepTmp := false
-	defer func() {
-		if !keepTmp {
-			_ = os.Remove(tmpPath)
-		}
-	}()
+	defer os.Remove(tmpPath)
 
 	a, err := app.New()
 	if err != nil {
@@ -182,18 +174,6 @@ func installUpdateBinary(ctx context.Context, target, tmpPath string) error {
 	self, err := currentExecutablePath()
 	if err != nil {
 		return err
-	}
-
-	if runtime.GOOS == "windows" {
-		if err := scheduleWindowsSelfUpdate(self, tmpPath, wasRunning); err != nil {
-			return err
-		}
-		keepTmp = true
-		color.Green("更新已安排，当前进程退出后会自动替换二进制")
-		if wasRunning {
-			color.Green("替换完成后会自动重新启动 gateway")
-		}
-		return nil
 	}
 
 	color.Cyan("替换二进制 ...")
@@ -257,6 +237,14 @@ func proxyEnvMissing() bool {
 		}
 	}
 	return true
+}
+
+func printMigrationNotice() {
+	color.Yellow("\n重要：当前版本是完整架构重构，不是原地兼容升级。")
+	color.Yellow("  • 已移除 mihomo 内核、订阅、节点、规则集、WebUI 和旧终端面板")
+	color.Yellow("  • 旧 gateway.yaml 会备份，首次启动新版本时需要重新初始化")
+	color.Yellow("  • 新版本只做旁路由和系统代理；规则与节点交给 Clash/sing-box")
+	color.Yellow("  • 建议先备份 ~/.config/lan-proxy-gateway/，并确认代理端口可用\n")
 }
 
 func resolveUpdateTag(ctx context.Context, requested string) (string, error) {
@@ -402,11 +390,6 @@ func gatewayReleaseAsset(goos, goarch string) (string, error) {
 			return "", fmt.Errorf("不支持的架构: %s/%s", goos, goarch)
 		}
 		return fmt.Sprintf("gateway-%s-%s", goos, goarch), nil
-	case "windows":
-		if goarch != "amd64" {
-			return "", fmt.Errorf("不支持的架构: %s/%s", goos, goarch)
-		}
-		return "gateway-windows-amd64.exe", nil
 	default:
 		return "", fmt.Errorf("不支持的系统: %s", goos)
 	}
@@ -503,9 +486,6 @@ func downloadUpdateAsset(ctx context.Context, url string) (string, error) {
 }
 
 func updateTempPattern(goos string) string {
-	if goos == "windows" {
-		return "gateway-update-*.exe"
-	}
 	return "gateway-update-*"
 }
 
@@ -551,61 +531,4 @@ func copyFile(src, dst string) error {
 	defer out.Close()
 	_, err = io.Copy(out, in)
 	return err
-}
-
-func scheduleWindowsSelfUpdate(target, source string, restart bool) error {
-	scriptPath, err := writeWindowsUpdateScript(target, source, restart)
-	if err != nil {
-		return err
-	}
-	return exec.Command("cmd", "/C", scriptPath).Start()
-}
-
-func writeWindowsUpdateScript(target, source string, restart bool) (string, error) {
-	f, err := os.CreateTemp("", "gateway-update-*.cmd")
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	if _, err := io.WriteString(f, buildWindowsUpdateScript(target, source, restart)); err != nil {
-		return "", err
-	}
-	return f.Name(), nil
-}
-
-func buildWindowsUpdateScript(target, source string, restart bool) string {
-	restartLine := "rem gateway was not running before update"
-	if restart {
-		restartLine = `"%TARGET%" start >nul 2>&1 <nul`
-	}
-	return strings.Join([]string{
-		"@echo off",
-		"setlocal",
-		fmt.Sprintf(`set "TARGET=%s"`, escapeWindowsBatchValue(target)),
-		fmt.Sprintf(`set "SOURCE=%s"`, escapeWindowsBatchValue(source)),
-		`set "BACKUP=%TARGET%.bak"`,
-		`del /f /q "%BACKUP%" >nul 2>&1`,
-		`for /L %%I in (1,1,60) do (`,
-		`  move /Y "%TARGET%" "%BACKUP%" >nul 2>&1`,
-		`  if exist "%BACKUP%" goto replace`,
-		`  timeout /t 1 /nobreak >nul`,
-		`)`,
-		`exit /b 1`,
-		`:replace`,
-		`copy /Y "%SOURCE%" "%TARGET%" >nul 2>&1`,
-		`if errorlevel 1 goto rollback`,
-		`del /f /q "%SOURCE%" >nul 2>&1`,
-		restartLine,
-		`del /f /q "%BACKUP%" >nul 2>&1`,
-		`del /f /q "%~f0"`,
-		`exit /b 0`,
-		`:rollback`,
-		`move /Y "%BACKUP%" "%TARGET%" >nul 2>&1`,
-		`exit /b 1`,
-		"",
-	}, "\r\n")
-}
-
-func escapeWindowsBatchValue(value string) string {
-	return strings.ReplaceAll(value, "%", "%%")
 }

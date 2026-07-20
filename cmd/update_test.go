@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 	"time"
 )
@@ -85,7 +84,6 @@ func TestGatewayReleaseAsset(t *testing.T) {
 		{goos: "darwin", goarch: "amd64", want: "gateway-darwin-amd64"},
 		{goos: "linux", goarch: "arm64", want: "gateway-linux-arm64"},
 		{goos: "linux", goarch: "amd64", want: "gateway-linux-amd64"},
-		{goos: "windows", goarch: "amd64", want: "gateway-windows-amd64.exe"},
 	}
 	for _, tc := range cases {
 		got, err := gatewayReleaseAsset(tc.goos, tc.goarch)
@@ -104,6 +102,9 @@ func TestGatewayReleaseAssetRejectsUnsupported(t *testing.T) {
 	}
 	if _, err := gatewayReleaseAsset("freebsd", "amd64"); err == nil {
 		t.Fatal("expected unsupported os error")
+	}
+	if _, err := gatewayReleaseAsset("windows", "amd64"); err == nil {
+		t.Fatal("expected windows to be unsupported")
 	}
 }
 
@@ -136,37 +137,7 @@ func TestUpdateURLCandidatesUsesOverrideMirror(t *testing.T) {
 }
 
 func TestUpdateTempPattern(t *testing.T) {
-	if got := updateTempPattern("windows"); got != "gateway-update-*.exe" {
-		t.Fatalf("windows pattern = %q", got)
-	}
 	if got := updateTempPattern("darwin"); got != "gateway-update-*" {
 		t.Fatalf("unix pattern = %q", got)
-	}
-}
-
-func TestBuildWindowsUpdateScript(t *testing.T) {
-	script := buildWindowsUpdateScript(
-		`C:\Program Files\gateway\gateway.exe`,
-		`C:\Temp\gateway-update.exe`,
-		true,
-	)
-	wants := []string{
-		`set "TARGET=C:\Program Files\gateway\gateway.exe"`,
-		`set "SOURCE=C:\Temp\gateway-update.exe"`,
-		`move /Y "%TARGET%" "%BACKUP%"`,
-		`"%TARGET%" start >nul 2>&1 <nul`,
-	}
-	for _, want := range wants {
-		if !strings.Contains(script, want) {
-			t.Fatalf("script missing %q:\n%s", want, script)
-		}
-	}
-}
-
-func TestEscapeWindowsBatchValue(t *testing.T) {
-	got := escapeWindowsBatchValue(`C:\Users\%USERNAME%\gateway.exe`)
-	want := `C:\Users\%%USERNAME%%\gateway.exe`
-	if got != want {
-		t.Fatalf("escapeWindowsBatchValue() = %q, want %q", got, want)
 	}
 }

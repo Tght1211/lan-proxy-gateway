@@ -1,97 +1,44 @@
-# lan-proxy-gateway v2 配置文件
+# lan-proxy-gateway v4 配置文件
 # 所在目录: ~/.config/lan-proxy-gateway/gateway.yaml
-# 首次运行 `gateway` 会自动走 3 步向导生成本文件，通常无需手动编辑。
+# 首次运行 `gateway` 会自动走初始化向导生成本文件，通常无需手动编辑。
+#
+# v4 架构：设备把 网关+DNS 指向本机即接入；出口要么直连本机网络，
+# 要么走一个上游代理（socks5/http）。需要 VLESS/订阅等协议时，
+# 在本机跑 clash / sing-box，把它的本地端口填为上游代理即可。
 
-version: 2
+version: 4
 
-# ========== 【主功能】局域网网关 ==========
+# ========== 局域网网关 ==========
 gateway:
   enabled: true
-  # 网关模式（菜单 → 流量 → 6 切换）：
-  #
-  #   tun     = TUN 旁路由（默认，一键式旁路由是本项目卖点）
-  #     - Mac:    已做低干扰处理（不抢宿主机 53、不接管宿主机出向）；
-  #               LAN 设备需要把【网关 + DNS 都指向本机 IP】才能走代理
-  #               （只改网关不改 DNS 只会被当成普通 NAT，不走代理）
-  #     - Linux:  TUN 全局接管（少见，适合单机用户）
-  #
-  #   forward = 端口模式（零干扰宿主机）
-  #     - Mac/Win: TUN 完全关，宿主机网络栈纹丝不动；只服务能显式填代理
-  #                的设备：<本机IP>:<mixed_port>。投影仪等不能填代理的请回 tun
-  #     - Linux:   iptables PREROUTING REDIRECT 透明旁路由（LAN 设备改默认
-  #                网关即可），宿主机直连不受影响
-  mode: tun
-  tun:
-    # mode=tun 时必开；mode=forward 时此字段被 Effective 层强制忽略（TUN 关）。
-    enabled: true
-    # bypass_local: 仅 Linux TUN 模式有意义；Mac 上 TUN 永远是低干扰版本，此项无效。
-    bypass_local: false
-  dns:
-    # 开 = LAN 设备可以直接把 DNS 指向本机 IP，最省事（推荐）。
-    # 关 = LAN 设备 DNS 要单独设能用的地址（如 114.114.114.114 或路由器）。
-    # 端口 53 已被其它进程（Clash Verge 等）占用时，把这里关掉让对方接管。
-    # TUN 模式下关 DNS 会让 fake-ip 机制失效，劫持可能不完整。
-    enabled: true
-    port: 53
 
-# ========== 【副功能】流量控制 ==========
-traffic:
-  mode: rule               # rule | global | direct
-  adblock: true            # 任何模式下都生效
-  extras:
-    direct:                # 命中时走直连
-      - "DOMAIN-SUFFIX,corp.example.com"
-    proxy:                 # 命中时走代理
-      - "DOMAIN-SUFFIX,example-overseas.com"
-    reject:                # 命中时拦截
-      - "DOMAIN-SUFFIX,annoying-ads.example"
-  rulesets:
-    china_direct: true
-    apple: true
-    nintendo: true
-    global: true
-    lan_direct: true
-
-# ========== 【拓展功能】代理源 ==========
-source:
-  # 五选一:
-  #   external     本机已有代理端口（最简单，推荐已经在跑 Clash Verge 的用户）
-  #   subscription 机场订阅 URL
-  #   file         本地 Clash 配置文件
-  #   remote       远程单点 socks5/http 代理
-  #   none         不配置，所有流量走直连
-  type: external
-
-  external:
-    name: "本机已有代理"
-    server: 127.0.0.1
-    port: 7890
-    kind: http             # http / socks5
-
-  subscription:
-    url: "https://your-subscription-url-here"
-    name: subscription
-
-  file:
-    path: /path/to/clash-config.yaml
-
-  remote:
-    name: MyProxy
-    kind: socks5
-    server: "1.2.3.4"
-    port: 443
+# ========== 出口 ==========
+egress:
+  mode: direct             # direct | proxy
+  proxy:                   # mode=proxy 时使用；恰好一个上游
+    type: socks5           # socks5 | http
+    host: 127.0.0.1
+    port: 7897
     username: ""
     password: ""
 
-  script_path: ""          # 可选：goja 后处理脚本
-  profiles: []             # 可选：命名档案切换（M3）
-  current: ""
+# ========== DNS 服务 ==========
+dns:
+  enabled: true
+  port: 53
+  upstreams: ["223.5.5.5", "119.29.29.29"]
+  # 保守默认：返回真实 IP，且只响应设备主动发到网关的 DNS 查询。
+  fake_ip: false
+  hijack: false
+  # 追加不做 fake-ip 的域名后缀（内置: lan/local/localhost/internal/home.arpa）
+  fake_ip_filter: []
+
+# QUIC(UDP/443) 拦截：代理模式下拒绝 QUIC 迫使浏览器回退 TCP（否则 QUIC 直连绕过代理）
+quic_block: true
 
 # ========== Runtime（通常不用改）==========
 runtime:
-  ports:
-    mixed: 7890            # mihomo 监听的混合代理端口
-    redir: 7892
-    api: 9090              # mihomo REST API 端口
-  api_secret: ""
-  log_level: warning
+  redir_port: 17892        # 透明 TCP 转发监听端口
+  api_port: 19090          # 本机回环状态 API（配置热加载）
+  log_level: info
+  fake_ip_range: "198.18.0.0/16"

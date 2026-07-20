@@ -19,55 +19,60 @@ type consoleTestPlatform struct{}
 func (consoleTestPlatform) DetectNetwork() (platform.NetworkInfo, error) {
 	return platform.NetworkInfo{Interface: "en0", IP: "192.168.12.100"}, nil
 }
-func (consoleTestPlatform) EnableIPForward() error                   { return nil }
-func (consoleTestPlatform) DisableIPForward() error                  { return nil }
-func (consoleTestPlatform) IPForwardEnabled() (bool, error)          { return true, nil }
-func (consoleTestPlatform) ConfigureNAT(string) error                { return nil }
-func (consoleTestPlatform) UnconfigureNAT(string) error              { return nil }
-func (consoleTestPlatform) PostStopCleanup() error                   { return nil }
-func (consoleTestPlatform) ResolveMihomoPath(string) (string, error) { return "", nil }
-func (consoleTestPlatform) IsAdmin() (bool, error)                   { return true, nil }
-func (consoleTestPlatform) InstallService(string) error              { return nil }
-func (consoleTestPlatform) UninstallService() error                  { return nil }
-func (consoleTestPlatform) ServiceStatus() (string, error)           { return "", nil }
-func (consoleTestPlatform) SetLocalDNSToLoopback() error             { return nil }
-func (consoleTestPlatform) RestoreLocalDNS() error                   { return nil }
-func (consoleTestPlatform) LocalDNSIsLoopback() (bool, error)        { return false, nil }
-func (consoleTestPlatform) ConfigurePFRedirect(string, int) error    { return nil }
-func (consoleTestPlatform) UnconfigurePFRedirect() error             { return nil }
+func (consoleTestPlatform) EnableIPForward() error            { return nil }
+func (consoleTestPlatform) DisableIPForward() error           { return nil }
+func (consoleTestPlatform) IPForwardEnabled() (bool, error)   { return true, nil }
+func (consoleTestPlatform) IsAdmin() (bool, error)            { return true, nil }
+func (consoleTestPlatform) InstallService(string) error       { return nil }
+func (consoleTestPlatform) UninstallService() error           { return nil }
+func (consoleTestPlatform) ServiceStatus() (string, error)    { return "", nil }
+func (consoleTestPlatform) SetLocalDNSToLoopback() error      { return nil }
+func (consoleTestPlatform) RestoreLocalDNS() error            { return nil }
+func (consoleTestPlatform) LocalDNSIsLoopback() (bool, error) { return false, nil }
 
-func TestScreenMenuQReturnsDashboard(t *testing.T) {
+func newTestConsole(input string, out *bytes.Buffer) *consoleUI {
+	return newConsole(&app.App{
+		Cfg:     config.Default(),
+		Gateway: gateway.New(),
+		Plat:    consoleTestPlatform{},
+	}, strings.NewReader(input), out)
+}
+
+func TestMainMenuIsFocusedOnGatewayAndSystemProxy(t *testing.T) {
 	oldNoColor := color.NoColor
 	color.NoColor = true
 	defer func() { color.NoColor = oldNoColor }()
 
 	var out bytes.Buffer
-	c := newConsole(&app.App{
-		Cfg:     config.Default(),
-		Gateway: gateway.New(),
-		Plat:    consoleTestPlatform{},
-	}, strings.NewReader("q\n"), &out)
-
-	if c.screenMenu(context.Background()) {
-		t.Fatal("screenMenu(q) should return to dashboard, not exit console")
+	c := newTestConsole("0\n", &out)
+	if err := c.main(context.Background()); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "Q  返回首页") {
-		t.Fatalf("expected menu output, got: %s", out.String())
+
+	got := out.String()
+	for _, want := range []string{
+		"2  设置代理",
+		"3  查看设备参数",
+		"4  查看最近日志",
+		"Q  退出",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("menu missing %q:\n%s", want, got)
+		}
+	}
+	if !strings.Contains(got, "1  启动旁路由") && !strings.Contains(got, "1  停止旁路由") {
+		t.Fatalf("menu missing lifecycle action:\n%s", got)
+	}
+	for _, removed := range []string{"首页", "设备列表", "DNS 设置", "活跃连接", "仪表盘", "节点", "订阅"} {
+		if strings.Contains(got, removed) {
+			t.Fatalf("menu still exposes removed feature %q:\n%s", removed, got)
+		}
 	}
 }
 
-func TestScreenMenuZeroReturnsDashboard(t *testing.T) {
-	oldNoColor := color.NoColor
-	color.NoColor = true
-	defer func() { color.NoColor = oldNoColor }()
-
-	c := newConsole(&app.App{
-		Cfg:     config.Default(),
-		Gateway: gateway.New(),
-		Plat:    consoleTestPlatform{},
-	}, strings.NewReader("0\n"), &bytes.Buffer{})
-
-	if c.screenMenu(context.Background()) {
-		t.Fatal("screenMenu(0) should return to dashboard, not exit console")
+func TestMainMenuQExits(t *testing.T) {
+	c := newTestConsole("q\n", &bytes.Buffer{})
+	if err := c.main(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }

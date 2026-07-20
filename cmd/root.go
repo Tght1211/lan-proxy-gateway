@@ -1,4 +1,4 @@
-// Package cmd wires the 5-command CLI together.
+// Package cmd wires the CLI together.
 // The root command, when invoked without any subcommand, launches the TUI console.
 package cmd
 
@@ -21,7 +21,8 @@ var rootCmd = &cobra.Command{
 	Short:   "LAN 代理网关 — 把本机变成局域网代理网关",
 	Version: Version,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// 进菜单、改配置、看状态都不需要 root；只有用户真点「启动」时才提示 sudo。
+		// The menu can render without root; privileged actions explain how to
+		// relaunch it with sudo when needed.
 		a, err := app.New()
 		if err != nil {
 			return err
@@ -49,8 +50,8 @@ func init() {
 		stopCmd,
 		statusCmd,
 		serviceCmd,
+		systemProxyCmd,
 		updateCmd,
-		configCmd,
-		nodeCmd,
+		runCmd,
 	)
 }

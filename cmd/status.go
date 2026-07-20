@@ -31,19 +31,13 @@ var statusCmd = &cobra.Command{
 		title.Println("== lan-proxy-gateway · 状态 ==")
 		fmt.Printf("  配置:   %v (%s)\n", s.Configured, s.ConfigFile)
 		fmt.Printf("  运行:   %v\n", s.Running)
-		fmt.Printf("  模式:   %s   广告拦截: %v   TUN: %v\n", s.Mode, s.Adblock, s.TUN)
-		fmt.Printf("  源:     %s\n", s.Source)
-		fmt.Printf("  端口:   mixed=%d  api=%d  redir=%d\n", s.Ports.Mixed, s.Ports.API, s.Ports.Redir)
-		fmt.Printf("  mihomo: %s\n", firstNonEmpty(s.MihomoBin, "(未找到)"))
+		if s.Egress == "proxy" {
+			fmt.Printf("  出口:   代理 (%s)\n", s.Proxy)
+		} else {
+			fmt.Printf("  出口:   直连\n")
+		}
 		fmt.Println()
-		fmt.Println(gateway.DeviceGuide(s.Gateway, s.Ports.Mixed))
+		fmt.Println(gateway.DeviceGuide(s.Gateway))
 		return nil
 	},
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }

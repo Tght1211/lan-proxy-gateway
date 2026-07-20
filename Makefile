@@ -13,7 +13,7 @@ test:
 	go test ./...
 
 test-core:
-	go test ./internal/config/... ./internal/traffic/... ./internal/source/... ./internal/engine/...
+	go test ./internal/config/... ./internal/relay/... ./internal/dns/... ./internal/firewall/... ./internal/gateway/... ./internal/app/...
 
 install: build
 	@echo "安装 $(BINARY) 到 $(INSTALL_PATH)（需要 sudo 密码）..."
@@ -30,12 +30,10 @@ build-all: clean
 	GOOS=darwin  GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY)-darwin-amd64 .
 	GOOS=linux   GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY)-linux-amd64 .
 	GOOS=linux   GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY)-linux-arm64 .
-	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY)-windows-amd64.exe .
 	tar -C $(DIST_DIR) -czf $(DIST_DIR)/$(BINARY)-darwin-arm64.tar.gz $(BINARY)-darwin-arm64
 	tar -C $(DIST_DIR) -czf $(DIST_DIR)/$(BINARY)-darwin-amd64.tar.gz $(BINARY)-darwin-amd64
 	tar -C $(DIST_DIR) -czf $(DIST_DIR)/$(BINARY)-linux-amd64.tar.gz $(BINARY)-linux-amd64
 	tar -C $(DIST_DIR) -czf $(DIST_DIR)/$(BINARY)-linux-arm64.tar.gz $(BINARY)-linux-arm64
-	cd $(DIST_DIR) && zip -q $(BINARY)-windows-amd64.zip $(BINARY)-windows-amd64.exe
 	if command -v shasum >/dev/null 2>&1; then \
 		cd $(DIST_DIR) && shasum -a 256 gateway-* > SHA256SUMS; \
 	else \

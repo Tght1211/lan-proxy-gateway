@@ -81,61 +81,6 @@ func (darwinPlatform) IPForwardEnabled() (bool, error) {
 	return strings.TrimSpace(out) == "1", nil
 }
 
-// ConfigureNAT writes a pf anchor and loads it. For the typical mihomo TUN
-// setup we actually don't need NAT (TUN takes care of egress), but we keep
-// this available for non-TUN modes and for parity with Linux.
-func (darwinPlatform) ConfigureNAT(iface string) error {
-	if iface == "" {
-		return fmt.Errorf("empty interface name")
-	}
-	// Idempotent no-op for now: mihomo TUN handles NAT via utun interface.
-	// Future: write /etc/pf.anchors/lan-proxy-gateway with:
-	//   nat on <iface> from any to any -> (<iface>)
-	// and `pfctl -e -f`.
-	return nil
-}
-
-func (darwinPlatform) UnconfigureNAT(iface string) error { return nil }
-
-// PostStopCleanup no-op on darwin: mihomo TUN's NAT/route changes are scoped
-// to its own utun interface, which disappears with the process.
-func (darwinPlatform) PostStopCleanup() error { return nil }
-
-// ConfigurePFRedirect is not supported on macOS because mihomo's redir-port
-// (which receives the redirected traffic) does not work on darwin — it relies
-// on Linux's SO_ORIGINAL_DST to recover the original destination. On macOS
-// the "forward" gateway mode falls back to TUN with bypass_local instead.
-func (darwinPlatform) ConfigurePFRedirect(iface string, redirPort int) error {
-	return ErrNotSupported
-}
-
-func (darwinPlatform) UnconfigurePFRedirect() error { return nil }
-
-func (darwinPlatform) ResolveMihomoPath(preferred string) (string, error) {
-	if preferred != "" {
-		if _, err := os.Stat(preferred); err == nil {
-			return preferred, nil
-		}
-	}
-	candidates := []string{
-		"/usr/local/bin/mihomo",
-		"/opt/homebrew/bin/mihomo",
-		"/usr/local/bin/clash.meta",
-	}
-	for _, p := range candidates {
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
-	}
-	if p, err := exec.LookPath("mihomo"); err == nil {
-		return p, nil
-	}
-	if p, err := exec.LookPath("clash-meta"); err == nil {
-		return p, nil
-	}
-	return "", fmt.Errorf("未找到 mihomo，请先运行 `gateway install`")
-}
-
 func (darwinPlatform) IsAdmin() (bool, error) {
 	return os.Geteuid() == 0, nil
 }
@@ -201,7 +146,7 @@ func (darwinPlatform) UninstallService() error {
 // 通过 networksetup 改**当前所有活跃服务**的 DNS。活跃服务指在 `networksetup
 // -listnetworkserviceorder` 结果中、有设备名且不是 "disabled" 的那些
 // （Wi-Fi / Ethernet 等）。用户如果连多个接口（比如笔记本插网线又开 Wi-Fi）
-// 两个都会改到，保证一定能走到 mihomo。
+// 两个都会改到，保证本机查询也走 gateway 自己的 DNS 服务。
 
 func activeNetworkServices() ([]string, error) {
 	out, err := exec.Command("networksetup", "-listallnetworkservices").Output()

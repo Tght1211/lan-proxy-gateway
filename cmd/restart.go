@@ -30,7 +30,7 @@ var restartCmd = &cobra.Command{
 			return err
 		}
 		color.Green("✔ 网关已重启")
-		color.New(color.Faint).Println(a.Engine.LogPath())
+		printDeviceGuide(a)
 		return nil
 	},
 }

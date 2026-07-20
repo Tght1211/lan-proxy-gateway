@@ -1,33 +1,59 @@
 // Package app is the single facade that the console and cobra commands both use.
-// Every user-visible action (start, stop, set mode, switch source, ...) lives
-// here — there is no parallel implementation in the CLI vs the TUI.
+// Every user-visible action (start, stop, set egress, ...) lives here.
+//
+// v4 进程模型：relay/DNS 都是进程内服务，不再有外部引擎。
+//   - `gateway start`  spawn 一个脱离终端的 `gateway run` 守护进程后返回
+//   - `gateway run`    守护主体：防火墙 → DNS → relay → loopback API → 阻塞
+//   - 配置变更         写盘 + POST /api/reload；守护进程同时轮询 mtime 兜底
 package app
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"log/slog"
+	"net"
+	"net/netip"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/tght/lan-proxy-gateway/internal/config"
-	"github.com/tght/lan-proxy-gateway/internal/engine"
+	"github.com/tght/lan-proxy-gateway/internal/dns"
+	"github.com/tght/lan-proxy-gateway/internal/firewall"
 	"github.com/tght/lan-proxy-gateway/internal/gateway"
 	"github.com/tght/lan-proxy-gateway/internal/platform"
+	"github.com/tght/lan-proxy-gateway/internal/relay"
 )
 
-// App wires together config, engine, gateway and platform.
+// App wires together config, gateway and platform; daemon-side services
+// (relay/dns/api) exist only inside the `run` process.
 type App struct {
 	Cfg     *config.Config
 	Paths   config.Paths
-	Engine  *engine.Engine
 	Gateway *gateway.Gateway
 	Plat    platform.Platform
 
-	// health 是代理源 supervisor 维护的健康看板；由 StartSupervisor 懒启动。
+	// cfgMu guards Cfg against daemon goroutines (config watcher, API
+	// handlers, supervisor) swapping/reading it concurrently. CLI/console
+	// processes are effectively single-threaded but use the accessors too.
+	cfgMu          sync.RWMutex
 	health         *healthState
 	supervisorOnce sync.Once
+}
+
+// getCfg returns the current config under read lock (daemon-safe).
+func (a *App) getCfg() *config.Config {
+	a.cfgMu.RLock()
+	defer a.cfgMu.RUnlock()
+	return a.Cfg
+}
+
+// setCfg swaps the live config (daemon hot-apply path).
+func (a *App) setCfg(cfg *config.Config) {
+	a.cfgMu.Lock()
+	defer a.cfgMu.Unlock()
+	a.Cfg = cfg
 }
 
 // New builds an App. It loads the config from disk; if missing, it returns one
@@ -39,20 +65,15 @@ func New() (*App, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	bin, _ := platform.Current().ResolveMihomoPath("")
 	gw := gateway.New()
-	gw.SetStatePath(filepath.Join(paths.Root, "runtime.state"))
-	a := &App{
+	gw.SetStatePath(paths.StateFile)
+	return &App{
 		Cfg:     cfg,
 		Paths:   paths,
-		Engine:  engine.New(bin, paths.MihomoDir, paths.CacheDir),
 		Gateway: gw,
 		Plat:    platform.Current(),
-	}
-	// If a previous gateway session left mihomo running in the background,
-	// wire the API client to it so Running()/Reload()/Stop() all work.
-	a.Engine.Attach(a.Cfg)
-	return a, nil
+		health:  &healthState{healthy: true},
+	}, nil
 }
 
 // Configured reports whether gateway.yaml exists on disk.
@@ -66,221 +87,167 @@ func (a *App) Save() error {
 	return config.Save(a.Cfg, a.Paths.ConfigFile)
 }
 
-// Start brings up the LAN gateway and the mihomo engine.
-func (a *App) Start(ctx context.Context) error {
-	effective := config.EffectiveRuntimeConfig(a.Cfg)
-	if effective.Gateway.Enabled {
-		mode := effective.Gateway.Mode
-		if mode == "" {
-			mode = config.GatewayModeTUN
+// ---------- egress facade ----------
+
+// SetEgress validates and saves a new egress config. When switching to proxy
+// mode the upstream proxy is probed first (unless probe=false); a failed probe
+// aborts the change. If the daemon is running it picks the change up live.
+func (a *App) SetEgress(ctx context.Context, e config.EgressConfig, probe bool) error {
+	next := *a.Cfg
+	next.Egress = e
+	config.Normalize(&next)
+	if err := config.Validate(&next); err != nil {
+		return err
+	}
+	if probe && e.Mode == config.EgressProxy {
+		d, err := buildDialer(e)
+		if err != nil {
+			return err
 		}
-		if err := a.Gateway.Enable(mode, effective.Runtime.Ports.Redir); err != nil {
-			return fmt.Errorf("启动局域网网关失败: %w", err)
+		probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if err := relay.Probe(probeCtx, d, probeTarget); err != nil {
+			return fmt.Errorf("上游代理连通性测试失败: %w", err)
 		}
 	}
-	if a.Engine == nil {
-		return errors.New("mihomo 未找到，请先运行 `gateway install`")
+	a.Cfg.Egress = e
+	if err := a.Save(); err != nil {
+		return err
 	}
-	if a.Engine.Running() {
-		return nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	startCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	return a.Engine.Start(startCtx, effective)
+	a.pokeReload()
+	return nil
 }
 
-// Stop tears everything down, best-effort.
-func (a *App) Stop() error {
-	var firstErr error
-	if err := a.restoreLocalDNSIfLoopback(); err != nil && firstErr == nil {
-		firstErr = err
-	}
-	if a.Engine != nil {
-		if err := a.Engine.Stop(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	if a.Gateway != nil {
-		if err := a.Gateway.Disable(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
+// TestEgress probes the currently configured egress end-to-end.
+func (a *App) TestEgress(ctx context.Context) error {
+	return a.TestEgressConfig(ctx, a.Cfg.Egress)
 }
 
-func (a *App) restoreLocalDNSIfLoopback() error {
-	if a.Plat == nil {
-		return nil
-	}
-	loopback, err := a.Plat.LocalDNSIsLoopback()
+// TestEgressConfig probes a candidate egress config without saving it.
+func (a *App) TestEgressConfig(ctx context.Context, e config.EgressConfig) error {
+	d, err := buildDialer(e)
 	if err != nil {
-		return fmt.Errorf("检查本机 DNS: %w", err)
-	}
-	if !loopback {
-		return nil
-	}
-	if err := a.Plat.RestoreLocalDNS(); err != nil {
-		if errors.Is(err, platform.ErrNotSupported) {
-			return nil
-		}
-		return fmt.Errorf("恢复本机 DNS: %w", err)
-	}
-	return nil
-}
-
-// SetMode updates traffic.mode, saves, and hot-reloads mihomo if it's running.
-func (a *App) SetMode(ctx context.Context, mode string) error {
-	if mode != config.ModeRule && mode != config.ModeGlobal && mode != config.ModeDirect {
-		return fmt.Errorf("不支持的模式: %s", mode)
-	}
-	a.Cfg.Traffic.Mode = mode
-	if err := a.Save(); err != nil {
 		return err
 	}
-	if a.Engine.Running() {
-		return a.Engine.Reload(ctx, config.EffectiveRuntimeConfig(a.Cfg))
-	}
-	return nil
+	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return relay.Probe(probeCtx, d, probeTarget)
 }
 
-// ToggleAdblock flips adblock, saves, hot-reloads.
-func (a *App) ToggleAdblock(ctx context.Context) error {
-	a.Cfg.Traffic.Adblock = !a.Cfg.Traffic.Adblock
-	if err := a.Save(); err != nil {
-		return err
+// pokeReload asks a running daemon to re-read the config; best-effort.
+func (a *App) pokeReload() {
+	if !a.Running() {
+		return
 	}
-	if a.Engine.Running() {
-		return a.Engine.Reload(ctx, config.EffectiveRuntimeConfig(a.Cfg))
-	}
-	return nil
+	_ = apiClient(a.Cfg.Runtime.APIPort).Reload(context.Background())
 }
 
-// ToggleTUN flips TUN mode, saves, hot-reloads.
-func (a *App) ToggleTUN(ctx context.Context) error {
-	a.Cfg.Gateway.TUN.Enabled = !a.Cfg.Gateway.TUN.Enabled
-	if err := a.Save(); err != nil {
-		return err
-	}
-	if a.Engine.Running() {
-		return a.Engine.Reload(ctx, config.EffectiveRuntimeConfig(a.Cfg))
-	}
-	return nil
-}
+// ---------- shared helpers ----------
 
-// SetGatewayMode switches between "tun" and "forward" gateway modes.
-// Requires a full restart because the gateway layer (pf rules / TUN) must
-// be torn down and re-created.
-func (a *App) SetGatewayMode(ctx context.Context, mode string) error {
-	if mode != config.GatewayModeTUN && mode != config.GatewayModeForward {
-		return fmt.Errorf("不支持的网关模式: %s", mode)
-	}
-	a.Cfg.Gateway.Mode = mode
-	if err := a.Save(); err != nil {
-		return err
-	}
-	if a.Engine != nil && a.Engine.Running() {
-		if err := a.Stop(); err != nil {
-			return fmt.Errorf("停止旧网关失败: %w", err)
-		}
-		return a.Start(ctx)
-	}
-	return nil
-}
+// probeTarget is the connectivity probe endpoint (HTTP) used for egress checks.
+const probeTarget = "www.apple.com:80"
 
-// SetSource replaces the source config wholesale, saves and reloads.
-func (a *App) SetSource(ctx context.Context, src config.SourceConfig) error {
-	a.Cfg.Source = src
-	return a.saveAndReload(ctx)
-}
-
-// saveAndReload 存盘后，若 mihomo 在跑则热重载。所有改配置的 facade 方法共用。
-func (a *App) saveAndReload(ctx context.Context) error {
-	if err := a.Save(); err != nil {
-		return err
+// buildDialer constructs the egress dialer for a config.
+func buildDialer(e config.EgressConfig) (relay.Dialer, error) {
+	const timeout = 15 * time.Second
+	if e.Mode != config.EgressProxy {
+		return relay.NewDirectDialer(timeout), nil
 	}
-	if a.Engine != nil && a.Engine.Running() {
-		return a.Engine.Reload(ctx, config.EffectiveRuntimeConfig(a.Cfg))
-	}
-	return nil
-}
-
-// AddRule 把一条规则按裁决（direct/proxy/reject）追加到 Traffic.Extras，存盘+热重载。
-func (a *App) AddRule(ctx context.Context, verdict, rule string) error {
-	switch verdict {
-	case "direct":
-		a.Cfg.Traffic.Extras.Direct = append(a.Cfg.Traffic.Extras.Direct, rule)
-	case "proxy":
-		a.Cfg.Traffic.Extras.Proxy = append(a.Cfg.Traffic.Extras.Proxy, rule)
-	case "reject":
-		a.Cfg.Traffic.Extras.Reject = append(a.Cfg.Traffic.Extras.Reject, rule)
+	p := e.Proxy
+	addr := net.JoinHostPort(p.Host, strconv.Itoa(p.Port))
+	switch p.Type {
+	case config.ProxyTypeSOCKS5:
+		return relay.NewSOCKS5Dialer(addr, p.Username, p.Password, timeout), nil
+	case config.ProxyTypeHTTP:
+		return relay.NewHTTPConnectDialer(addr, p.Username, p.Password, timeout), nil
 	default:
-		return fmt.Errorf("不支持的裁决: %s（应为 direct/proxy/reject）", verdict)
+		return nil, fmt.Errorf("不支持的代理类型: %q", p.Type)
 	}
-	return a.saveAndReload(ctx)
 }
 
-// RemoveRule 按裁决+从 0 起的索引删一条自定义规则，存盘+热重载。
-func (a *App) RemoveRule(ctx context.Context, verdict string, index int) error {
-	var list *[]string
-	switch verdict {
-	case "direct":
-		list = &a.Cfg.Traffic.Extras.Direct
-	case "proxy":
-		list = &a.Cfg.Traffic.Extras.Proxy
-	case "reject":
-		list = &a.Cfg.Traffic.Extras.Reject
-	default:
-		return fmt.Errorf("不支持的裁决: %s（应为 direct/proxy/reject）", verdict)
+// firewallConfig derives the desired firewall rule set from the config.
+func firewallConfig(cfg *config.Config) firewall.Config {
+	proxy := cfg.Egress.Mode == config.EgressProxy
+	return firewall.Config{
+		RedirPort: cfg.Runtime.RedirPort,
+		DNSPort:   cfg.DNS.Port,
+		// Relay TCP in both modes. On a single-interface macOS gateway, pf NAT
+		// does not translate packets that enter and leave on the same interface,
+		// so kernel-forwarded direct connections never receive replies.
+		TCPRedirect: true,
+		DNSHijack:   cfg.DNS.Enabled && cfg.DNS.Hijack,
+		QUICBlock:   proxy && cfg.QUICBlock,
 	}
-	if index < 0 || index >= len(*list) {
-		return fmt.Errorf("索引越界: %d（%s 共 %d 条）", index, verdict, len(*list))
-	}
-	*list = append((*list)[:index], (*list)[index+1:]...)
-	return a.saveAndReload(ctx)
 }
 
-// Status builds a read-only snapshot for UI rendering.
-// json tags 让 `gateway status --json` 输出规范的 snake_case，便于脚本/agent 解析。
+// dnsOptions derives the DNS server options from the config.
+func dnsOptions(cfg *config.Config, logger *slog.Logger) dns.Options {
+	fakeRange, _ := netip.ParsePrefix(cfg.Runtime.FakeIPRange)
+	return dns.Options{
+		Addr:          net.JoinHostPort("", strconv.Itoa(cfg.DNS.Port)),
+		Upstreams:     cfg.DNS.Upstreams,
+		FakeIPRange:   fakeRange,
+		FakeIPEnabled: cfg.Egress.Mode == config.EgressProxy && cfg.DNS.FakeIP,
+		FakeIPFilter:  cfg.DNS.FakeIPFilter,
+		Logger:        logger,
+	}
+}
+
+// ---------- status ----------
+
+// Status is a read-only snapshot for UI rendering and `gateway status --json`.
 type Status struct {
-	Configured  bool                `json:"configured"`
-	Running     bool                `json:"running"`
-	Mode        string              `json:"mode"`
-	Adblock     bool                `json:"adblock"`
-	TUN         bool                `json:"tun"`
-	GatewayMode string              `json:"gateway_mode"`
-	Source      string              `json:"source"`
-	Gateway     gateway.Status      `json:"gateway"`
-	Ports       config.RuntimePorts `json:"ports"`
-	MihomoBin   string              `json:"mihomo_bin"`
-	ConfigFile  string              `json:"config_file"`
+	Configured bool           `json:"configured"`
+	Running    bool           `json:"running"`
+	Egress     string         `json:"egress"`
+	Proxy      string         `json:"proxy,omitempty"` // "socks5 127.0.0.1:7897" when egress=proxy
+	DNS        DNSStatus      `json:"dns"`
+	QUICBlock  bool           `json:"quic_block"`
+	Gateway    gateway.Status `json:"gateway"`
+	Ports      PortsStatus    `json:"ports"`
+	ConfigFile string         `json:"config_file"`
+	LogFile    string         `json:"log_file"`
+}
+
+type DNSStatus struct {
+	Enabled bool `json:"enabled"`
+	Port    int  `json:"port"`
+	Hijack  bool `json:"hijack"`
+	FakeIP  bool `json:"fake_ip"`
+}
+
+type PortsStatus struct {
+	Redir int `json:"redir"`
+	API   int `json:"api"`
+	DNS   int `json:"dns"`
 }
 
 // Status returns the current runtime status (no blocking network calls).
 func (a *App) Status() Status {
-	effective := config.EffectiveRuntimeConfig(a.Cfg)
 	gs, _ := a.Gateway.Status()
-	bin := ""
-	if p, err := a.Plat.ResolveMihomoPath(""); err == nil {
-		bin = p
+	st := Status{
+		Configured: a.Configured(),
+		Running:    a.Running(),
+		Egress:     a.Cfg.Egress.Mode,
+		DNS: DNSStatus{
+			Enabled: a.Cfg.DNS.Enabled,
+			Port:    a.Cfg.DNS.Port,
+			Hijack:  a.Cfg.DNS.Hijack,
+			FakeIP:  a.Cfg.DNS.FakeIP && a.Cfg.Egress.Mode == config.EgressProxy,
+		},
+		QUICBlock: a.Cfg.QUICBlock && a.Cfg.Egress.Mode == config.EgressProxy,
+		Gateway:   gs,
+		Ports: PortsStatus{
+			Redir: a.Cfg.Runtime.RedirPort,
+			API:   a.Cfg.Runtime.APIPort,
+			DNS:   a.Cfg.DNS.Port,
+		},
+		ConfigFile: a.Paths.ConfigFile,
+		LogFile:    a.Paths.LogFile,
 	}
-	gwMode := effective.Gateway.Mode
-	if gwMode == "" {
-		gwMode = config.GatewayModeTUN
+	if a.Cfg.Egress.Mode == config.EgressProxy {
+		p := a.Cfg.Egress.Proxy
+		st.Proxy = fmt.Sprintf("%s %s:%d", p.Type, p.Host, p.Port)
 	}
-	return Status{
-		Configured:  a.Configured(),
-		Running:     a.Engine != nil && a.Engine.Running(),
-		Mode:        effective.Traffic.Mode,
-		Adblock:     effective.Traffic.Adblock,
-		TUN:         effective.Gateway.TUN.Enabled,
-		GatewayMode: gwMode,
-		Source:      effective.Source.Type,
-		Gateway:     gs,
-		Ports:       effective.Runtime.Ports,
-		MihomoBin:   bin,
-		ConfigFile:  a.Paths.ConfigFile,
-	}
+	return st
 }

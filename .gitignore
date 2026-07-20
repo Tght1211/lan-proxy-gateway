@@ -4,26 +4,10 @@
 gateway.yaml
 script.js
 
-# 运行时生成的配置（包含订阅信息）
-data/
-config.yaml
-
 # Go 构建产物
 /gateway
 /gateway.exe
 /dist/
-
-# mihomo 数据文件
-*.mmdb
-*.dat
-*.db
-Country.mmdb
-GeoIP.dat
-GeoSite.dat
-cache.db
-
-# mihomo UI
-/ui/
 
 # 日志
 *.log
