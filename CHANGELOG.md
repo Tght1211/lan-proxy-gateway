@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Persist fake-IP-to-domain mappings across gateway restarts instead of losing every active device mapping with the daemon process.
+- Extend the default idle retention from 10 minutes to 7 days and raise the bounded LRU capacity for long-lived phone, TV, and console caches.
+- Rate-limit repeated missing fake-IP warnings per address while continuing to reject unknown mappings safely.
+- Save cache snapshots atomically with mode `0600`, validate restored entries, and ignore corrupt, expired, duplicate, or out-of-range data without blocking DNS startup.
+
 ## v4.0.4 - 2026-07-21
 
 ### Device onboarding

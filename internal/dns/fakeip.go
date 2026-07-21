@@ -2,15 +2,18 @@ package dns
 
 import (
 	"net/netip"
+	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // fakeIPEntry maps one allocated fake address to its domain.
 type fakeIPEntry struct {
-	ip       netip.Addr
-	name     string
-	lastSeen time.Time
+	ip            netip.Addr
+	name          string
+	lastSeen      time.Time
+	persistedSeen time.Time
 }
 
 // fakeIPPool hands out stable fake addresses from a prefix (198.18.0.0/16 by
@@ -20,15 +23,16 @@ type fakeIPEntry struct {
 // Answers carry TTL=1 (devices re-query constantly, keeping mappings warm);
 // the pool retains mappings for idleTTL of no use and evicts LRU past maxSize.
 type fakeIPPool struct {
-	mu       sync.Mutex
-	prefix   netip.Prefix
-	base     uint32 // prefix address as u32
-	bits     int    // host bits in the prefix
-	offset   uint32 // next allocation offset (never 0 or all-ones)
-	idleTTL  time.Duration
-	maxSize  int
-	byName   map[string]*fakeIPEntry
-	byIP     map[netip.Addr]*fakeIPEntry
+	mu      sync.Mutex
+	prefix  netip.Prefix
+	base    uint32 // prefix address as u32
+	bits    int    // host bits in the prefix
+	offset  uint32 // next allocation offset (never 0 or all-ones)
+	idleTTL time.Duration
+	maxSize int
+	byName  map[string]*fakeIPEntry
+	byIP    map[netip.Addr]*fakeIPEntry
+	dirty   atomic.Bool
 }
 
 func newFakeIPPool(prefix netip.Prefix, idleTTL time.Duration, maxSize int) *fakeIPPool {
@@ -68,12 +72,16 @@ func (p *fakeIPPool) Get(name string, now time.Time) netip.Addr {
 	defer p.mu.Unlock()
 	if e, ok := p.byName[name]; ok {
 		e.lastSeen = now
+		if now.Sub(e.persistedSeen) >= cacheTouchInterval {
+			p.dirty.Store(true)
+		}
 		return e.ip
 	}
 	p.evictLocked(now)
 	e := &fakeIPEntry{ip: p.allocLocked(), name: name, lastSeen: now}
 	p.byName[name] = e
 	p.byIP[e.ip] = e
+	p.dirty.Store(true)
 	return e.ip
 }
 
@@ -90,6 +98,9 @@ func (p *fakeIPPool) Lookup(ip netip.Addr, now time.Time) (string, bool) {
 		return "", false
 	}
 	e.lastSeen = now
+	if now.Sub(e.persistedSeen) >= cacheTouchInterval {
+		p.dirty.Store(true)
+	}
 	return e.name, true
 }
 
@@ -149,4 +160,65 @@ func (p *fakeIPPool) evictLRULocked() {
 func (p *fakeIPPool) removeLocked(e *fakeIPEntry) {
 	delete(p.byIP, e.ip)
 	delete(p.byName, e.name)
+	p.dirty.Store(true)
+}
+
+type fakeIPPoolSnapshot struct {
+	Offset  uint32
+	Entries []fakeIPSnapshotEntry
+}
+
+type fakeIPSnapshotEntry struct {
+	IP       netip.Addr
+	Name     string
+	LastSeen time.Time
+}
+
+func (p *fakeIPPool) snapshot(now time.Time) fakeIPPoolSnapshot {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.evictLocked(now)
+	entries := make([]fakeIPSnapshotEntry, 0, len(p.byIP))
+	for _, e := range p.byIP {
+		entries = append(entries, fakeIPSnapshotEntry{IP: e.ip, Name: e.name, LastSeen: e.lastSeen})
+		e.persistedSeen = e.lastSeen
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].IP.Less(entries[j].IP) })
+	p.dirty.Store(false)
+	return fakeIPPoolSnapshot{Offset: p.offset, Entries: entries}
+}
+
+func (p *fakeIPPool) restore(snapshot fakeIPPoolSnapshot, now time.Time) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, item := range snapshot.Entries {
+		if item.Name == "" || !item.IP.Is4() || !p.prefix.Contains(item.IP) {
+			continue
+		}
+		if item.LastSeen.IsZero() || item.LastSeen.After(now) {
+			item.LastSeen = now
+		}
+		if p.idleTTL > 0 && now.Sub(item.LastSeen) > p.idleTTL {
+			continue
+		}
+		if _, exists := p.byIP[item.IP]; exists {
+			continue
+		}
+		if _, exists := p.byName[item.Name]; exists {
+			continue
+		}
+		e := &fakeIPEntry{
+			ip: item.IP, name: item.Name, lastSeen: item.LastSeen, persistedSeen: item.LastSeen,
+		}
+		p.byIP[e.ip] = e
+		p.byName[e.name] = e
+		if len(p.byIP) >= p.maxSize {
+			break
+		}
+	}
+	if snapshot.Offset > 0 && snapshot.Offset < p.maxOffset() {
+		p.offset = snapshot.Offset
+	}
+	p.dirty.Store(false)
+	return len(p.byIP)
 }

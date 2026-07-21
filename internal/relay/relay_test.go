@@ -581,6 +581,24 @@ func TestServerFakeIPMissingResets(t *testing.T) {
 	}
 }
 
+func TestMissingFakeIPWarningRateLimit(t *testing.T) {
+	srv := New(Options{})
+	ip := netip.MustParseAddr("198.18.0.9")
+	now := time.Now()
+	if !srv.shouldLogMissingFakeIP(ip, now) {
+		t.Fatal("first miss should log")
+	}
+	if srv.shouldLogMissingFakeIP(ip, now.Add(30*time.Second)) {
+		t.Fatal("repeated miss inside interval should be suppressed")
+	}
+	if !srv.shouldLogMissingFakeIP(ip, now.Add(time.Minute)) {
+		t.Fatal("miss after interval should log again")
+	}
+	if !srv.shouldLogMissingFakeIP(netip.MustParseAddr("198.18.0.10"), now) {
+		t.Fatal("different fake IP should log independently")
+	}
+}
+
 type dialerFunc func(ctx context.Context, network, addr string) (net.Conn, error)
 
 func (f dialerFunc) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
