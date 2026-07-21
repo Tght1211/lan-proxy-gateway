@@ -25,6 +25,9 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 TopBar()
                 Divider().overlay(Theme.border)
+                if model.coreUpgradeRecommended {
+                    CoreCompatibilityBar()
+                }
                 detail
             }
             .background(Theme.canvas)
@@ -106,6 +109,26 @@ struct ContentView: View {
     }
 }
 
+private struct CoreCompatibilityBar: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.triangle.2.circlepath.circle.fill").foregroundStyle(Theme.yellow)
+            Text("检测到较早版本的核心服务，部分实时数据不可用。")
+                .font(.system(size: 12, weight: .medium))
+            Spacer()
+            Button("使用当前核心重启") { model.restart() }
+                .buttonStyle(ActionButtonStyle(tint: Theme.yellow))
+                .disabled(model.isBusy)
+        }
+        .padding(.horizontal, 20)
+        .frame(height: 44)
+        .background(Theme.yellow.opacity(0.09))
+        .overlay(alignment: .bottom) { Divider().overlay(Theme.border) }
+    }
+}
+
 private struct TopBar: View {
     @EnvironmentObject private var model: AppModel
 
@@ -144,6 +167,9 @@ private struct OverviewView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
+                if model.status?.configured == false {
+                    GettingStartedPanel()
+                }
                 HStack(spacing: 16) {
                     CoreHero().frame(width: 310)
                     ThroughputChart(compact: true).frame(minWidth: 480, minHeight: 230)
@@ -152,7 +178,7 @@ private struct OverviewView: View {
                     MetricCard("实时下载", speed(model.stats?.relay.traffic.last?.down ?? 0), "arrow.down", Theme.cyan)
                     MetricCard("实时上传", speed(model.stats?.relay.traffic.last?.up ?? 0), "arrow.up", Theme.yellow)
                     MetricCard("活动连接", "\(model.stats?.relay.active.count ?? 0)", "point.3.connected.trianglepath.dotted", Theme.lime)
-                    MetricCard("在线设备", "\(model.stats?.relay.devices.count ?? 0)", "desktopcomputer", Theme.coral)
+                    MetricCard("活跃设备", "\(model.activeDeviceCount)", "desktopcomputer", Theme.coral)
                 }
                 HStack(alignment: .top, spacing: 16) {
                     ServiceRanking(limit: 6).frame(maxWidth: .infinity)
@@ -196,6 +222,42 @@ private struct CoreHero: View {
                 }
             }
         }
+    }
+}
+
+private struct GettingStartedPanel: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        Panel {
+            HStack(spacing: 18) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 7).fill(Theme.cyan.opacity(0.14))
+                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                        .font(.system(size: 25, weight: .semibold)).foregroundStyle(Theme.cyan)
+                }
+                .frame(width: 54, height: 54)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("首次使用").font(.system(size: 15, weight: .semibold))
+                    Text("先填写 Clash、Mihomo 或 sing-box 提供的本机代理地址与端口，再启动网关。")
+                        .font(.caption).foregroundStyle(Theme.muted).lineLimit(2)
+                }
+                Spacer(minLength: 12)
+                Button {
+                    model.selectedSection = .proxy
+                } label: {
+                    Label("配置代理出口", systemImage: "arrow.right")
+                }
+                .buttonStyle(ActionButtonStyle(tint: Theme.cyan))
+                Button {
+                    model.initializeAndStart()
+                } label: {
+                    Label("使用直连启动", systemImage: "play.fill")
+                }
+                .buttonStyle(ActionButtonStyle(tint: Theme.lime))
+            }
+        }
+        .frame(minHeight: 88)
     }
 }
 
@@ -305,7 +367,7 @@ private struct DevicesView: View {
         ScrollView {
             VStack(spacing: 16) {
                 HStack(spacing: 12) {
-                    MetricCard("活跃设备", "\(model.stats?.relay.devices.count ?? 0)", "desktopcomputer", Theme.lime)
+                    MetricCard("当前活跃", "\(model.activeDeviceCount)", "desktopcomputer", Theme.lime)
                     MetricCard("网关地址", model.status?.gateway.localIP.nonEmpty ?? "--", "network", Theme.cyan)
                     MetricCard("默认路由", model.status?.gateway.router.nonEmpty ?? "--", "wifi.router", Theme.yellow)
                 }
@@ -322,7 +384,11 @@ private struct DeviceRanking: View {
     var body: some View {
         Panel {
             VStack(alignment: .leading, spacing: 14) {
-                Text("DEVICE TRAFFIC").eyebrow()
+                HStack {
+                    Text("DEVICE TRAFFIC").eyebrow()
+                    Spacer()
+                    Text("本次运行会话").font(.caption).foregroundStyle(Theme.muted)
+                }
                 let devices = Array((model.stats?.relay.devices ?? []).prefix(12))
                 if devices.isEmpty {
                     EmptyTelemetry(icon: "desktopcomputer", text: "等待局域网设备接入")
@@ -487,9 +553,13 @@ private struct ProxyView: View {
                             TextField("7897", value: $model.proxyPort, format: .number).textFieldStyle(DarkFieldStyle())
                         }
                         HStack {
-                            Button("应用代理") { model.applyProxy() }.buttonStyle(ActionButtonStyle(tint: Theme.cyan))
+                            Button(model.isConfigured ? "应用代理" : "保存代理配置") { model.applyProxy() }.buttonStyle(ActionButtonStyle(tint: Theme.cyan))
                             Button("切换直连") { model.useDirectConnection() }.buttonStyle(ActionButtonStyle(tint: Theme.yellow))
                         }.disabled(model.isBusy)
+                        if model.status?.configured == false {
+                            Text("保存后返回顶部启动核心服务。管理员授权仅用于系统网络与网关设置。")
+                                .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }.frame(maxWidth: 520)
                 Panel {
@@ -528,7 +598,7 @@ private struct SettingsView: View {
                         Button("安装 CLI") { model.installCLI() }.buttonStyle(ActionButtonStyle(tint: Theme.cyan))
                     }
                     Divider().overlay(Theme.border)
-                    SettingsRow(title: "开机自启", detail: model.serviceStatus) {
+                    SettingsRow(title: "开机自启", detail: "\(model.serviceStatus) · 使用 /usr/local/bin/gateway") {
                         Button("启用") { model.installService() }.buttonStyle(ActionButtonStyle(tint: Theme.lime))
                         Button("移除") { model.uninstallService() }.buttonStyle(ActionButtonStyle(tint: Theme.coral))
                     }

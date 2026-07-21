@@ -14,9 +14,13 @@ final class AppModel: ObservableObject {
     @Published var isBusy = false
     @Published var notice: String?
     @Published var errorMessage: String?
+    @Published var coreUpgradeRecommended = false
 
     private let client = GatewayClient()
     private var timer: Timer?
+    private var isRefreshing = false
+    private var didLoadProxyConfig = false
+    private var noticeTask: Task<Void, Never>?
 
     init() {
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
@@ -25,24 +29,42 @@ final class AppModel: ObservableObject {
         Task { await refresh(silent: true) }
     }
 
-    deinit { timer?.invalidate() }
+    deinit {
+        timer?.invalidate()
+        noticeTask?.cancel()
+    }
 
     var isRunning: Bool { status?.running == true }
     var isConfigured: Bool { status?.configured == true }
+    var activeDeviceCount: Int {
+        Set(stats?.relay.active.map(\.srcIP) ?? []).count
+    }
 
     func refresh(silent: Bool = false) async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
         do {
             let latest = try await client.status()
             status = latest
+            loadProxyConfigIfNeeded(from: latest)
             if latest.running {
-                stats = try? await client.stats(apiPort: latest.ports.api)
+                do {
+                    let runtime = try await client.stats(apiPort: latest.ports.api)
+                    stats = runtime
+                    coreUpgradeRecommended = runtime.schemaVersion != 1
+                } catch {
+                    stats = nil
+                    coreUpgradeRecommended = true
+                }
             } else {
                 stats = nil
+                coreUpgradeRecommended = false
             }
             if selectedSection == .settings {
                 logText = await client.readLog(path: latest.logFile)
             }
-            if !silent { notice = "状态已刷新" }
+            if !silent { showNotice("状态已刷新") }
         } catch {
             if !silent { errorMessage = error.localizedDescription }
         }
@@ -113,14 +135,36 @@ final class AppModel: ObservableObject {
         errorMessage = nil
         Task {
             do {
-                let output = try await operation()
-                notice = output.isEmpty ? success : output
+                _ = try await operation()
+                showNotice(success)
                 await refresh(silent: true)
                 updateServiceStatus()
             } catch {
                 errorMessage = error.localizedDescription
             }
             isBusy = false
+        }
+    }
+
+    private func loadProxyConfigIfNeeded(from status: GatewayStatus) {
+        guard !didLoadProxyConfig else { return }
+        didLoadProxyConfig = true
+        guard let proxy = status.proxy else { return }
+        let parts = proxy.split(separator: " ", maxSplits: 1).map(String.init)
+        guard parts.count == 2, let separator = parts[1].lastIndex(of: ":"),
+              let port = Int(parts[1][parts[1].index(after: separator)...]) else { return }
+        proxyType = parts[0]
+        proxyHost = String(parts[1][..<separator])
+        proxyPort = port
+    }
+
+    private func showNotice(_ text: String) {
+        noticeTask?.cancel()
+        notice = text
+        noticeTask = Task {
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            notice = nil
         }
     }
 }

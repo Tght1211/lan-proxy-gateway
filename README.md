@@ -255,6 +255,8 @@ gateway update
 
 App 提供实时流量、活动与历史连接、设备/服务流量排行、延迟、抖动和可用率监控。服务名称来自网关可观察到的目标域名，例如 YouTube、Netflix 或 Nintendo；网关无法读取远端设备的本地进程名，因此不会把域名推断伪装成精确的 App 进程识别。
 
+普通用户可从 [GitHub Releases](https://github.com/Tght1211/lan-proxy-gateway/releases) 下载 macOS DMG，把 **LAN Proxy Gateway** 拖入“应用程序”后打开。首次使用按 App 首页提示填写第三方代理类型、地址和端口，再启动核心；涉及网关规则、系统代理或开机自启时，macOS 才会请求管理员授权。旧版核心仍在运行时，App 会提示使用当前内置核心重启，不会重复启动第二个网关进程。
+
 本机开发构建：
 
 ```bash

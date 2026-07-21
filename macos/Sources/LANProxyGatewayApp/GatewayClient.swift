@@ -29,6 +29,8 @@ struct GatewayClient {
         }
         let developmentCandidates = [
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent("gateway"),
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
                 .deletingLastPathComponent().appendingPathComponent("gateway"),
             URL(fileURLWithPath: "/usr/local/bin/gateway"),
             URL(fileURLWithPath: "/opt/homebrew/bin/gateway")
@@ -89,7 +91,17 @@ struct GatewayClient {
     }
 
     func installService() async throws -> String {
-        try await output(arguments: ["service", "install"], privileged: true)
+        guard let source = bundledEngineURL ?? engineURL else {
+            throw GatewayClientError.engineNotFound
+        }
+        let installed = "/usr/local/bin/gateway"
+        let command = [
+            "/bin/mkdir -p /usr/local/bin",
+            "/bin/cp \(shellQuote(source.path)) \(shellQuote(installed))",
+            "/bin/chmod 755 \(shellQuote(installed))",
+            "/usr/bin/env \(privilegedEnvironment()) \(shellQuote(installed)) service install"
+        ].joined(separator: " && ")
+        return try await runPrivilegedShell(command).text
     }
 
     func uninstallService() async throws -> String {
@@ -133,12 +145,9 @@ struct GatewayClient {
     private func run(arguments: [String], privileged: Bool) async throws -> CommandResult {
         guard let engineURL else { throw GatewayClientError.engineNotFound }
         if privileged {
-            let identity = userIdentityEnvironment()
-            let env = identity.map { "\($0.key)=\(shellQuote($0.value))" }
-                .sorted().joined(separator: " ")
             let args = arguments.map(shellQuote).joined(separator: " ")
             return try await runPrivilegedShell(
-                "/usr/bin/env \(env) \(shellQuote(engineURL.path)) \(args)"
+                "/usr/bin/env \(privilegedEnvironment()) \(shellQuote(engineURL.path)) \(args)"
             )
         }
         return try await runProcess(executable: engineURL, arguments: arguments)
@@ -168,16 +177,22 @@ struct GatewayClient {
             } catch {
                 throw GatewayClientError.commandFailed(error.localizedDescription)
             }
+            async let out = stdout.fileHandleForReading.readToEnd() ?? Data()
+            async let err = stderr.fileHandleForReading.readToEnd() ?? Data()
             process.waitUntilExit()
-            let out = stdout.fileHandleForReading.readDataToEndOfFile()
-            let err = stderr.fileHandleForReading.readDataToEndOfFile()
+            let (outputData, errorData) = try await (out, err)
             guard process.terminationStatus == 0 else {
-                let message = String(decoding: err.isEmpty ? out : err, as: UTF8.self)
+                let message = String(decoding: errorData.isEmpty ? outputData : errorData, as: UTF8.self)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 throw GatewayClientError.commandFailed(message.isEmpty ? "gateway 命令执行失败。" : message)
             }
-            return CommandResult(data: out)
+            return CommandResult(data: outputData)
         }.value
+    }
+
+    private func privilegedEnvironment() -> String {
+        userIdentityEnvironment().map { "\($0.key)=\(shellQuote($0.value))" }
+            .sorted().joined(separator: " ")
     }
 
     private func userIdentityEnvironment() -> [String: String] {

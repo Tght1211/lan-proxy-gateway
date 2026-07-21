@@ -53,6 +53,7 @@ struct PortsStatus: Decodable {
 }
 
 struct RuntimeStats: Decodable {
+    let schemaVersion: Int?
     let egress: String
     let proxy: String?
     let uptimeSec: Int64
@@ -62,6 +63,7 @@ struct RuntimeStats: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case egress, proxy, relay, dns, health
+        case schemaVersion = "schema_version"
         case uptimeSec = "uptime_sec"
     }
 }
@@ -79,6 +81,17 @@ struct RelayStats: Decodable {
         case active, recent, traffic, devices, services
         case upTotal = "up_total"
         case downTotal = "down_total"
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        upTotal = try values.decodeIfPresent(Int64.self, forKey: .upTotal) ?? 0
+        downTotal = try values.decodeIfPresent(Int64.self, forKey: .downTotal) ?? 0
+        active = try values.decodeIfPresent([ConnectionInfo].self, forKey: .active) ?? []
+        recent = try values.decodeIfPresent([ConnectionInfo].self, forKey: .recent) ?? []
+        traffic = try values.decodeIfPresent([TrafficPoint].self, forKey: .traffic) ?? []
+        devices = try values.decodeIfPresent([UsageAggregate].self, forKey: .devices) ?? []
+        services = try values.decodeIfPresent([UsageAggregate].self, forKey: .services) ?? []
     }
 }
 
@@ -103,6 +116,20 @@ struct ConnectionInfo: Decodable, Identifiable {
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case viaProxy = "via_proxy"
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UInt64.self, forKey: .id)
+        srcIP = try values.decodeIfPresent(String.self, forKey: .srcIP) ?? "--"
+        dstHost = try values.decodeIfPresent(String.self, forKey: .dstHost) ?? "--"
+        dstPort = try values.decodeIfPresent(Int.self, forKey: .dstPort) ?? 0
+        service = try values.decodeIfPresent(String.self, forKey: .service) ?? "未识别流量"
+        up = try values.decodeIfPresent(Int64.self, forKey: .up) ?? 0
+        down = try values.decodeIfPresent(Int64.self, forKey: .down) ?? 0
+        startedAt = try values.decode(Date.self, forKey: .startedAt)
+        endedAt = try values.decodeIfPresent(Date.self, forKey: .endedAt)
+        viaProxy = try values.decodeIfPresent(Bool.self, forKey: .viaProxy) ?? false
     }
 }
 
@@ -160,6 +187,18 @@ struct HealthStats: Decodable {
         case latencyMS = "latency_ms"
         case jitterMS = "jitter_ms"
         case availability, history
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        healthy = try values.decodeIfPresent(Bool.self, forKey: .healthy) ?? false
+        lastError = try values.decodeIfPresent(String.self, forKey: .lastError)
+        checkedAt = try values.decodeIfPresent(Date.self, forKey: .checkedAt)
+        failCount = try values.decodeIfPresent(Int.self, forKey: .failCount) ?? 0
+        latencyMS = try values.decodeIfPresent(Double.self, forKey: .latencyMS) ?? 0
+        jitterMS = try values.decodeIfPresent(Double.self, forKey: .jitterMS) ?? 0
+        availability = try values.decodeIfPresent(Double.self, forKey: .availability) ?? 0
+        history = try values.decodeIfPresent([ProbePoint].self, forKey: .history) ?? []
     }
 }
 

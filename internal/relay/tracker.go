@@ -125,20 +125,34 @@ func (t *Tracker) Open(srcIP, dstHost string, dstPort int, viaProxy bool) *Track
 
 func (t *Tracker) Snapshot() Snapshot {
 	t.mu.Lock()
+	devices := cloneAggregates(t.devices)
+	services := cloneAggregates(t.services)
 	out := Snapshot{
-		Active:   make([]ConnInfo, 0, len(t.conns)),
-		Recent:   append([]ConnInfo(nil), t.recent...),
-		Traffic:  append([]TrafficPoint(nil), t.traffic...),
-		Devices:  aggregateSlice(t.devices),
-		Services: aggregateSlice(t.services),
+		Active:  make([]ConnInfo, 0, len(t.conns)),
+		Recent:  append([]ConnInfo(nil), t.recent...),
+		Traffic: append([]TrafficPoint(nil), t.traffic...),
 	}
 	for _, c := range t.conns {
-		out.Active = append(out.Active, c.info())
+		info := c.info()
+		out.Active = append(out.Active, info)
+		updateAggregate(devices, c.srcIP, info, c.startedAt)
+		updateAggregate(services, c.service, info, c.startedAt)
 	}
+	out.Devices = aggregateSlice(devices)
+	out.Services = aggregateSlice(services)
 	t.mu.Unlock()
 	sort.Slice(out.Active, func(i, j int) bool { return out.Active[i].StartedAt.After(out.Active[j].StartedAt) })
 	out.UpTotal = t.upTotal.Load()
 	out.DownTotal = t.downTotal.Load()
+	return out
+}
+
+func cloneAggregates(source map[string]*UsageAggregate) map[string]*UsageAggregate {
+	out := make(map[string]*UsageAggregate, len(source))
+	for name, item := range source {
+		copy := *item
+		out[name] = &copy
+	}
 	return out
 }
 

@@ -14,15 +14,16 @@ import (
 	"github.com/tght/lan-proxy-gateway/internal/relay"
 )
 
-// StatsResponse is served by GET /api/stats and consumed by the console
-// dashboard and `gateway status`.
+// StatsResponse is served by GET /api/stats and consumed by the console and
+// native App. Bump SchemaVersion when an incompatible field changes.
 type StatsResponse struct {
-	Egress    string         `json:"egress"`
-	Proxy     string         `json:"proxy,omitempty"`
-	UptimeSec int64          `json:"uptime_sec"`
-	Relay     relay.Snapshot `json:"relay"`
-	DNS       *dns.Stats     `json:"dns,omitempty"`
-	Health    HealthSnapshot `json:"health"`
+	SchemaVersion int            `json:"schema_version"`
+	Egress        string         `json:"egress"`
+	Proxy         string         `json:"proxy,omitempty"`
+	UptimeSec     int64          `json:"uptime_sec"`
+	Relay         relay.Snapshot `json:"relay"`
+	DNS           *dns.Stats     `json:"dns,omitempty"`
+	Health        HealthSnapshot `json:"health"`
 }
 
 // apiServer is the daemon's loopback-only status API.
@@ -75,10 +76,11 @@ func (s *apiServer) Close() error {
 func (s *apiServer) handleStats(w http.ResponseWriter, r *http.Request) {
 	cfg := s.app.getCfg()
 	resp := StatsResponse{
-		Egress:    cfg.Egress.Mode,
-		UptimeSec: int64(time.Since(s.started).Seconds()),
-		Relay:     s.rt.tracker.Snapshot(),
-		Health:    s.app.Health(),
+		SchemaVersion: 1,
+		Egress:        cfg.Egress.Mode,
+		UptimeSec:     int64(time.Since(s.started).Seconds()),
+		Relay:         s.rt.tracker.Snapshot(),
+		Health:        s.app.Health(),
 	}
 	if cfg.Egress.Mode == "proxy" {
 		p := cfg.Egress.Proxy

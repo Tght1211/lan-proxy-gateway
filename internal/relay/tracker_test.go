@@ -28,6 +28,30 @@ func TestTrackerArchivesAndAggregates(t *testing.T) {
 	}
 }
 
+func TestTrackerSnapshotIncludesActiveConnectionsInAggregates(t *testing.T) {
+	tr := NewTracker()
+	c := tr.Open("192.168.1.30", "www.youtube.com", 443, true)
+	c.AddUp(120)
+	c.AddDown(880)
+
+	snap := tr.Snapshot()
+	if len(snap.Active) != 1 {
+		t.Fatalf("active=%d, want 1", len(snap.Active))
+	}
+	if len(snap.Devices) != 1 || snap.Devices[0].Name != "192.168.1.30" || snap.Devices[0].Down != 880 {
+		t.Fatalf("devices = %+v", snap.Devices)
+	}
+	if len(snap.Services) != 1 || snap.Services[0].Name != "YouTube" || snap.Services[0].Connections != 1 {
+		t.Fatalf("services = %+v", snap.Services)
+	}
+
+	c.Close()
+	snap = tr.Snapshot()
+	if len(snap.Devices) != 1 || snap.Devices[0].Connections != 1 || snap.Devices[0].Down != 880 {
+		t.Fatalf("completed device aggregate counted incorrectly: %+v", snap.Devices)
+	}
+}
+
 func TestTrackerSamplesTraffic(t *testing.T) {
 	tr := NewTracker()
 	ctx, cancel := context.WithCancel(context.Background())

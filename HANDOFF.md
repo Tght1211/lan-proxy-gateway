@@ -37,6 +37,9 @@
   - CLI/service/log settings
 - Administrator authorization is requested only for privileged gateway, system proxy and LaunchDaemon operations.
 - The App bundles the same Go `gateway` executable and can install it to `/usr/local/bin/gateway`.
+- First-run guidance takes users from their third-party proxy address to a running gateway.
+- Older running cores are decoded defensively and shown with a one-click current-core restart prompt.
+- LaunchDaemon installation first places the bundled core at `/usr/local/bin/gateway`, so it never depends on a mounted DMG or movable App path.
 
 ### Build and release
 
@@ -55,10 +58,10 @@ swift build -c debug                               PASS
 VERSION=v0.1.0-dev ./macos/build-dmg.sh            PASS (arm64 host)
 ```
 
-Local artifact (ignored by git):
+Latest local artifact (ignored by git):
 
 ```text
-dist/LANProxyGateway-v0.1.0-dev-macos-arm64.dmg
+dist/LANProxyGateway-v4.1.0-dev-macos-arm64.dmg
 ```
 
 ## Important behavior and limitations
@@ -78,7 +81,7 @@ dist/LANProxyGateway-v0.1.0-dev-macos-arm64.dmg
 4. Add Developer ID signing and notarization (`notarytool`) to Release secrets/workflow.
 5. Decide whether to persist hourly/daily telemetry in SQLite. Add retention and privacy controls before doing so.
 6. Add optional device aliases based on user-entered names; do not guess identities from IP addresses.
-7. Add API schema versioning before more App releases depend on the telemetry JSON.
+7. Evolve the current `schema_version: 1` contract deliberately when adding incompatible telemetry fields.
 
 ## Key files
 
