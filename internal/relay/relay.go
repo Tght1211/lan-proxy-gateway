@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const missingFakeIPLogInterval = time.Minute
+
 // Options configures the transparent relay server.
 type Options struct {
 	ListenAddr string // e.g. ":17892"
@@ -40,6 +42,8 @@ type Server struct {
 
 	fakeRange  atomic.Pointer[netip.Prefix]
 	fakeLookup atomic.Value // func(netip.Addr) (string, bool)
+	missingMu  sync.Mutex
+	missingLog map[netip.Addr]time.Time
 
 	mu   sync.Mutex
 	ln   *net.TCPListener
@@ -54,10 +58,11 @@ type dialerHolder struct {
 
 func New(opts Options) *Server {
 	s := &Server{
-		origDST: opts.OrigDST,
-		tracker: opts.Tracker,
-		logger:  opts.Logger,
-		done:    make(chan struct{}),
+		origDST:    opts.OrigDST,
+		tracker:    opts.Tracker,
+		logger:     opts.Logger,
+		done:       make(chan struct{}),
+		missingLog: make(map[netip.Addr]time.Time),
 	}
 	if s.tracker == nil {
 		s.tracker = NewTracker()
@@ -195,8 +200,10 @@ func (s *Server) handle(client *net.TCPConn) {
 		lookup, _ := s.fakeLookup.Load().(func(netip.Addr) (string, bool))
 		domain, ok := lookup(orig.Addr())
 		if !ok {
-			s.logger.Warn("fake-ip 映射缺失，断开连接(设备应重新解析 DNS)",
-				"src", client.RemoteAddr(), "fake_ip", orig.Addr())
+			if s.shouldLogMissingFakeIP(orig.Addr(), time.Now()) {
+				s.logger.Warn("fake-ip 映射缺失，断开连接(设备应重新解析 DNS)",
+					"src", client.RemoteAddr(), "fake_ip", orig.Addr())
+			}
 			return
 		}
 		host = domain
@@ -234,4 +241,25 @@ func (s *Server) handle(client *net.TCPConn) {
 	defer tc.Close()
 
 	pipe(client, upstream, tc)
+}
+
+func (s *Server) shouldLogMissingFakeIP(ip netip.Addr, now time.Time) bool {
+	s.missingMu.Lock()
+	defer s.missingMu.Unlock()
+	if last, ok := s.missingLog[ip]; ok && now.Sub(last) < missingFakeIPLogInterval {
+		return false
+	}
+	if len(s.missingLog) >= 4096 {
+		cutoff := now.Add(-missingFakeIPLogInterval)
+		for addr, last := range s.missingLog {
+			if last.Before(cutoff) {
+				delete(s.missingLog, addr)
+			}
+		}
+		if len(s.missingLog) >= 4096 {
+			clear(s.missingLog)
+		}
+	}
+	s.missingLog[ip] = now
+	return true
 }

@@ -181,7 +181,7 @@ func firewallConfig(cfg *config.Config) firewall.Config {
 }
 
 // dnsOptions derives the DNS server options from the config.
-func dnsOptions(cfg *config.Config, logger *slog.Logger) dns.Options {
+func dnsOptions(cfg *config.Config, cachePath string, logger *slog.Logger) dns.Options {
 	fakeRange, _ := netip.ParsePrefix(cfg.Runtime.FakeIPRange)
 	return dns.Options{
 		Addr:          net.JoinHostPort("", strconv.Itoa(cfg.DNS.Port)),
@@ -189,6 +189,7 @@ func dnsOptions(cfg *config.Config, logger *slog.Logger) dns.Options {
 		FakeIPRange:   fakeRange,
 		FakeIPEnabled: cfg.Egress.Mode == config.EgressProxy && cfg.DNS.FakeIP,
 		FakeIPFilter:  cfg.DNS.FakeIPFilter,
+		CachePath:     cachePath,
 		Logger:        logger,
 	}
 }

@@ -114,17 +114,17 @@ func TestFirewallConfigModes(t *testing.T) {
 
 func TestDNSOptionsFakeIPOnlyInProxyMode(t *testing.T) {
 	cfg := config.Default()
-	opts := dnsOptions(cfg, nil)
+	opts := dnsOptions(cfg, "", nil)
 	if opts.FakeIPEnabled {
 		t.Fatal("direct mode must not fake-ip")
 	}
 	cfg.Egress.Mode = config.EgressProxy
-	opts = dnsOptions(cfg, nil)
+	opts = dnsOptions(cfg, "", nil)
 	if !opts.FakeIPEnabled {
 		t.Fatal("proxy mode must fake-ip by default")
 	}
 	cfg.DNS.FakeIP = false
-	opts = dnsOptions(cfg, nil)
+	opts = dnsOptions(cfg, "", nil)
 	if opts.FakeIPEnabled {
 		t.Fatal("explicit fake_ip=false must be honored")
 	}

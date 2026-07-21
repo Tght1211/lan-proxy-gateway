@@ -21,6 +21,13 @@ import (
 // DefaultFakeIPRange is the fake-ip answer pool (mihomo-compatible range).
 const DefaultFakeIPRange = "198.18.0.0/16"
 
+const (
+	defaultFakeIPIdleTTL = 7 * 24 * time.Hour
+	defaultFakeIPMaxSize = 60000
+	cacheFlushInterval   = 5 * time.Minute
+	cacheTouchInterval   = 5 * time.Minute
+)
+
 // Stats are the server's counters, exposed via the status API.
 type Stats struct {
 	Queries      int64 `json:"queries"`
@@ -39,6 +46,7 @@ type Options struct {
 	FakeIPFilter   []string // extra suffixes that must resolve for real
 	IdleTTL        time.Duration
 	MaxPoolEntries int
+	CachePath      string
 	Logger         *slog.Logger
 }
 
@@ -52,6 +60,8 @@ type Server struct {
 	pool      *fakeIPPool
 	forwarder *forwarder
 	fakeOn    atomic.Bool
+	cachePath string
+	cacheMu   sync.Mutex
 
 	queries      atomic.Int64
 	fakeAnswered atomic.Int64
@@ -71,7 +81,11 @@ func New(opts Options) *Server {
 	}
 	idle := opts.IdleTTL
 	if idle <= 0 {
-		idle = 10 * time.Minute
+		idle = defaultFakeIPIdleTTL
+	}
+	maxEntries := opts.MaxPoolEntries
+	if maxEntries <= 0 {
+		maxEntries = defaultFakeIPMaxSize
 	}
 	logger := opts.Logger
 	if logger == nil {
@@ -86,8 +100,14 @@ func New(opts Options) *Server {
 		filter:    newSuffixFilter(opts.FakeIPFilter),
 		prefix:    prefix,
 		logger:    logger,
-		pool:      newFakeIPPool(prefix, idle, opts.MaxPoolEntries),
+		pool:      newFakeIPPool(prefix, idle, maxEntries),
 		forwarder: newForwarder(opts.Upstreams),
+		cachePath: opts.CachePath,
+	}
+	if count, err := s.loadFakeIPCache(time.Now()); err != nil {
+		logger.Warn("fake-ip 缓存恢复失败，使用空映射", "path", opts.CachePath, "err", err)
+	} else if count > 0 {
+		logger.Info("fake-ip 缓存已恢复", "entries", count)
 	}
 	s.fakeOn.Store(opts.FakeIPEnabled)
 	return s
@@ -154,6 +174,7 @@ func (s *Server) Serve(ctx context.Context, pc *net.UDPConn, l *net.TCPListener)
 	errCh := make(chan error, 2)
 	go func() { errCh <- s.udp.ActivateAndServe() }()
 	go func() { errCh <- s.tcp.ActivateAndServe() }()
+	go s.persistFakeIPCache(ctx)
 	s.logger.Info("DNS 服务已启动", "udp", pc.LocalAddr(), "tcp", l.Addr(), "fake_ip", s.fakeOn.Load())
 
 	select {
@@ -169,12 +190,16 @@ func (s *Server) Serve(ctx context.Context, pc *net.UDPConn, l *net.TCPListener)
 // Shutdown stops both listeners.
 func (s *Server) Shutdown() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.udp != nil {
-		_ = s.udp.Shutdown()
+	udp, tcp := s.udp, s.tcp
+	s.mu.Unlock()
+	if udp != nil {
+		_ = udp.Shutdown()
 	}
-	if s.tcp != nil {
-		_ = s.tcp.Shutdown()
+	if tcp != nil {
+		_ = tcp.Shutdown()
+	}
+	if err := s.flushFakeIPCache(time.Now()); err != nil {
+		s.logger.Warn("fake-ip 缓存保存失败", "path", s.cachePath, "err", err)
 	}
 }
 

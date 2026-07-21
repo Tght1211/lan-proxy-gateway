@@ -2,8 +2,10 @@ package dns
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/netip"
+	"os"
 	"testing"
 	"time"
 
@@ -21,12 +23,12 @@ var (
 func TestDecide(t *testing.T) {
 	filter := newSuffixFilter(nil)
 	cases := []struct {
-		name    string
-		client  netip.Addr
-		qname   string
-		qtype   uint16
-		fakeOn  bool
-		want    action
+		name   string
+		client netip.Addr
+		qname  string
+		qtype  uint16
+		fakeOn bool
+		want   action
 	}{
 		{"fake A for LAN client", lanClient, "example.com.", dns.TypeA, true, actionFakeIP},
 		{"no fake when disabled", lanClient, "example.com.", dns.TypeA, false, actionForward},
@@ -123,6 +125,118 @@ func TestFakeIPPoolLRUEviction(t *testing.T) {
 	}
 }
 
+func TestDefaultFakeIPRetentionCoversLongDeviceCaches(t *testing.T) {
+	now := time.Now()
+	s := New(Options{FakeIPRange: prefix})
+	ip := s.pool.Get("cached.example.", now)
+	if _, ok := s.pool.Lookup(ip, now.Add(24*time.Hour)); !ok {
+		t.Fatal("default retention must survive a device cache lasting 24 hours")
+	}
+}
+
+func TestFakeIPSnapshotKeepsConcurrentDirtyState(t *testing.T) {
+	now := time.Now()
+	p := newFakeIPPool(prefix, time.Hour, 100)
+	p.Get("a.example.", now)
+	p.snapshot(now)
+	if p.dirty.Load() {
+		t.Fatal("snapshot should mark persisted state clean")
+	}
+	p.Get("b.example.", now.Add(time.Second))
+	if !p.dirty.Load() {
+		t.Fatal("mutation after snapshot must remain dirty for the next flush")
+	}
+}
+
+func TestFakeIPTouchMarksCacheDirtyAfterPersistenceWindow(t *testing.T) {
+	now := time.Now()
+	p := newFakeIPPool(prefix, time.Hour, 100)
+	ip := p.Get("a.example.", now)
+	p.snapshot(now)
+	if _, ok := p.Lookup(ip, now.Add(cacheTouchInterval-time.Second)); !ok {
+		t.Fatal("mapping unexpectedly missing")
+	}
+	if p.dirty.Load() {
+		t.Fatal("short-lived touch should not force a full cache rewrite")
+	}
+	if _, ok := p.Lookup(ip, now.Add(cacheTouchInterval)); !ok {
+		t.Fatal("mapping unexpectedly missing")
+	}
+	if !p.dirty.Load() {
+		t.Fatal("touch after persistence window must schedule a cache rewrite")
+	}
+}
+
+func TestFakeIPCacheSurvivesRestart(t *testing.T) {
+	cachePath := t.TempDir() + "/fakeip-cache.json"
+	now := time.Now().Round(time.Second)
+	s1 := New(Options{FakeIPRange: prefix, FakeIPEnabled: true, CachePath: cachePath})
+	ipA := s1.pool.Get("a.example.", now)
+	ipB := s1.pool.Get("b.example.", now.Add(time.Second))
+	s1.Shutdown()
+	info, err := os.Stat(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("cache mode = %o, want 600", info.Mode().Perm())
+	}
+
+	s2 := New(Options{FakeIPRange: prefix, FakeIPEnabled: true, CachePath: cachePath})
+	if name, ok := s2.LookupFakeIP(ipA); !ok || name != "a.example." {
+		t.Fatalf("restored lookup = %q %v", name, ok)
+	}
+	if got := s2.pool.Get("b.example.", now.Add(3*time.Second)); got != ipB {
+		t.Fatalf("stable restored IP = %s, want %s", got, ipB)
+	}
+	if got := s2.pool.Get("c.example.", now.Add(4*time.Second)); got == ipA || got == ipB {
+		t.Fatalf("allocation cursor reused restored IP %s", got)
+	}
+}
+
+func TestFakeIPCacheDropsExpiredAndInvalidEntries(t *testing.T) {
+	cachePath := t.TempDir() + "/fakeip-cache.json"
+	now := time.Now().Round(time.Second)
+	snapshot := fakeIPCacheFile{
+		Version: fakeIPCacheVersion,
+		Prefix:  prefix.String(),
+		Offset:  20,
+		Entries: []fakeIPCacheEntry{
+			{IP: netip.MustParseAddr("198.18.0.7"), Name: "fresh.example.", LastSeen: now.Add(-time.Hour)},
+			{IP: netip.MustParseAddr("198.18.0.8"), Name: "expired.example.", LastSeen: now.Add(-2 * time.Hour)},
+			{IP: netip.MustParseAddr("203.0.113.1"), Name: "outside.example.", LastSeen: now},
+		},
+	}
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cachePath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := New(Options{FakeIPRange: prefix, IdleTTL: 90 * time.Minute, CachePath: cachePath})
+	if _, ok := s.pool.Lookup(netip.MustParseAddr("198.18.0.7"), now); !ok {
+		t.Fatal("fresh entry should be restored")
+	}
+	if _, ok := s.pool.Lookup(netip.MustParseAddr("198.18.0.8"), now); ok {
+		t.Fatal("expired entry should be dropped")
+	}
+	if s.pool.Len() != 1 {
+		t.Fatalf("restored pool size = %d, want 1", s.pool.Len())
+	}
+}
+
+func TestFakeIPCacheCorruptionDoesNotPreventServer(t *testing.T) {
+	cachePath := t.TempDir() + "/fakeip-cache.json"
+	if err := os.WriteFile(cachePath, []byte("not-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := New(Options{FakeIPRange: prefix, CachePath: cachePath})
+	if got := s.pool.Get("example.com.", time.Now()); !prefix.Contains(got) {
+		t.Fatalf("new mapping %s outside pool", got)
+	}
+}
+
 // ---------- fake upstream + handler e2e ----------
 
 func startFakeUpstream(t *testing.T, answers map[string]string) string {
@@ -156,14 +270,14 @@ type fakeRW struct {
 	msg    *dns.Msg
 }
 
-func (f *fakeRW) LocalAddr() net.Addr        { return &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 53} }
-func (f *fakeRW) RemoteAddr() net.Addr       { return f.remote }
-func (f *fakeRW) WriteMsg(m *dns.Msg) error  { f.msg = m; return nil }
+func (f *fakeRW) LocalAddr() net.Addr         { return &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 53} }
+func (f *fakeRW) RemoteAddr() net.Addr        { return f.remote }
+func (f *fakeRW) WriteMsg(m *dns.Msg) error   { f.msg = m; return nil }
 func (f *fakeRW) Write(b []byte) (int, error) { return len(b), nil }
-func (f *fakeRW) Close() error               { return nil }
-func (f *fakeRW) TsigStatus() error          { return nil }
-func (f *fakeRW) TsigTimersOnly(bool)        {}
-func (f *fakeRW) Hijack()                    {}
+func (f *fakeRW) Close() error                { return nil }
+func (f *fakeRW) TsigStatus() error           { return nil }
+func (f *fakeRW) TsigTimersOnly(bool)         {}
+func (f *fakeRW) Hijack()                     {}
 
 func queryMsg(name string, qtype uint16) *dns.Msg {
 	m := new(dns.Msg)

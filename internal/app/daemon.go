@@ -172,7 +172,7 @@ func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST re
 		Logger:     logger,
 	})
 	if a.Cfg.DNS.Enabled {
-		rt.dns = dns.New(dnsOptions(a.Cfg, logger))
+		rt.dns = dns.New(dnsOptions(a.Cfg, a.Paths.FakeIPCacheFile, logger))
 		rt.bindFakeIP()
 		go func() {
 			if err := rt.dns.ListenAndServe(ctx); err != nil && ctx.Err() == nil {

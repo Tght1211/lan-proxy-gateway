@@ -18,11 +18,12 @@ var ErrNotConfigured = errors.New("gateway.yaml not found; run `gateway install`
 
 // Paths resolves the runtime directory and well-known file paths.
 type Paths struct {
-	Root       string // ~/.config/lan-proxy-gateway on unix
-	ConfigFile string // Root/gateway.yaml
-	LogFile    string // Root/gateway.log (daemon log)
-	PIDFile    string // Root/gateway.pid (daemon pid)
-	StateFile  string // Root/runtime.state (firewall/ipforward rollback)
+	Root            string // ~/.config/lan-proxy-gateway on unix
+	ConfigFile      string // Root/gateway.yaml
+	LogFile         string // Root/gateway.log (daemon log)
+	PIDFile         string // Root/gateway.pid (daemon pid)
+	StateFile       string // Root/runtime.state (firewall/ipforward rollback)
+	FakeIPCacheFile string // Root/fakeip-cache.json (restart-safe DNS mappings)
 }
 
 // ResolvePaths returns the default paths for this platform and user.
@@ -45,11 +46,12 @@ func ResolvePaths() (Paths, error) {
 		root = filepath.Join(home, ".config", "lan-proxy-gateway")
 	}
 	return Paths{
-		Root:       root,
-		ConfigFile: filepath.Join(root, "gateway.yaml"),
-		LogFile:    filepath.Join(root, "gateway.log"),
-		PIDFile:    filepath.Join(root, "gateway.pid"),
-		StateFile:  filepath.Join(root, "runtime.state"),
+		Root:            root,
+		ConfigFile:      filepath.Join(root, "gateway.yaml"),
+		LogFile:         filepath.Join(root, "gateway.log"),
+		PIDFile:         filepath.Join(root, "gateway.pid"),
+		StateFile:       filepath.Join(root, "runtime.state"),
+		FakeIPCacheFile: filepath.Join(root, "fakeip-cache.json"),
 	}, nil
 }
 
