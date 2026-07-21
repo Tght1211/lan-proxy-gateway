@@ -20,6 +20,8 @@ script.js
 .AppleDouble
 .LSOverride
 ._*
+/macos/.build/
+/macos/.swiftpm/
 
 # IDE
 .vscode/

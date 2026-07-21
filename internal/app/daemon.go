@@ -157,6 +157,7 @@ func (a *App) Run(ctx context.Context) error {
 func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST relay.OrigDSTResolver) (*daemonRuntime, error) {
 	rt := &daemonRuntime{logger: logger}
 	rt.tracker = relay.NewTracker()
+	rt.tracker.StartSampling(ctx, 5*time.Second)
 
 	dialer, err := buildDialer(a.Cfg.Egress)
 	if err != nil {

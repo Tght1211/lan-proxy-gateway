@@ -1,0 +1,126 @@
+import AppKit
+import Foundation
+
+@MainActor
+final class AppModel: ObservableObject {
+    @Published var status: GatewayStatus?
+    @Published var stats: RuntimeStats?
+    @Published var selectedSection: AppSection? = .overview
+    @Published var proxyType = "socks5"
+    @Published var proxyHost = "127.0.0.1"
+    @Published var proxyPort = 7897
+    @Published var logText = "正在读取日志..."
+    @Published var serviceStatus = "正在检查..."
+    @Published var isBusy = false
+    @Published var notice: String?
+    @Published var errorMessage: String?
+
+    private let client = GatewayClient()
+    private var timer: Timer?
+
+    init() {
+        timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.refresh(silent: true) }
+        }
+        Task { await refresh(silent: true) }
+    }
+
+    deinit { timer?.invalidate() }
+
+    var isRunning: Bool { status?.running == true }
+    var isConfigured: Bool { status?.configured == true }
+
+    func refresh(silent: Bool = false) async {
+        do {
+            let latest = try await client.status()
+            status = latest
+            if latest.running {
+                stats = try? await client.stats(apiPort: latest.ports.api)
+            } else {
+                stats = nil
+            }
+            if selectedSection == .settings {
+                logText = await client.readLog(path: latest.logFile)
+            }
+            if !silent { notice = "状态已刷新" }
+        } catch {
+            if !silent { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func initializeAndStart() {
+        perform("核心服务已启动") {
+            if !self.isConfigured { _ = try await self.client.initialize() }
+            return try await self.client.start()
+        }
+    }
+
+    func stop() {
+        perform("核心服务已停止") { try await self.client.stop() }
+    }
+
+    func restart() {
+        perform("核心服务已重启") { try await self.client.restart() }
+    }
+
+    func applyProxy() {
+        let host = proxyHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty, (1...65535).contains(proxyPort) else {
+            errorMessage = "请输入有效的代理地址和端口。"
+            return
+        }
+        perform("代理出口已更新") {
+            try await self.client.setProxy(type: self.proxyType, host: host, port: self.proxyPort)
+        }
+    }
+
+    func useDirectConnection() {
+        perform("已切换为直连出口") { try await self.client.setDirect() }
+    }
+
+    func updateServiceStatus() {
+        Task {
+            serviceStatus = (try? await client.serviceStatus()) ?? "未安装"
+        }
+    }
+
+    func installService() {
+        perform("开机自启已安装") { try await self.client.installService() }
+    }
+
+    func uninstallService() {
+        perform("开机自启已移除") { try await self.client.uninstallService() }
+    }
+
+    func installCLI() {
+        perform("CLI 已安装到 /usr/local/bin/gateway") { try await self.client.installCLI() }
+    }
+
+    func reloadLog() {
+        guard let path = status?.logFile else { return }
+        Task { logText = await client.readLog(path: path) }
+    }
+
+    func revealLog() {
+        guard let path = status?.logFile else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+
+    private func perform(_ success: String, operation: @escaping () async throws -> String) {
+        guard !isBusy else { return }
+        isBusy = true
+        notice = nil
+        errorMessage = nil
+        Task {
+            do {
+                let output = try await operation()
+                notice = output.isEmpty ? success : output
+                await refresh(silent: true)
+                updateServiceStatus()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isBusy = false
+        }
+    }
+}

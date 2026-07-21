@@ -4,7 +4,7 @@ BINARY = gateway
 INSTALL_PATH = /usr/local/bin/$(BINARY)
 DIST_DIR = dist
 
-.PHONY: build install uninstall build-all clean test test-core
+.PHONY: build install uninstall build-all build-app dmg clean test test-core
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
@@ -41,8 +41,15 @@ build-all: clean
 	fi
 	@echo "Build complete. Assets in $(DIST_DIR)/"
 
+build-app:
+	swift build --package-path macos --configuration release
+
+dmg:
+	VERSION=$(VERSION) ./macos/build-dmg.sh
+
 clean:
 	rm -rf $(DIST_DIR)/ $(BINARY)
+	rm -rf macos/.build/
 	rm -rf .tmp/ .cache/ .try/
 	rm -f logs/*.log
 	find . -name '.DS_Store' -delete

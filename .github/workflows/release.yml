@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,6 +22,9 @@ jobs:
 
       - name: Build all platforms
         run: make build-all VERSION=${GITHUB_REF_NAME}
+
+      - name: Build macOS DMG
+        run: make dmg VERSION=${GITHUB_REF_NAME}
 
       - name: Create release
         uses: softprops/action-gh-release@v2

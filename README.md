@@ -28,6 +28,7 @@ English: [README_EN.md](README_EN.md)
 - [工作流程](#工作流程)
 - [实际效果](#实际效果)
 - [从 v3 升级到 v4](#从-v3-升级到-v4)
+- [macOS App](#macos-app)
 - [终端控制面板](#终端控制面板)
 - [macOS 系统代理](#macos-系统代理)
 - [常用命令](#常用命令)
@@ -247,6 +248,21 @@ gateway update
 ```
 
 更新命令会显示上述迁移说明，并在确认前保持旧版本不变。
+
+## macOS App
+
+仓库同时维护 Go CLI 和原生 SwiftUI App。两者不是两套网关核心：CLI 与 App 都连接同一个 `gateway` 守护进程，共用配置、状态 API、日志和网络规则。服务已经运行时，从另一个前端再次启动只会连接现有服务，不会创建第二个数据面进程。
+
+App 提供实时流量、活动与历史连接、设备/服务流量排行、延迟、抖动和可用率监控。服务名称来自网关可观察到的目标域名，例如 YouTube、Netflix 或 Nintendo；网关无法读取远端设备的本地进程名，因此不会把域名推断伪装成精确的 App 进程识别。
+
+本机开发构建：
+
+```bash
+make build-app
+make dmg VERSION=v0.1.0-dev
+```
+
+只有 Xcode Command Line Tools 时，`make dmg` 会构建当前 Mac 架构的 App；完整 Xcode 或 GitHub macOS Runner 会构建 universal App。DMG 内包含同版本 `gateway` 核心，App 设置页也可以把 CLI 安装到 `/usr/local/bin/gateway`。
 
 ## 终端控制面板
 

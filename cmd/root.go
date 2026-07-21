@@ -44,6 +44,7 @@ func Execute() {
 func init() {
 	statusCmd.Flags().BoolVar(&statusJSON, "json", false, "机器可读 JSON 输出")
 	rootCmd.AddCommand(
+		initConfigCmd,
 		installCmd,
 		startCmd,
 		restartCmd,
