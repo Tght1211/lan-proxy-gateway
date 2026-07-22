@@ -107,8 +107,22 @@ final class AppModel: ObservableObject {
         perform("已切换为直连出口") { try await self.client.setDirect() }
     }
 
-    func applyRoutingRules(_ rules: [RoutingRule]) {
-        perform("分流规则已更新") { try await self.client.setRoutingRules(rules) }
+    @discardableResult
+    func applyRoutingRules(_ rules: [RoutingRule]) async -> Bool {
+        guard !isBusy else { return false }
+        isBusy = true
+        notice = nil
+        errorMessage = nil
+        defer { isBusy = false }
+        do {
+            _ = try await client.setRoutingRules(rules)
+            showNotice("分流规则已更新")
+            await refresh(silent: true)
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
     }
 
     func updateServiceStatus() {

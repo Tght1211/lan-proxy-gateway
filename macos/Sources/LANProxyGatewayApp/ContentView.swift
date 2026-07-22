@@ -886,7 +886,13 @@ private struct ConnectionsView: View {
                 item.service.localizedCaseInsensitiveContains(search)
             let matchesStatus = statusFilter == "全部" || (statusFilter == "活跃" ? item.endedAt == nil : item.endedAt != nil)
             let matchesDevice = deviceFilter == "全部设备" || item.srcIP == deviceFilter
-            let matchesRoute = routeFilter == "全部出口" || (routeFilter == "代理" ? item.viaProxy : !item.viaProxy)
+            let matchesRoute: Bool
+            switch routeFilter {
+            case "代理": matchesRoute = item.viaProxy && !item.rejected
+            case "直连": matchesRoute = !item.viaProxy && !item.rejected
+            case "拒绝": matchesRoute = item.rejected
+            default: matchesRoute = true
+            }
             let matchesResolution = !unresolvedOnly || item.service == "未解析域名"
             return matchesSearch && matchesStatus && matchesDevice && matchesRoute && matchesResolution
         }
@@ -913,7 +919,7 @@ private struct ConnectionsView: View {
                     }
                 }.labelsHidden().frame(width: 150)
                 Picker("出口", selection: $routeFilter) {
-                    Text("全部出口").tag("全部出口"); Text("代理").tag("代理"); Text("直连").tag("直连")
+                    Text("全部出口").tag("全部出口"); Text("代理").tag("代理"); Text("直连").tag("直连"); Text("拒绝").tag("拒绝")
                 }.labelsHidden().frame(width: 120)
                 Toggle("仅未解析域名", isOn: $unresolvedOnly).toggleStyle(.checkbox).font(.caption)
                 Image(systemName: "info.circle").foregroundStyle(Theme.muted)
@@ -925,7 +931,10 @@ private struct ConnectionsView: View {
 
             Table(connections) {
                 TableColumn("状态") { item in
-                    HStack(spacing: 6) { Circle().fill(item.endedAt == nil ? Theme.lime : Theme.muted).frame(width: 6, height: 6); Text(item.endedAt == nil ? "活跃" : "完成") }
+                    HStack(spacing: 6) {
+                        Circle().fill(item.rejected ? Theme.coral : (item.endedAt == nil ? Theme.lime : Theme.muted)).frame(width: 6, height: 6)
+                        Text(item.rejected ? "拒绝" : (item.endedAt == nil ? "活跃" : "完成"))
+                    }
                 }.width(70)
                 TableColumn("设备") { item in
                     VStack(alignment: .leading, spacing: 1) {
@@ -937,7 +946,10 @@ private struct ConnectionsView: View {
                 }.width(min: 125, ideal: 155)
                 TableColumn("识别服务") { Text($0.service).fontWeight(.medium) }.width(min: 100, ideal: 130)
                 TableColumn("目标域名 / 地址") { Text("\($0.dstHost):\($0.dstPort)").font(.system(.body, design: .monospaced)) }
-                TableColumn("出口") { Text($0.viaProxy ? "PROXY" : "DIRECT").foregroundStyle($0.viaProxy ? Theme.cyan : Theme.yellow) }.width(70)
+                TableColumn("出口") { item in
+                    Text(item.rejected ? "REJECT" : (item.viaProxy ? "PROXY" : "DIRECT"))
+                        .foregroundStyle(item.rejected ? Theme.coral : (item.viaProxy ? Theme.cyan : Theme.yellow))
+                }.width(70)
                 TableColumn("流量") { Text(bytes($0.up + $0.down)) }.width(80)
                 TableColumn("时间") { Text($0.startedAt, style: .time) }.width(70)
             }
@@ -1161,6 +1173,8 @@ private struct RoutingRulesEditor: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var draft: [RoutingRule]
+    @State private var isSaving = false
+    @State private var saveError: String?
 
     init(rules: [RoutingRule]) { _draft = State(initialValue: rules) }
 
@@ -1169,23 +1183,27 @@ private struct RoutingRulesEditor: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("分流规则").font(.title2.weight(.semibold))
-                    Text("按顺序匹配第一条规则；局域网网关无法识别远端设备的 PROCESS-NAME。")
+                    Text("按顺序匹配第一条规则，可拖拽调整顺序；局域网网关无法识别远端设备的 PROCESS-NAME。")
                         .font(.caption).foregroundStyle(Theme.muted)
                 }
                 Spacer()
                 Button { addRule() } label: { Label("添加规则", systemImage: "plus") }.buttonStyle(.bordered)
             }.padding(20)
             Divider()
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 8) {
+            if draft.isEmpty {
+                EmptyTelemetry(icon: "arrow.triangle.branch", text: "暂无规则，全部流量使用默认出口")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
                     ForEach($draft) { $rule in
                         HStack(spacing: 10) {
                             Image(systemName: "line.3.horizontal").foregroundStyle(Theme.muted)
                             Picker("类型", selection: $rule.type) {
                                 Text("完整域名").tag("domain")
                                 Text("域名后缀").tag("domain-suffix")
+                                Text("IP-CIDR").tag("ip-cidr")
                             }.labelsHidden().frame(width: 125)
-                            TextField("例如 openai.com", text: $rule.value).textFieldStyle(DarkFieldStyle())
+                            TextField(placeholder(for: rule.type), text: $rule.value).textFieldStyle(DarkFieldStyle())
                             Picker("动作", selection: $rule.action) {
                                 Text("上游代理").tag("proxy")
                                 Text("本机直连").tag("direct")
@@ -1195,26 +1213,62 @@ private struct RoutingRulesEditor: View {
                                 Image(systemName: "trash")
                             }.buttonStyle(.plain)
                         }
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .padding(.vertical, 2)
                     }
-                    if draft.isEmpty {
-                        EmptyTelemetry(icon: "arrow.triangle.branch", text: "暂无规则，全部流量使用默认出口")
-                            .frame(minHeight: 220)
+                    .onMove { indices, offset in
+                        draft.move(fromOffsets: indices, toOffset: offset)
                     }
-                }.padding(20)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.hidden)
+                .padding(.vertical, 8)
             }
             Divider()
             HStack {
-                Text("PROXY \(count("proxy")) · DIRECT \(count("direct")) · REJECT \(count("reject"))")
-                    .font(.caption).foregroundStyle(Theme.muted)
+                if let saveError {
+                    Label(saveError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(Theme.coral).lineLimit(2)
+                } else {
+                    Text("PROXY \(count("proxy")) · DIRECT \(count("direct")) · REJECT \(count("reject"))")
+                        .font(.caption).foregroundStyle(Theme.muted)
+                }
                 Spacer()
-                Button("取消") { dismiss() }.buttonStyle(.bordered)
-                Button("应用规则") {
-                    model.applyRoutingRules(draft)
-                    dismiss()
-                }.buttonStyle(ActionButtonStyle(tint: Theme.cyan)).disabled(hasInvalidRule || model.isBusy)
+                Button("取消") { dismiss() }.buttonStyle(.bordered).disabled(isSaving)
+                Button {
+                    save()
+                } label: {
+                    if isSaving {
+                        ProgressView().controlSize(.small).frame(width: 56)
+                    } else {
+                        Text("应用规则")
+                    }
+                }
+                .buttonStyle(ActionButtonStyle(tint: Theme.cyan))
+                .disabled(hasInvalidRule || isSaving || model.isBusy)
             }.padding(20)
         }
         .frame(width: 760, height: 520).background(Theme.canvas)
+    }
+
+    private func save() {
+        saveError = nil
+        isSaving = true
+        Task {
+            let ok = await model.applyRoutingRules(draft)
+            isSaving = false
+            if ok {
+                dismiss()
+            } else {
+                saveError = model.errorMessage ?? "保存失败，请检查规则"
+            }
+        }
+    }
+
+    private func placeholder(for type: String) -> String {
+        type == "ip-cidr" ? "例如 192.168.1.0/24" : "例如 openai.com"
     }
 
     private var hasInvalidRule: Bool { draft.contains { $0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }

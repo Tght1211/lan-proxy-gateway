@@ -125,10 +125,12 @@ struct ConnectionInfo: Decodable, Identifiable {
     let startedAt: Date
     let endedAt: Date?
     let viaProxy: Bool
+    let rejected: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, up, down
         case service
+        case rejected
         case srcIP = "src_ip"
         case dstHost = "dst_host"
         case dstPort = "dst_port"
@@ -150,6 +152,7 @@ struct ConnectionInfo: Decodable, Identifiable {
         startedAt = try values.decode(Date.self, forKey: .startedAt)
         endedAt = try values.decodeIfPresent(Date.self, forKey: .endedAt)
         viaProxy = try values.decodeIfPresent(Bool.self, forKey: .viaProxy) ?? false
+        rejected = try values.decodeIfPresent(Bool.self, forKey: .rejected) ?? false
     }
 }
 
