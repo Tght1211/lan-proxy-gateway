@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/net/publicsuffix"
 )
 
 const (
@@ -255,8 +257,11 @@ func appendBoundedFront[T any](items []T, item T, limit int) []T {
 // suffix without requiring an external classification service.
 func classifyService(host string) string {
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
-	if parsed := net.ParseIP(host); parsed != nil || host == "" {
-		return "未识别流量"
+	if host == "" {
+		return "未知目标"
+	}
+	if parsed := net.ParseIP(host); parsed != nil {
+		return "IP 地址流量"
 	}
 	patterns := []struct {
 		name     string
@@ -269,7 +274,14 @@ func classifyService(host string) string {
 		{"PlayStation", []string{"playstation.net", "playstation.com", "sonyentertainmentnetwork.com"}},
 		{"Steam", []string{"steampowered.com", "steamcontent.com", "steamstatic.com"}},
 		{"TikTok", []string{"tiktok.com", "tiktokcdn.com", "byteoversea.com"}},
+		{"抖音", []string{"douyin.com", "douyinvod.com", "douyinstatic.com", "amemv.com", "snssdk.com", "byteimg.com"}},
+		{"小红书", []string{"xiaohongshu.com", "xhscdn.com", "xhscdn.net"}},
+		{"微信", []string{"weixin.qq.com", "wechat.com", "weixinbridge.com", "qpic.cn"}},
+		{"腾讯", []string{"qq.com", "gtimg.com", "qcloud.com", "myqcloud.com"}},
+		{"百度", []string{"baidu.com", "bdstatic.com", "bcebos.com", "baidubce.com"}},
+		{"阿里巴巴", []string{"alibaba.com", "alibabacloud.com", "alicdn.com", "aliyun.com", "taobao.com", "tmall.com"}},
 		{"哔哩哔哩", []string{"bilibili.com", "bilivideo.com", "hdslb.com"}},
+		{"Garmin", []string{"garmin.com", "garmin.cn"}},
 		{"GitHub", []string{"github.com", "githubusercontent.com", "githubassets.com"}},
 		{"Microsoft", []string{"microsoft.com", "live.com", "windows.net", "xboxlive.com"}},
 		{"Google", []string{"google.com", "googleapis.com", "gstatic.com"}},
@@ -286,9 +298,8 @@ func classifyService(host string) string {
 			}
 		}
 	}
-	parts := strings.Split(host, ".")
-	if len(parts) >= 2 {
-		return strings.Join(parts[len(parts)-2:], ".")
+	if domain, err := publicsuffix.EffectiveTLDPlusOne(host); err == nil {
+		return domain
 	}
 	return host
 }

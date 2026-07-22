@@ -39,6 +39,7 @@
 - The App bundles the same Go `gateway` executable and can install it to `/usr/local/bin/gateway`.
 - First-run guidance takes users from their third-party proxy address to a running gateway.
 - Older running cores are decoded defensively and shown with a one-click current-core restart prompt.
+- Telemetry schema v2 adds cached egress public IP/region/ISP identity and improved DNS-assisted service labels.
 - LaunchDaemon installation first places the bundled core at `/usr/local/bin/gateway`, so it never depends on a mounted DMG or movable App path.
 
 ### Build and release
@@ -81,7 +82,7 @@ dist/LANProxyGateway-v4.1.0-dev-macos-arm64.dmg
 4. Add Developer ID signing and notarization (`notarytool`) to Release secrets/workflow.
 5. Decide whether to persist hourly/daily telemetry in SQLite. Add retention and privacy controls before doing so.
 6. Add optional device aliases based on user-entered names; do not guess identities from IP addresses.
-7. Evolve the current `schema_version: 1` contract deliberately when adding incompatible telemetry fields.
+7. Evolve the current `schema_version: 2` contract deliberately when adding incompatible telemetry fields.
 
 ## Key files
 

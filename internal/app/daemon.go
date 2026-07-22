@@ -243,6 +243,7 @@ func (rt *daemonRuntime) bindFakeIP() {
 	}
 	prefix := rt.dns.FakeIPRange()
 	rt.relay.SetFakeIP(&prefix, rt.dns.LookupFakeIP)
+	rt.relay.SetRealIPLookup(rt.dns.LookupRealIP)
 }
 
 // watchConfig polls the config file mtime and applies changes (belt; the

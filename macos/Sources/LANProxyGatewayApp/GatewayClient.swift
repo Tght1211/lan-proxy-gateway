@@ -132,9 +132,13 @@ struct GatewayClient {
             }
             defer { try? handle.close() }
             let data = (try? handle.readToEnd()) ?? Data()
-            let text = String(decoding: data.suffix(160_000), as: UTF8.self)
-            return text.split(separator: "\n", omittingEmptySubsequences: false)
-                .suffix(300).joined(separator: "\n")
+            let tail = data.suffix(160_000)
+            let text = String(decoding: tail, as: UTF8.self)
+            var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+            if data.count > tail.count, !lines.isEmpty {
+                lines.removeFirst()
+            }
+            return lines.suffix(300).reversed().joined(separator: "\n")
         }.value
     }
 

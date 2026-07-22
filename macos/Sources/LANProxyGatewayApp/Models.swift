@@ -124,7 +124,8 @@ struct ConnectionInfo: Decodable, Identifiable {
         srcIP = try values.decodeIfPresent(String.self, forKey: .srcIP) ?? "--"
         dstHost = try values.decodeIfPresent(String.self, forKey: .dstHost) ?? "--"
         dstPort = try values.decodeIfPresent(Int.self, forKey: .dstPort) ?? 0
-        service = try values.decodeIfPresent(String.self, forKey: .service) ?? "未识别流量"
+        let decodedService = try values.decodeIfPresent(String.self, forKey: .service) ?? "IP 地址流量"
+        service = decodedService == "未识别流量" ? "IP 地址流量" : decodedService
         up = try values.decodeIfPresent(Int64.self, forKey: .up) ?? 0
         down = try values.decodeIfPresent(Int64.self, forKey: .down) ?? 0
         startedAt = try values.decode(Date.self, forKey: .startedAt)
@@ -148,6 +149,7 @@ struct UsageAggregate: Decodable, Identifiable {
     let lastSeen: Date
     var id: String { name }
     var total: Int64 { up + down }
+    var displayName: String { name == "未识别流量" ? "IP 地址流量" : name }
 
     enum CodingKeys: String, CodingKey {
         case name, up, down, connections
@@ -178,6 +180,7 @@ struct HealthStats: Decodable {
     let jitterMS: Double
     let availability: Double
     let history: [ProbePoint]
+    let egressIdentity: EgressIdentity?
 
     enum CodingKeys: String, CodingKey {
         case healthy
@@ -187,6 +190,7 @@ struct HealthStats: Decodable {
         case latencyMS = "latency_ms"
         case jitterMS = "jitter_ms"
         case availability, history
+        case egressIdentity = "egress_identity"
     }
 
     init(from decoder: Decoder) throws {
@@ -199,6 +203,22 @@ struct HealthStats: Decodable {
         jitterMS = try values.decodeIfPresent(Double.self, forKey: .jitterMS) ?? 0
         availability = try values.decodeIfPresent(Double.self, forKey: .availability) ?? 0
         history = try values.decodeIfPresent([ProbePoint].self, forKey: .history) ?? []
+        egressIdentity = try values.decodeIfPresent(EgressIdentity.self, forKey: .egressIdentity)
+    }
+}
+
+struct EgressIdentity: Decodable {
+    let ip: String
+    let countryCode: String?
+    let region: String?
+    let city: String?
+    let isp: String?
+    let checkedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case ip, region, city, isp
+        case countryCode = "country_code"
+        case checkedAt = "checked_at"
     }
 }
 

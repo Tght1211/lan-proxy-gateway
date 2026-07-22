@@ -3,16 +3,16 @@ import Charts
 import SwiftUI
 
 private enum Theme {
-    static let canvas = Color(red: 0.035, green: 0.043, blue: 0.047)
-    static let sidebar = Color(red: 0.055, green: 0.064, blue: 0.068)
-    static let panel = Color(red: 0.075, green: 0.086, blue: 0.09)
-    static let panelRaised = Color(red: 0.095, green: 0.108, blue: 0.112)
-    static let border = Color.white.opacity(0.09)
-    static let cyan = Color(red: 0.20, green: 0.86, blue: 0.82)
-    static let coral = Color(red: 1.0, green: 0.38, blue: 0.31)
-    static let lime = Color(red: 0.62, green: 0.91, blue: 0.30)
-    static let yellow = Color(red: 1.0, green: 0.78, blue: 0.24)
-    static let muted = Color.white.opacity(0.55)
+    static let canvas = Color(red: 0.955, green: 0.961, blue: 0.969)
+    static let sidebar = Color(red: 0.925, green: 0.937, blue: 0.945)
+    static let panel = Color.white
+    static let panelRaised = Color(red: 0.969, green: 0.975, blue: 0.979)
+    static let border = Color(red: 0.835, green: 0.855, blue: 0.875)
+    static let cyan = Color(red: 0.08, green: 0.42, blue: 0.36)
+    static let coral = Color(red: 0.72, green: 0.20, blue: 0.18)
+    static let lime = Color(red: 0.20, green: 0.52, blue: 0.28)
+    static let yellow = Color(red: 0.78, green: 0.47, blue: 0.08)
+    static let muted = Color(nsColor: .secondaryLabelColor)
 }
 
 struct ContentView: View {
@@ -32,7 +32,8 @@ struct ContentView: View {
             }
             .background(Theme.canvas)
         }
-        .preferredColorScheme(.dark)
+        .tint(Theme.cyan)
+        .preferredColorScheme(.light)
         .toolbar(.hidden, for: .windowToolbar)
         .alert("操作失败", isPresented: Binding(
             get: { model.errorMessage != nil },
@@ -54,13 +55,13 @@ struct ContentView: View {
         VStack(spacing: 0) {
             HStack(spacing: 11) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 7).fill(Theme.cyan)
-                    Image(systemName: "network").foregroundStyle(Color.black).font(.system(size: 18, weight: .bold))
+                    RoundedRectangle(cornerRadius: 7).fill(Theme.cyan.opacity(0.16))
+                    Image(systemName: "network").foregroundStyle(Theme.cyan).font(.system(size: 17, weight: .semibold))
                 }
-                .frame(width: 34, height: 34)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("LAN GATEWAY").font(.system(size: 13, weight: .bold))
-                    Text("NETWORK CORE").font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.cyan)
+                .frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("旁路由").font(.system(size: 14, weight: .semibold))
+                    Text("LAN Proxy Gateway").font(.system(size: 10)).foregroundStyle(Theme.muted)
                 }
                 Spacer()
             }
@@ -80,8 +81,8 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 8) {
                     Circle().fill(model.isRunning ? Theme.lime : Theme.muted).frame(width: 7, height: 7)
-                    Text(model.isRunning ? "CORE ONLINE" : "CORE OFFLINE")
-                        .font(.system(size: 10, weight: .bold))
+                    Text(model.isRunning ? "服务运行中" : "服务已停止")
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(model.isRunning ? Theme.lime : Theme.muted)
                 }
                 Text(model.status?.gateway.localIP.nonEmpty ?? "等待网络检测")
@@ -89,10 +90,10 @@ struct ContentView: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.black.opacity(0.16))
+            .background(Theme.panel.opacity(0.72))
         }
         .background(Theme.sidebar)
-        .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 230)
+        .navigationSplitViewColumnWidth(min: 172, ideal: 184, max: 200)
     }
 
     @ViewBuilder private var detail: some View {
@@ -136,15 +137,16 @@ private struct TopBar: View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.selectedSection?.rawValue ?? "网络总览").font(.system(size: 18, weight: .semibold))
-                Text(Date.now, style: .time).font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.muted)
+                Text(model.isRunning ? "网关服务正常 · \(model.status?.gateway.localIP.nonEmpty ?? "正在检测网络")" : "网关服务未运行")
+                    .font(.system(size: 11)).foregroundStyle(Theme.muted)
             }
             Spacer()
             if model.isBusy { ProgressView().controlSize(.small) }
             Button { Task { await model.refresh() } } label: { Image(systemName: "arrow.clockwise") }
                 .buttonStyle(IconButtonStyle()).help("刷新")
             if model.isRunning {
-                Button { model.restart() } label: { Image(systemName: "bolt.fill") }
-                    .buttonStyle(IconButtonStyle()).help("重启核心")
+                Button { model.restart() } label: { Label("重启", systemImage: "arrow.triangle.2.circlepath") }
+                    .buttonStyle(.bordered).help("重启核心服务")
                 Button { model.stop() } label: { Label("停止核心", systemImage: "stop.fill") }
                     .buttonStyle(ActionButtonStyle(tint: Theme.coral))
             } else {
@@ -155,7 +157,7 @@ private struct TopBar: View {
             }
         }
         .padding(.horizontal, 24)
-        .frame(height: 64)
+        .frame(height: 58)
         .background(Theme.canvas)
         .disabled(model.isBusy)
     }
@@ -170,16 +172,14 @@ private struct OverviewView: View {
                 if model.status?.configured == false {
                     GettingStartedPanel()
                 }
-                HStack(spacing: 16) {
-                    CoreHero().frame(width: 310)
-                    ThroughputChart(compact: true).frame(minWidth: 480, minHeight: 230)
-                }
+                GatewaySummary()
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
                     MetricCard("实时下载", speed(model.stats?.relay.traffic.last?.down ?? 0), "arrow.down", Theme.cyan)
                     MetricCard("实时上传", speed(model.stats?.relay.traffic.last?.up ?? 0), "arrow.up", Theme.yellow)
                     MetricCard("活动连接", "\(model.stats?.relay.active.count ?? 0)", "point.3.connected.trianglepath.dotted", Theme.lime)
                     MetricCard("活跃设备", "\(model.activeDeviceCount)", "desktopcomputer", Theme.coral)
                 }
+                ThroughputChart(compact: true).frame(minHeight: 270)
                 HStack(alignment: .top, spacing: 16) {
                     ServiceRanking(limit: 6).frame(maxWidth: .infinity)
                     StabilitySummary().frame(width: 330)
@@ -191,6 +191,63 @@ private struct OverviewView: View {
     }
 }
 
+private struct GatewaySummary: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        Panel {
+            HStack(spacing: 20) {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle().fill((model.isRunning ? Theme.lime : Theme.coral).opacity(0.14))
+                        Image(systemName: model.isRunning ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                            .font(.system(size: 24)).foregroundStyle(model.isRunning ? Theme.lime : Theme.coral)
+                    }
+                    .frame(width: 48, height: 48)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(model.isRunning ? "旁路由正在工作" : "旁路由未启动")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text(model.isRunning ? "局域网设备可以使用当前网关" : "启动后才会接管局域网设备流量")
+                            .font(.caption).foregroundStyle(Theme.muted)
+                    }
+                }
+                Spacer(minLength: 12)
+                SummaryFact("网关地址", model.status?.gateway.localIP.nonEmpty ?? "--")
+                SummaryFact("网络接口", model.status?.gateway.interface.nonEmpty ?? "--")
+                SummaryFact("出口", model.status?.egress == "proxy" ? "代理" : "直连")
+                SummaryFact("DNS", model.status?.dns.enabled == true ? "已启用" : "未启用")
+                ExitIdentityFact(identity: model.stats?.health.egressIdentity)
+                SummaryFact("运行时间", uptime(model.stats?.uptimeSec ?? 0))
+            }
+        }
+    }
+}
+
+private struct ExitIdentityFact: View {
+    let identity: EgressIdentity?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("公网出口").font(.caption2).foregroundStyle(Theme.muted)
+            Text(identity?.ip ?? "正在检测")
+                .font(.system(size: 12, weight: .medium, design: .monospaced)).lineLimit(1)
+            Text(egressLocation(identity)).font(.caption2).foregroundStyle(Theme.muted).lineLimit(1)
+        }
+        .frame(minWidth: 112, alignment: .leading)
+    }
+}
+
+private struct SummaryFact: View {
+    let label: String
+    let value: String
+    init(_ label: String, _ value: String) { self.label = label; self.value = value }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(.caption2).foregroundStyle(Theme.muted)
+            Text(value).font(.system(size: 12, weight: .medium, design: .monospaced)).lineLimit(1)
+        }
+    }
+}
+
 private struct CoreHero: View {
     @EnvironmentObject private var model: AppModel
 
@@ -198,7 +255,7 @@ private struct CoreHero: View {
         Panel {
             VStack(alignment: .leading, spacing: 17) {
                 HStack {
-                    Text("CORE STATUS").eyebrow()
+                    Text("核心状态").sectionLabel()
                     Spacer()
                     LiveBadge(active: model.isRunning)
                 }
@@ -266,15 +323,17 @@ private struct ThroughputChart: View {
     let compact: Bool
 
     var body: some View {
+        let allPoints = model.stats?.relay.traffic ?? []
+        let points = compact ? Array(allPoints.suffix(60)) : allPoints
         Panel {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Text("LIVE THROUGHPUT").eyebrow()
+                    Text("实时吞吐").sectionLabel()
                     Spacer()
                     ChartLegend(color: Theme.cyan, text: "下载")
                     ChartLegend(color: Theme.yellow, text: "上传")
                 }
-                Chart(model.stats?.relay.traffic ?? []) { point in
+                Chart(points) { point in
                     AreaMark(x: .value("时间", point.at), y: .value("下载", Double(point.down) / 5))
                         .foregroundStyle(LinearGradient(colors: [Theme.cyan.opacity(0.28), Theme.cyan.opacity(0.01)], startPoint: .top, endPoint: .bottom))
                         .interpolationMethod(.catmullRom)
@@ -283,14 +342,14 @@ private struct ThroughputChart: View {
                     LineMark(x: .value("时间", point.at), y: .value("上传", Double(point.up) / 5))
                         .foregroundStyle(Theme.yellow).lineStyle(StrokeStyle(lineWidth: 1.5)).interpolationMethod(.catmullRom)
                 }
-                .chartXAxis(compact ? .hidden : .automatic)
+                .chartXAxis(.automatic)
                 .chartYAxis {
                     AxisMarks(position: .leading) { value in
                         AxisGridLine().foregroundStyle(Theme.border)
                         AxisValueLabel { if let bytes = value.as(Double.self) { Text(shortBytes(Int64(bytes)) + "/s") } }
                     }
                 }
-                .chartPlotStyle { $0.background(Color.black.opacity(0.14)) }
+                .chartPlotStyle { $0.background(Theme.canvas.opacity(0.28)) }
             }
         }
     }
@@ -321,7 +380,7 @@ private struct ServicesView: View {
             VStack(spacing: 16) {
                 HStack(spacing: 12) {
                     MetricCard("已识别服务", "\(model.stats?.relay.services.count ?? 0)", "square.stack.3d.up.fill", Theme.cyan)
-                    MetricCard("访问最多", model.stats?.relay.services.first?.name ?? "--", "crown.fill", Theme.yellow)
+                    MetricCard("访问最多", model.stats?.relay.services.first?.displayName ?? "--", "crown.fill", Theme.yellow)
                     MetricCard("服务流量", bytes(model.stats?.relay.services.reduce(0) { $0 + $1.total } ?? 0), "chart.bar.fill", Theme.coral)
                 }
                 ServiceRanking(limit: 14).frame(minHeight: 500)
@@ -339,21 +398,33 @@ private struct ServiceRanking: View {
         Panel {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Text("SERVICE TRAFFIC").eyebrow()
+                    Text("服务流量").sectionLabel()
                     Spacer()
                     Text("域名级识别").font(.caption).foregroundStyle(Theme.muted)
                 }
                 if data.isEmpty {
                     EmptyTelemetry(icon: "square.stack.3d.up", text: "等待服务流量")
                 } else {
-                    Chart(data) { item in
-                        BarMark(x: .value("流量", item.total), y: .value("服务", item.name))
-                            .foregroundStyle(by: .value("服务", item.name)).cornerRadius(3)
-                            .annotation(position: .trailing) { Text(shortBytes(item.total)).font(.caption2).foregroundStyle(Theme.muted) }
+                    let maximum = max(data.first?.total ?? 1, 1)
+                    VStack(spacing: 11) {
+                        ForEach(data) { item in
+                            VStack(spacing: 5) {
+                                HStack {
+                                    Text(item.displayName).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                                    Spacer()
+                                    Text(shortBytes(item.total)).font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.muted)
+                                }
+                                GeometryReader { geometry in
+                                    ZStack(alignment: .leading) {
+                                        Capsule().fill(Theme.panelRaised)
+                                        Capsule().fill(Theme.cyan.opacity(0.72))
+                                            .frame(width: geometry.size.width * CGFloat(Double(item.total) / Double(maximum)))
+                                    }
+                                }
+                                .frame(height: 5)
+                            }
+                        }
                     }
-                    .chartLegend(.hidden)
-                    .chartXAxis(.hidden)
-                    .chartYAxis { AxisMarks { AxisValueLabel().foregroundStyle(Color.white.opacity(0.8)) } }
                 }
             }
         }
@@ -385,7 +456,7 @@ private struct DeviceRanking: View {
         Panel {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Text("DEVICE TRAFFIC").eyebrow()
+                    Text("设备流量").sectionLabel()
                     Spacer()
                     Text("本次运行会话").font(.caption).foregroundStyle(Theme.muted)
                 }
@@ -393,11 +464,30 @@ private struct DeviceRanking: View {
                 if devices.isEmpty {
                     EmptyTelemetry(icon: "desktopcomputer", text: "等待局域网设备接入")
                 } else {
-                    Chart(devices) { item in
-                        BarMark(x: .value("设备", item.name), y: .value("流量", item.total))
-                            .foregroundStyle(Theme.lime.gradient).cornerRadius(3)
+                    let maximum = max(devices.first?.total ?? 1, 1)
+                    VStack(spacing: 13) {
+                        ForEach(devices) { item in
+                            VStack(spacing: 6) {
+                                HStack {
+                                    HStack(spacing: 7) {
+                                        Circle().fill(Theme.lime).frame(width: 7, height: 7)
+                                        Text(item.name).font(.system(size: 13, weight: .medium, design: .monospaced))
+                                    }
+                                    Spacer()
+                                    Text("\(item.connections) 个连接").font(.caption).foregroundStyle(Theme.muted)
+                                    Text(shortBytes(item.total)).font(.system(size: 11, design: .monospaced)).frame(width: 72, alignment: .trailing)
+                                }
+                                GeometryReader { geometry in
+                                    ZStack(alignment: .leading) {
+                                        Capsule().fill(Theme.panelRaised)
+                                        Capsule().fill(Theme.lime.opacity(0.72))
+                                            .frame(width: geometry.size.width * CGFloat(Double(item.total) / Double(maximum)))
+                                    }
+                                }
+                                .frame(height: 6)
+                            }
+                        }
                     }
-                    .chartYAxis { AxisMarks { AxisGridLine().foregroundStyle(Theme.border); AxisValueLabel() } }
                 }
             }
         }
@@ -410,7 +500,7 @@ private struct DeviceSetupPanel: View {
     var body: some View {
         Panel {
             VStack(alignment: .leading, spacing: 14) {
-                Text("DEVICE ONBOARDING").eyebrow()
+                Text("设备接入参数").sectionLabel()
                 HStack(spacing: 28) {
                     SetupValue("网关 / 路由器", model.status?.gateway.localIP.nonEmpty ?? "--")
                     SetupValue("首选 DNS", model.status?.gateway.localIP.nonEmpty ?? "--")
@@ -448,7 +538,7 @@ private struct StabilityChart: View {
     var body: some View {
         Panel {
             VStack(alignment: .leading, spacing: 14) {
-                HStack { Text("LATENCY MONITOR").eyebrow(); Spacer(); LiveBadge(active: model.stats?.health.healthy == true) }
+                HStack { Text("出口延迟").sectionLabel(); Spacer(); LiveBadge(active: model.stats?.health.healthy == true) }
                 Chart(model.stats?.health.history ?? []) { point in
                     LineMark(x: .value("时间", point.at), y: .value("延迟", point.latencyMS))
                         .foregroundStyle(Theme.cyan).interpolationMethod(.catmullRom)
@@ -472,20 +562,18 @@ private struct StabilitySummary: View {
     var body: some View {
         Panel {
             VStack(alignment: .leading, spacing: 15) {
-                Text("NETWORK QUALITY").eyebrow()
-                HStack {
-                    ZStack {
-                        Circle().stroke(Theme.border, lineWidth: 8)
-                        Circle().trim(from: 0, to: min((model.stats?.health.availability ?? 0) / 100, 1))
-                            .stroke(Theme.lime, style: StrokeStyle(lineWidth: 8, lineCap: .round)).rotationEffect(.degrees(-90))
-                        Text(String(format: "%.0f", model.stats?.health.availability ?? 0)).font(.title2.bold())
-                    }.frame(width: 92, height: 92)
-                    VStack(alignment: .leading, spacing: 9) {
-                        QualityRow("健康状态", model.stats?.health.healthy == true ? "稳定" : "异常", model.stats?.health.healthy == true ? Theme.lime : Theme.coral)
-                        QualityRow("平均延迟", formatMS(model.stats?.health.latencyMS), Theme.cyan)
-                        QualityRow("平均抖动", formatMS(model.stats?.health.jitterMS), Theme.yellow)
-                    }
+                Text("网络质量").sectionLabel()
+                HStack(alignment: .firstTextBaseline) {
+                    Text(String(format: "%.1f%%", model.stats?.health.availability ?? 0))
+                        .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    Text("可用率").font(.caption).foregroundStyle(Theme.muted)
+                    Spacer()
+                    LiveBadge(active: model.stats?.health.healthy == true)
                 }
+                ProgressView(value: min((model.stats?.health.availability ?? 0) / 100, 1))
+                    .tint(Theme.lime)
+                QualityRow("平均延迟", formatMS(model.stats?.health.latencyMS), Theme.cyan)
+                QualityRow("平均抖动", formatMS(model.stats?.health.jitterMS), Theme.yellow)
                 if let error = model.stats?.health.lastError, !error.isEmpty {
                     Text(error).font(.caption).foregroundStyle(Theme.coral).lineLimit(2)
                 }
@@ -510,7 +598,7 @@ private struct ConnectionsView: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
                 TextField("搜索设备、服务或域名", text: $search).textFieldStyle(.plain)
                 Spacer()
-                Text("\(connections.count) RECORDS").eyebrow()
+                Text("\(connections.count) 条记录").font(.caption).foregroundStyle(Theme.muted)
             }
             .padding(.horizontal, 16).frame(height: 44).background(Theme.panel)
 
@@ -539,17 +627,17 @@ private struct ProxyView: View {
             HStack(alignment: .top, spacing: 16) {
                 Panel {
                     VStack(alignment: .leading, spacing: 20) {
-                        Text("UPSTREAM EGRESS").eyebrow()
+                        Text("代理出口").sectionLabel()
                         Picker("", selection: $model.proxyType) {
                             Text("SOCKS5").tag("socks5")
                             Text("HTTP CONNECT").tag("http")
-                        }.pickerStyle(.segmented)
+                        }.pickerStyle(.segmented).tint(Theme.cyan)
                         VStack(alignment: .leading, spacing: 7) {
-                            Text("HOST").eyebrow()
+                            Text("代理地址").fieldLabel()
                             TextField("127.0.0.1", text: $model.proxyHost).textFieldStyle(DarkFieldStyle())
                         }
                         VStack(alignment: .leading, spacing: 7) {
-                            Text("PORT").eyebrow()
+                            Text("代理端口").fieldLabel()
                             TextField("7897", value: $model.proxyPort, format: .number).textFieldStyle(DarkFieldStyle())
                         }
                         HStack {
@@ -564,10 +652,21 @@ private struct ProxyView: View {
                 }.frame(maxWidth: 520)
                 Panel {
                     VStack(alignment: .leading, spacing: 20) {
-                        Text("CURRENT ROUTE").eyebrow()
+                        Text("当前链路").sectionLabel()
                         RouteDiagram()
                         Divider().overlay(Theme.border)
                         ValuePair(label: "当前出口", value: model.status?.proxy ?? "DIRECT")
+                        if let identity = model.stats?.health.egressIdentity {
+                            Divider().overlay(Theme.border)
+                            HStack(spacing: 28) {
+                                ValuePair(label: "公网 IP", value: identity.ip)
+                                ValuePair(label: "地区", value: egressLocation(identity))
+                                ValuePair(label: "网络", value: identity.isp?.nonEmpty ?? "--")
+                            }
+                        } else {
+                            Text("正在通过当前出口检测公网 IP 和地区...")
+                                .font(.caption).foregroundStyle(Theme.muted)
+                        }
                     }
                 }
             }.padding(20)
@@ -578,11 +677,11 @@ private struct ProxyView: View {
 private struct RouteDiagram: View {
     var body: some View {
         HStack(spacing: 8) {
-            RouteNode(icon: "desktopcomputer", label: "LAN")
+            RouteNode(icon: "desktopcomputer", label: "局域网设备")
             RouteLine(color: Theme.lime)
-            RouteNode(icon: "server.rack", label: "CORE")
+            RouteNode(icon: "server.rack", label: "旁路由")
             RouteLine(color: Theme.cyan)
-            RouteNode(icon: "cloud", label: "UPSTREAM")
+            RouteNode(icon: "cloud", label: "上游代理")
         }.frame(maxWidth: .infinity).padding(.vertical, 28)
     }
 }
@@ -607,9 +706,9 @@ private struct SettingsView: View {
                 }
                 Panel {
                     VStack(alignment: .leading, spacing: 12) {
-                        HStack { Text("CORE LOG").eyebrow(); Spacer(); Button("刷新") { model.reloadLog() }.buttonStyle(IconButtonStyle()); Button("打开") { model.revealLog() }.buttonStyle(IconButtonStyle()) }
+                        HStack { Text("运行日志").sectionLabel(); Spacer(); Button("刷新") { model.reloadLog() }.buttonStyle(.bordered); Button("在访达中显示") { model.revealLog() }.buttonStyle(.bordered) }
                         ScrollView([.horizontal, .vertical]) {
-                            Text(model.logText).font(.system(size: 11, design: .monospaced)).foregroundStyle(Color.white.opacity(0.72)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .topLeading)
+                            Text(model.logText).font(.system(size: 11, design: .monospaced)).foregroundStyle(Color.primary.opacity(0.78)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .topLeading)
                         }.frame(minHeight: 280)
                     }
                 }
@@ -622,7 +721,15 @@ private struct SettingsView: View {
 
 private struct Panel<Content: View>: View {
     @ViewBuilder let content: Content
-    var body: some View { content.padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Theme.panel).overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border)).clipShape(RoundedRectangle(cornerRadius: 8)) }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) { content }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(Theme.panel)
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border, lineWidth: 0.7))
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .shadow(color: Color.black.opacity(0.035), radius: 7, y: 2)
+    }
 }
 
 private struct MetricCard: View {
@@ -630,17 +737,17 @@ private struct MetricCard: View {
     let color: Color
     init(_ label: String, _ value: String, _ icon: String, _ color: Color) { self.label = label; self.value = value; self.icon = icon; self.color = color }
     var body: some View {
-        HStack(spacing: 12) {
-            ZStack { RoundedRectangle(cornerRadius: 6).fill(color.opacity(0.14)); Image(systemName: icon).foregroundStyle(color).font(.system(size: 17, weight: .semibold)) }.frame(width: 40, height: 40)
+        HStack(spacing: 11) {
+            ZStack { Circle().fill(color.opacity(0.11)); Image(systemName: icon).foregroundStyle(color).font(.system(size: 15, weight: .semibold)) }.frame(width: 34, height: 34)
             VStack(alignment: .leading, spacing: 3) { Text(label).font(.caption).foregroundStyle(Theme.muted); Text(value).font(.system(size: 18, weight: .semibold, design: .rounded)).lineLimit(1).minimumScaleFactor(0.7) }
             Spacer(minLength: 0)
-        }.padding(14).frame(minHeight: 72).background(Theme.panelRaised).overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border)).clipShape(RoundedRectangle(cornerRadius: 8))
+        }.padding(.horizontal, 13).frame(minHeight: 66).background(Theme.panel).overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border, lineWidth: 0.7)).clipShape(RoundedRectangle(cornerRadius: 7))
     }
 }
 
 private struct LiveBadge: View {
     let active: Bool
-    var body: some View { HStack(spacing: 6) { Circle().fill(active ? Theme.lime : Theme.coral).frame(width: 6, height: 6); Text(active ? "LIVE" : "OFFLINE") }.font(.system(size: 9, weight: .bold)).foregroundStyle(active ? Theme.lime : Theme.coral).padding(.horizontal, 8).frame(height: 24).background((active ? Theme.lime : Theme.coral).opacity(0.1)).clipShape(RoundedRectangle(cornerRadius: 5)) }
+    var body: some View { HStack(spacing: 6) { Circle().fill(active ? Theme.lime : Theme.coral).frame(width: 6, height: 6); Text(active ? "正常" : "异常") }.font(.system(size: 10, weight: .semibold)).foregroundStyle(active ? Theme.lime : Theme.coral).padding(.horizontal, 8).frame(height: 24).background((active ? Theme.lime : Theme.coral).opacity(0.09)).clipShape(RoundedRectangle(cornerRadius: 5)) }
 }
 
 private struct ValuePair: View {
@@ -658,7 +765,7 @@ private struct RecentStrip: View {
     var body: some View {
         Panel {
             VStack(alignment: .leading, spacing: 12) {
-                HStack { Text("RECENT ACTIVITY").eyebrow(); Spacer(); Button("查看全部") { model.selectedSection = .connections }.buttonStyle(.plain).foregroundStyle(Theme.cyan).font(.caption) }
+                HStack { Text("最近连接").sectionLabel(); Spacer(); Button("查看全部") { model.selectedSection = .connections }.buttonStyle(.plain).foregroundStyle(Theme.cyan).font(.caption) }
                 ForEach(Array((model.stats?.relay.recent ?? []).prefix(5))) { item in
                     HStack(spacing: 12) {
                         Circle().fill(serviceColor(item.service)).frame(width: 7, height: 7)
@@ -694,7 +801,7 @@ private struct QualityRow: View {
 
 private struct RouteNode: View {
     let icon: String, label: String
-    var body: some View { VStack(spacing: 8) { ZStack { RoundedRectangle(cornerRadius: 7).fill(Theme.panelRaised); Image(systemName: icon).font(.title2).foregroundStyle(Theme.cyan) }.frame(width: 62, height: 62); Text(label).eyebrow() } }
+    var body: some View { VStack(spacing: 8) { ZStack { RoundedRectangle(cornerRadius: 7).fill(Theme.panelRaised); Image(systemName: icon).font(.title2).foregroundStyle(Theme.cyan) }.frame(width: 62, height: 62); Text(label).font(.caption2).foregroundStyle(Theme.muted) } }
 }
 
 private struct RouteLine: View {
@@ -714,20 +821,22 @@ private struct NoticeBar: View {
 }
 
 private struct IconButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View { configuration.label.frame(width: 30, height: 30).background(configuration.isPressed ? Theme.panelRaised : Theme.panel).overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border)).clipShape(RoundedRectangle(cornerRadius: 6)) }
+    func makeBody(configuration: Configuration) -> some View { configuration.label.foregroundStyle(Color.primary.opacity(0.8)).frame(width: 30, height: 30).background(configuration.isPressed ? Theme.sidebar : Theme.panel).overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 0.7)).clipShape(RoundedRectangle(cornerRadius: 6)) }
 }
 
 private struct ActionButtonStyle: ButtonStyle {
     let tint: Color
-    func makeBody(configuration: Configuration) -> some View { configuration.label.font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.black).padding(.horizontal, 13).frame(minHeight: 30).background(tint.opacity(configuration.isPressed ? 0.7 : 1)).clipShape(RoundedRectangle(cornerRadius: 6)) }
+    func makeBody(configuration: Configuration) -> some View { configuration.label.font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.white).padding(.horizontal, 13).frame(minHeight: 30).background(tint.opacity(configuration.isPressed ? 0.72 : 0.92)).clipShape(RoundedRectangle(cornerRadius: 6)) }
 }
 
 private struct DarkFieldStyle: TextFieldStyle {
-    func _body(configuration: TextField<Self._Label>) -> some View { configuration.padding(.horizontal, 11).frame(height: 36).background(Color.black.opacity(0.22)).overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border)).clipShape(RoundedRectangle(cornerRadius: 6)) }
+    func _body(configuration: TextField<Self._Label>) -> some View { configuration.padding(.horizontal, 11).frame(height: 36).background(Theme.panelRaised).overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 0.8)).clipShape(RoundedRectangle(cornerRadius: 6)) }
 }
 
 private extension Text {
     func eyebrow() -> some View { self.font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.muted) }
+    func sectionLabel() -> some View { self.font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.primary.opacity(0.82)) }
+    func fieldLabel() -> some View { self.font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.muted) }
 }
 
 private extension String { var nonEmpty: String? { isEmpty ? nil : self } }
@@ -738,3 +847,19 @@ private func speed(_ fiveSecondBytes: Int64) -> String { bytes(fiveSecondBytes /
 private func uptime(_ seconds: Int64) -> String { seconds > 3600 ? "\(seconds / 3600)H" : "\(max(seconds / 60, 0))M" }
 private func formatMS(_ value: Double?) -> String { guard let value, value > 0 else { return "--" }; return String(format: "%.1f ms", value) }
 private func serviceColor(_ service: String) -> Color { [Theme.cyan, Theme.lime, Theme.coral, Theme.yellow][Int(service.hashValue.magnitude % 4)] }
+private func egressLocation(_ identity: EgressIdentity?) -> String {
+    guard let identity else { return "地区待检测" }
+    let country = identity.countryCode.flatMap {
+        Locale(identifier: "zh-Hans").localizedString(forRegionCode: $0)
+    }
+    let place = identity.city?.nonEmpty ?? identity.region?.nonEmpty
+    return [country, place].compactMap { $0 }.uniqued().joined(separator: " · ").nonEmpty ?? "地区未知"
+}
+
+private extension Array where Element == String {
+    func uniqued() -> [String] {
+        reduce(into: []) { result, value in
+            if !result.contains(value) { result.append(value) }
+        }
+    }
+}

@@ -2,6 +2,9 @@ package app
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -11,14 +14,26 @@ import (
 // HealthSnapshot is the advisory egress health view (no auto-flipping — v4
 // leaves routing decisions to the upstream proxy and the user).
 type HealthSnapshot struct {
-	Healthy      bool         `json:"healthy"`
-	LastError    string       `json:"last_error,omitempty"`
-	CheckedAt    time.Time    `json:"checked_at,omitempty"`
-	FailCount    int          `json:"fail_count"`
-	LatencyMS    float64      `json:"latency_ms"`
-	JitterMS     float64      `json:"jitter_ms"`
-	Availability float64      `json:"availability"`
-	History      []ProbePoint `json:"history"`
+	Healthy        bool            `json:"healthy"`
+	LastError      string          `json:"last_error,omitempty"`
+	CheckedAt      time.Time       `json:"checked_at,omitempty"`
+	FailCount      int             `json:"fail_count"`
+	LatencyMS      float64         `json:"latency_ms"`
+	JitterMS       float64         `json:"jitter_ms"`
+	Availability   float64         `json:"availability"`
+	History        []ProbePoint    `json:"history"`
+	EgressIdentity *EgressIdentity `json:"egress_identity,omitempty"`
+}
+
+// EgressIdentity describes the public network observed through the currently
+// configured egress. It is advisory telemetry and never affects routing.
+type EgressIdentity struct {
+	IP          string    `json:"ip"`
+	CountryCode string    `json:"country_code,omitempty"`
+	Region      string    `json:"region,omitempty"`
+	City        string    `json:"city,omitempty"`
+	ISP         string    `json:"isp,omitempty"`
+	CheckedAt   time.Time `json:"checked_at"`
 }
 
 type ProbePoint struct {
@@ -28,12 +43,15 @@ type ProbePoint struct {
 }
 
 type healthState struct {
-	mu        sync.RWMutex
-	healthy   bool
-	lastError string
-	checkedAt time.Time
-	failCount int
-	history   []ProbePoint
+	mu              sync.RWMutex
+	healthy         bool
+	lastError       string
+	checkedAt       time.Time
+	failCount       int
+	history         []ProbePoint
+	identity        *EgressIdentity
+	identityKey     string
+	identityAttempt time.Time
 }
 
 func (h *healthState) record(err error, latency time.Duration) {
@@ -66,6 +84,10 @@ func (h *healthState) snapshot() HealthSnapshot {
 		FailCount: h.failCount,
 		History:   append([]ProbePoint{}, h.history...),
 	}
+	if h.identity != nil {
+		copy := *h.identity
+		out.EgressIdentity = &copy
+	}
 	var successes int
 	var latencySum, jitterSum float64
 	var previous float64
@@ -94,6 +116,29 @@ func (h *healthState) snapshot() HealthSnapshot {
 		out.JitterMS = jitterSum / float64(successes-1)
 	}
 	return out
+}
+
+func (h *healthState) identityDue(now time.Time, key string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.identityKey != key {
+		return true
+	}
+	interval := 30 * time.Minute
+	if h.identity == nil {
+		interval = 5 * time.Minute
+	}
+	return now.Sub(h.identityAttempt) >= interval
+}
+
+func (h *healthState) recordIdentity(identity *EgressIdentity, key string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.identityAttempt = time.Now()
+	h.identityKey = key
+	if identity != nil {
+		h.identity = identity
+	}
 }
 
 // Health returns the current advisory health snapshot. Before the supervisor
@@ -130,7 +175,8 @@ func (a *App) supervise(ctx context.Context) {
 }
 
 func (a *App) probeOnce(ctx context.Context) {
-	dialer, err := buildDialer(a.getCfg().Egress)
+	egress := a.getCfg().Egress
+	dialer, err := buildDialer(egress)
 	if err != nil {
 		a.health.record(err, 0)
 		return
@@ -140,4 +186,58 @@ func (a *App) probeOnce(ctx context.Context) {
 	started := time.Now()
 	err = relay.Probe(probeCtx, dialer, probeTarget)
 	a.health.record(err, time.Since(started))
+	if err != nil {
+		return
+	}
+	key := fmt.Sprintf("%s|%s|%s|%d", egress.Mode, egress.Proxy.Type, egress.Proxy.Host, egress.Proxy.Port)
+	if !a.health.identityDue(time.Now(), key) {
+		return
+	}
+	identityCtx, identityCancel := context.WithTimeout(ctx, 8*time.Second)
+	defer identityCancel()
+	identity, identityErr := lookupEgressIdentity(identityCtx, dialer)
+	if identityErr != nil {
+		a.health.recordIdentity(nil, key)
+		return
+	}
+	a.health.recordIdentity(identity, key)
+}
+
+func lookupEgressIdentity(ctx context.Context, dialer relay.Dialer) (*EgressIdentity, error) {
+	transport := &http.Transport{DialContext: dialer.DialContext, ForceAttemptHTTP2: true}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, Timeout: 8 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://ipwho.is/", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "LAN-Proxy-Gateway/4")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("出口信息服务返回 %s", resp.Status)
+	}
+	var payload struct {
+		IP          string `json:"ip"`
+		Success     bool   `json:"success"`
+		CountryCode string `json:"country_code"`
+		Region      string `json:"region"`
+		City        string `json:"city"`
+		Connection  struct {
+			ISP string `json:"isp"`
+		} `json:"connection"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	if !payload.Success || payload.IP == "" {
+		return nil, fmt.Errorf("出口信息服务未返回有效地址")
+	}
+	return &EgressIdentity{
+		IP: payload.IP, CountryCode: payload.CountryCode, Region: payload.Region,
+		City: payload.City, ISP: payload.Connection.ISP, CheckedAt: time.Now(),
+	}, nil
 }

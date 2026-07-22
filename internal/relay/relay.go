@@ -26,6 +26,9 @@ type Options struct {
 	// egress proxy receives domain names instead of IPs. Optional.
 	FakeIPRange  *netip.Prefix
 	LookupFakeIP func(netip.Addr) (string, bool)
+	// LookupRealIP labels telemetry for recently forwarded DNS answers. It
+	// never changes the address passed to the egress dialer.
+	LookupRealIP func(netip.Addr) (string, bool)
 	Logger       *slog.Logger
 }
 
@@ -42,6 +45,7 @@ type Server struct {
 
 	fakeRange  atomic.Pointer[netip.Prefix]
 	fakeLookup atomic.Value // func(netip.Addr) (string, bool)
+	realLookup atomic.Value // func(netip.Addr) (string, bool)
 	missingMu  sync.Mutex
 	missingLog map[netip.Addr]time.Time
 
@@ -83,7 +87,18 @@ func New(opts Options) *Server {
 		s.fakeRange.Store(opts.FakeIPRange)
 		s.fakeLookup.Store(opts.LookupFakeIP)
 	}
+	if opts.LookupRealIP != nil {
+		s.realLookup.Store(opts.LookupRealIP)
+	}
 	return s
+}
+
+// SetRealIPLookup installs an optional DNS observation lookup used only for
+// connection labels and service aggregation.
+func (s *Server) SetRealIPLookup(lookup func(netip.Addr) (string, bool)) {
+	if lookup != nil {
+		s.realLookup.Store(lookup)
+	}
 }
 
 // SetDialer swaps the egress dialer live (direct ↔ proxy switch).
@@ -237,7 +252,15 @@ func (s *Server) handle(client *net.TCPConn) {
 	if ta, ok := client.RemoteAddr().(*net.TCPAddr); ok {
 		srcIP = ta.IP.String()
 	}
-	tc := s.tracker.Open(srcIP, host, int(orig.Port()), s.viaProxy.Load())
+	observedHost := host
+	if ip, err := netip.ParseAddr(host); err == nil {
+		if lookup, _ := s.realLookup.Load().(func(netip.Addr) (string, bool)); lookup != nil {
+			if domain, ok := lookup(ip); ok {
+				observedHost = domain
+			}
+		}
+	}
+	tc := s.tracker.Open(srcIP, observedHost, int(orig.Port()), s.viaProxy.Load())
 	defer tc.Close()
 
 	pipe(client, upstream, tc)

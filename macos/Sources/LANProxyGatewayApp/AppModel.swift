@@ -52,7 +52,7 @@ final class AppModel: ObservableObject {
                 do {
                     let runtime = try await client.stats(apiPort: latest.ports.api)
                     stats = runtime
-                    coreUpgradeRecommended = runtime.schemaVersion != 1
+                    coreUpgradeRecommended = runtime.schemaVersion != 2
                 } catch {
                     stats = nil
                     coreUpgradeRecommended = true

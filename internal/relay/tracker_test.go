@@ -81,8 +81,11 @@ func TestClassifyService(t *testing.T) {
 		"video.nflxvideo.net":      "Netflix",
 		"api.github.com":           "GitHub",
 		"assets.example.org":       "example.org",
-		"203.0.113.10":             "未识别流量",
+		"203.0.113.10":             "IP 地址流量",
 		"r1---sn.googlevideo.com.": "YouTube",
+		"sns-img-qc.xhscdn.com":    "小红书",
+		"v3-dy-o.zjcdn.com":        "zjcdn.com",
+		"asset.example.co.uk":      "example.co.uk",
 	}
 	for host, want := range tests {
 		if got := classifyService(host); got != want {
