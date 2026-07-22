@@ -266,11 +266,15 @@ func Validate(cfg *Config) error {
 	for i, rule := range cfg.Routing.Rules {
 		switch rule.Type {
 		case RuleDomain, RuleDomainSuffix:
+			if rule.Value == "" || strings.ContainsAny(rule.Value, " /\t") {
+				return fmt.Errorf("routing.rules[%d].value 不合法", i)
+			}
+		case RuleIPCIDR:
+			if _, err := netip.ParsePrefix(rule.Value); err != nil {
+				return fmt.Errorf("routing.rules[%d].value 不是合法 CIDR: %q", i, rule.Value)
+			}
 		default:
-			return fmt.Errorf("routing.rules[%d].type 必须是 domain/domain-suffix", i)
-		}
-		if rule.Value == "" || strings.ContainsAny(rule.Value, " /\t") {
-			return fmt.Errorf("routing.rules[%d].value 不合法", i)
+			return fmt.Errorf("routing.rules[%d].type 必须是 domain/domain-suffix/ip-cidr", i)
 		}
 		switch rule.Action {
 		case EgressProxy, EgressDirect, RouteReject:

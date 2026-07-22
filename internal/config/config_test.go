@@ -90,6 +90,7 @@ func TestValidateErrors(t *testing.T) {
 		{"bad fake range", "version: 4\nruntime:\n  fake_ip_range: nope\n", "fake_ip_range"},
 		{"bad route type", "version: 4\nrouting:\n  rules:\n    - type: process-name\n      value: app\n      action: proxy\n", "routing.rules[0].type"},
 		{"bad route action", "version: 4\nrouting:\n  rules:\n    - type: domain-suffix\n      value: example.com\n      action: drop\n", "routing.rules[0].action"},
+		{"bad cidr value", "version: 4\nrouting:\n  rules:\n    - type: ip-cidr\n      value: 10.0.0.1\n      action: direct\n", "routing.rules[0].value"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

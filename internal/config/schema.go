@@ -15,6 +15,7 @@ const (
 const (
 	RuleDomain       = "domain"
 	RuleDomainSuffix = "domain-suffix"
+	RuleIPCIDR       = "ip-cidr"
 )
 
 // Upstream proxy kinds.

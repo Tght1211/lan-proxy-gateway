@@ -29,6 +29,7 @@ type ConnInfo struct {
 	StartedAt time.Time  `json:"started_at"`
 	EndedAt   *time.Time `json:"ended_at,omitempty"`
 	ViaProxy  bool       `json:"via_proxy"`
+	Rejected  bool       `json:"rejected,omitempty"`
 }
 
 // TrafficPoint is one five-second throughput sample.
@@ -132,6 +133,21 @@ func (t *Tracker) Open(srcIP, dstHost string, dstPort int, viaProxy bool) *Track
 	t.conns[c.id] = c
 	t.mu.Unlock()
 	return c
+}
+
+// RecordRejected archives a connection refused by a routing rule. It appears
+// in the recent history but never counts toward device/service usage.
+func (t *Tracker) RecordRejected(srcIP, dstHost string, dstPort int) {
+	now := time.Now()
+	t.mu.Lock()
+	t.nextID++
+	info := ConnInfo{
+		ID: t.nextID, SrcIP: srcIP, DstHost: dstHost, DstPort: dstPort,
+		Service: classifyService(dstHost), StartedAt: now, EndedAt: &now,
+		Rejected: true,
+	}
+	t.recent = appendBoundedFront(t.recent, info, maxRecentConnections)
+	t.mu.Unlock()
 }
 
 func (t *Tracker) Snapshot() Snapshot {

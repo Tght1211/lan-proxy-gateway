@@ -115,7 +115,7 @@ func (s *Server) SetRouting(defaultAction string, direct, proxy Dialer, rules []
 		defaultAction: defaultAction,
 		direct:        direct,
 		proxy:         proxy,
-		rules:         append([]RouteRule(nil), rules...),
+		rules:         compileRules(rules),
 	})
 }
 
@@ -222,6 +222,7 @@ func (s *Server) handle(client *net.TCPConn) {
 	s.logger.Debug("接受连接", "src", client.RemoteAddr(), "orig", orig)
 
 	host := orig.Addr().String()
+	dstIP := orig.Addr()
 	if prefix := s.fakeRange.Load(); prefix != nil && prefix.Contains(orig.Addr()) {
 		lookup, _ := s.fakeLookup.Load().(func(netip.Addr) (string, bool))
 		domain, ok := lookup(orig.Addr())
@@ -233,6 +234,7 @@ func (s *Server) handle(client *net.TCPConn) {
 			return
 		}
 		host = domain
+		dstIP = netip.Addr{}
 		s.logger.Debug("fake-ip 反查", "src", client.RemoteAddr(), "fake_ip", orig.Addr(), "domain", domain)
 	}
 	routeHost := host
@@ -244,16 +246,22 @@ func (s *Server) handle(client *net.TCPConn) {
 		}
 	}
 
+	srcIP := ""
+	if ta, ok := client.RemoteAddr().(*net.TCPAddr); ok {
+		srcIP = ta.IP.String()
+	}
+
 	var dialer Dialer
 	viaProxy := s.viaProxy.Load()
 	rejected := false
 	if policy := s.routing.Load(); policy != nil {
-		dialer, viaProxy, rejected = policy.selectDialer(routeHost)
+		dialer, viaProxy, rejected = policy.selectDialer(routeHost, dstIP)
 	} else if holder := s.dialer.Load(); holder != nil {
 		dialer = holder.dialer
 	}
 	if rejected {
 		s.logger.Info("连接被路由规则拒绝", "src", client.RemoteAddr(), "target", host)
+		s.tracker.RecordRejected(srcIP, routeHost, int(orig.Port()))
 		return
 	}
 	if dialer == nil {
@@ -275,10 +283,6 @@ func (s *Server) handle(client *net.TCPConn) {
 		_ = uc.SetNoDelay(true)
 	}
 
-	srcIP := ""
-	if ta, ok := client.RemoteAddr().(*net.TCPAddr); ok {
-		srcIP = ta.IP.String()
-	}
 	observedHost := routeHost
 	tc := s.tracker.Open(srcIP, observedHost, int(orig.Port()), viaProxy)
 	defer tc.Close()
