@@ -10,7 +10,9 @@ BUILD_NUMBER="${BUILD_NUMBER:-$(git -C "$ROOT_DIR" rev-list --count HEAD 2>/dev/
 APP_NAME="LAN Proxy Gateway"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
-TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/lan-proxy-gateway.XXXXXX")"
+# iconutil intermittently rejects otherwise valid iconsets under per-user
+# /var/folders paths. A short system temporary path is reliable on macOS.
+TEMP_DIR="$(mktemp -d "/tmp/lan-proxy-gateway.XXXXXX")"
 
 cleanup() {
     rm -rf "$TEMP_DIR"

@@ -11,6 +11,8 @@ final class AppModel: ObservableObject {
     @Published var proxyPort = 7897
     @Published var logText = "正在读取日志..."
     @Published var serviceStatus = "正在检查..."
+    @Published var isServiceInstalled = false
+    @Published var deviceLabels: [String: String] = [:]
     @Published var isBusy = false
     @Published var notice: String?
     @Published var errorMessage: String?
@@ -21,8 +23,12 @@ final class AppModel: ObservableObject {
     private var isRefreshing = false
     private var didLoadProxyConfig = false
     private var noticeTask: Task<Void, Never>?
+    private let deviceLabelsKey = "deviceLabels"
 
     init() {
+        if let stored = UserDefaults.standard.dictionary(forKey: deviceLabelsKey) as? [String: String] {
+            deviceLabels = stored
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.refresh(silent: true) }
         }
@@ -52,7 +58,7 @@ final class AppModel: ObservableObject {
                 do {
                     let runtime = try await client.stats(apiPort: latest.ports.api)
                     stats = runtime
-                    coreUpgradeRecommended = runtime.schemaVersion != 2
+                    coreUpgradeRecommended = runtime.schemaVersion != 3
                 } catch {
                     stats = nil
                     coreUpgradeRecommended = true
@@ -62,7 +68,8 @@ final class AppModel: ObservableObject {
                 coreUpgradeRecommended = false
             }
             if selectedSection == .settings {
-                logText = await client.readLog(path: latest.logFile)
+                let latestLog = await client.readLog(path: latest.logFile)
+                if latestLog != logText { logText = latestLog }
             }
             if !silent { showNotice("状态已刷新") }
         } catch {
@@ -100,10 +107,28 @@ final class AppModel: ObservableObject {
         perform("已切换为直连出口") { try await self.client.setDirect() }
     }
 
+    func applyRoutingRules(_ rules: [RoutingRule]) {
+        perform("分流规则已更新") { try await self.client.setRoutingRules(rules) }
+    }
+
     func updateServiceStatus() {
         Task {
-            serviceStatus = (try? await client.serviceStatus()) ?? "未安装"
+            let latest = (try? await client.serviceStatus()) ?? "未安装"
+            serviceStatus = latest
+            isServiceInstalled = latest != "未安装" && latest != "inactive"
         }
+    }
+
+    func setServiceEnabled(_ enabled: Bool) {
+        if enabled { installService() } else { uninstallService() }
+    }
+
+    func deviceLabel(for ip: String) -> String { deviceLabels[ip] ?? "" }
+
+    func setDeviceLabel(_ label: String, for ip: String) {
+        let value = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty { deviceLabels.removeValue(forKey: ip) } else { deviceLabels[ip] = value }
+        UserDefaults.standard.set(deviceLabels, forKey: deviceLabelsKey)
     }
 
     func installService() {
@@ -120,7 +145,10 @@ final class AppModel: ObservableObject {
 
     func reloadLog() {
         guard let path = status?.logFile else { return }
-        Task { logText = await client.readLog(path: path) }
+        Task {
+            let latestLog = await client.readLog(path: path)
+            if latestLog != logText { logText = latestLog }
+        }
     }
 
     func revealLog() {

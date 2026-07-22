@@ -9,6 +9,12 @@ const Version = 4
 const (
 	EgressDirect = "direct"
 	EgressProxy  = "proxy"
+	RouteReject  = "reject"
+)
+
+const (
+	RuleDomain       = "domain"
+	RuleDomainSuffix = "domain-suffix"
 )
 
 // Upstream proxy kinds.
@@ -22,9 +28,21 @@ type Config struct {
 	Version   int           `yaml:"version"`
 	Gateway   GatewayConfig `yaml:"gateway"`
 	Egress    EgressConfig  `yaml:"egress"`
+	Routing   RoutingConfig `yaml:"routing,omitempty"`
 	DNS       DNSConfig     `yaml:"dns"`
 	QUICBlock bool          `yaml:"quic_block"`
 	Runtime   RuntimeConfig `yaml:"runtime"`
+}
+
+// RoutingConfig overrides the default egress for matching domains.
+type RoutingConfig struct {
+	Rules []RoutingRule `yaml:"rules,omitempty" json:"rules"`
+}
+
+type RoutingRule struct {
+	Type   string `yaml:"type" json:"type"`
+	Value  string `yaml:"value" json:"value"`
+	Action string `yaml:"action" json:"action"`
 }
 
 // GatewayConfig controls LAN device onboarding.

@@ -90,6 +90,14 @@ struct GatewayClient {
         try await output(arguments: ["system-proxy", "off"], privileged: true)
     }
 
+    func setRoutingRules(_ rules: [RoutingRule]) async throws -> String {
+        let data = try JSONEncoder().encode(rules)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw GatewayClientError.invalidOutput("无法编码分流规则")
+        }
+        return try await output(arguments: ["routing", "set", "--rules-json", json], privileged: false)
+    }
+
     func installService() async throws -> String {
         guard let source = bundledEngineURL ?? engineURL else {
             throw GatewayClientError.engineNotFound
@@ -138,7 +146,7 @@ struct GatewayClient {
             if data.count > tail.count, !lines.isEmpty {
                 lines.removeFirst()
             }
-            return lines.suffix(300).reversed().joined(separator: "\n")
+            return lines.suffix(120).joined(separator: "\n")
         }.value
     }
 

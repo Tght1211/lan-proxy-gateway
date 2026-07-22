@@ -42,6 +42,7 @@ type Server struct {
 	listenAddr atomic.Value // string
 	dialer     atomic.Pointer[dialerHolder]
 	viaProxy   atomic.Bool
+	routing    atomic.Pointer[routingPolicy]
 
 	fakeRange  atomic.Pointer[netip.Prefix]
 	fakeLookup atomic.Value // func(netip.Addr) (string, bool)
@@ -106,6 +107,16 @@ func (s *Server) SetRealIPLookup(lookup func(netip.Addr) (string, bool)) {
 func (s *Server) SetDialer(d Dialer, viaProxy bool) {
 	s.dialer.Store(&dialerHolder{dialer: d})
 	s.viaProxy.Store(viaProxy)
+}
+
+// SetRouting atomically replaces the domain routing policy for new connections.
+func (s *Server) SetRouting(defaultAction string, direct, proxy Dialer, rules []RouteRule) {
+	s.routing.Store(&routingPolicy{
+		defaultAction: defaultAction,
+		direct:        direct,
+		proxy:         proxy,
+		rules:         append([]RouteRule(nil), rules...),
+	})
 }
 
 // SetFakeIP installs (or with nil prefix, removes) fake-ip domain lookup.
@@ -224,10 +235,26 @@ func (s *Server) handle(client *net.TCPConn) {
 		host = domain
 		s.logger.Debug("fake-ip 反查", "src", client.RemoteAddr(), "fake_ip", orig.Addr(), "domain", domain)
 	}
+	routeHost := host
+	if ip, err := netip.ParseAddr(host); err == nil {
+		if lookup, _ := s.realLookup.Load().(func(netip.Addr) (string, bool)); lookup != nil {
+			if domain, ok := lookup(ip); ok {
+				routeHost = domain
+			}
+		}
+	}
 
 	var dialer Dialer
-	if holder := s.dialer.Load(); holder != nil {
+	viaProxy := s.viaProxy.Load()
+	rejected := false
+	if policy := s.routing.Load(); policy != nil {
+		dialer, viaProxy, rejected = policy.selectDialer(routeHost)
+	} else if holder := s.dialer.Load(); holder != nil {
 		dialer = holder.dialer
+	}
+	if rejected {
+		s.logger.Info("连接被路由规则拒绝", "src", client.RemoteAddr(), "target", host)
+		return
 	}
 	if dialer == nil {
 		s.logger.Error("未配置出口 dialer", "src", client.RemoteAddr())
@@ -243,7 +270,7 @@ func (s *Server) handle(client *net.TCPConn) {
 		return
 	}
 	defer upstream.Close()
-	s.logger.Debug("出口已建立", "src", client.RemoteAddr(), "target", target, "via_proxy", s.viaProxy.Load())
+	s.logger.Debug("出口已建立", "src", client.RemoteAddr(), "target", target, "via_proxy", viaProxy)
 	if uc, ok := upstream.(*net.TCPConn); ok {
 		_ = uc.SetNoDelay(true)
 	}
@@ -252,15 +279,8 @@ func (s *Server) handle(client *net.TCPConn) {
 	if ta, ok := client.RemoteAddr().(*net.TCPAddr); ok {
 		srcIP = ta.IP.String()
 	}
-	observedHost := host
-	if ip, err := netip.ParseAddr(host); err == nil {
-		if lookup, _ := s.realLookup.Load().(func(netip.Addr) (string, bool)); lookup != nil {
-			if domain, ok := lookup(ip); ok {
-				observedHost = domain
-			}
-		}
-	}
-	tc := s.tracker.Open(srcIP, observedHost, int(orig.Port()), s.viaProxy.Load())
+	observedHost := routeHost
+	tc := s.tracker.Open(srcIP, observedHost, int(orig.Port()), viaProxy)
 	defer tc.Close()
 
 	pipe(client, upstream, tc)

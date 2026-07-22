@@ -76,6 +76,7 @@ struct ContentView: View {
                     .frame(minHeight: 27)
             }
             .scrollContentBackground(.hidden)
+            .scrollIndicators(.hidden)
             .listStyle(.sidebar)
 
             VStack(alignment: .leading, spacing: 9) {
@@ -99,7 +100,6 @@ struct ContentView: View {
     @ViewBuilder private var detail: some View {
         switch model.selectedSection ?? .overview {
         case .overview: OverviewView()
-        case .traffic: TrafficView()
         case .services: ServicesView()
         case .devices: DevicesView()
         case .stability: StabilityView()
@@ -167,7 +167,7 @@ private struct OverviewView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        ScrollView {
+        ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 16) {
                 if model.status?.configured == false {
                     GettingStartedPanel()
@@ -336,11 +336,11 @@ private struct ThroughputChart: View {
                 Chart(points) { point in
                     AreaMark(x: .value("时间", point.at), y: .value("下载", Double(point.down) / 5))
                         .foregroundStyle(LinearGradient(colors: [Theme.cyan.opacity(0.28), Theme.cyan.opacity(0.01)], startPoint: .top, endPoint: .bottom))
-                        .interpolationMethod(.catmullRom)
+                        .interpolationMethod(.linear)
                     LineMark(x: .value("时间", point.at), y: .value("下载", Double(point.down) / 5))
-                        .foregroundStyle(Theme.cyan).lineStyle(StrokeStyle(lineWidth: 2)).interpolationMethod(.catmullRom)
+                        .foregroundStyle(Theme.cyan).lineStyle(StrokeStyle(lineWidth: 2)).interpolationMethod(.linear)
                     LineMark(x: .value("时间", point.at), y: .value("上传", Double(point.up) / 5))
-                        .foregroundStyle(Theme.yellow).lineStyle(StrokeStyle(lineWidth: 1.5)).interpolationMethod(.catmullRom)
+                        .foregroundStyle(Theme.yellow).lineStyle(StrokeStyle(lineWidth: 1.5)).interpolationMethod(.linear)
                 }
                 .chartXAxis(.automatic)
                 .chartYAxis {
@@ -355,37 +355,115 @@ private struct ThroughputChart: View {
     }
 }
 
-private struct TrafficView: View {
+private struct ServicesView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var selectedDevice = "全部设备"
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                HStack(spacing: 12) {
-                    MetricCard("会话下载", bytes(model.stats?.relay.downTotal ?? 0), "arrow.down.circle.fill", Theme.cyan)
-                    MetricCard("会话上传", bytes(model.stats?.relay.upTotal ?? 0), "arrow.up.circle.fill", Theme.yellow)
-                    MetricCard("连接总数", "\(model.stats?.relay.services.reduce(0) { $0 + $1.connections } ?? 0)", "link", Theme.lime)
+        let deviceGroups = model.stats?.relay.deviceServices ?? []
+        let filtered = selectedDevice == "全部设备"
+            ? (model.stats?.relay.services ?? [])
+            : (deviceGroups.first { $0.device == selectedDevice }?.services ?? [])
+        VStack(spacing: 14) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("统计范围").fieldLabel()
+                    Picker("统计范围", selection: $selectedDevice) {
+                        Text("全部设备").tag("全部设备")
+                        ForEach(deviceGroups) { group in
+                            Text(model.deviceLabel(for: group.device).nonEmpty.map { "\($0) · \(group.device)" } ?? group.device)
+                                .tag(group.device)
+                        }
+                    }
+                    .labelsHidden().frame(width: 250)
                 }
-                ThroughputChart(compact: false).frame(minHeight: 440)
-            }.padding(20)
+                MetricCard("已识别服务", "\(filtered.count)", "square.stack.3d.up.fill", Theme.cyan)
+                MetricCard("访问最多", filtered.first?.displayName ?? "--", "crown.fill", Theme.yellow)
+                MetricCard("服务流量", bytes(filtered.reduce(0) { $0 + $1.total }), "chart.bar.fill", Theme.coral)
+            }
+            DeviceTopServices(groups: deviceGroups)
+            FilteredServiceList(data: filtered, scope: selectedDevice)
+        }
+        .padding(20)
+        .onChange(of: deviceGroups.map(\.device)) { devices in
+            if selectedDevice != "全部设备", !devices.contains(selectedDevice) { selectedDevice = "全部设备" }
         }
     }
 }
 
-private struct ServicesView: View {
+private struct DeviceTopServices: View {
     @EnvironmentObject private var model: AppModel
+    let groups: [DeviceServiceAggregate]
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                HStack(spacing: 12) {
-                    MetricCard("已识别服务", "\(model.stats?.relay.services.count ?? 0)", "square.stack.3d.up.fill", Theme.cyan)
-                    MetricCard("访问最多", model.stats?.relay.services.first?.displayName ?? "--", "crown.fill", Theme.yellow)
-                    MetricCard("服务流量", bytes(model.stats?.relay.services.reduce(0) { $0 + $1.total } ?? 0), "chart.bar.fill", Theme.coral)
+        HStack(spacing: 10) {
+            ForEach(groups.prefix(5)) { group in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(model.deviceLabel(for: group.device).nonEmpty ?? group.device)
+                        .font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                    Text(group.device).font(.system(size: 9, design: .monospaced)).foregroundStyle(Theme.muted)
+                    ForEach(Array(group.services.prefix(3))) { service in
+                        HStack(spacing: 6) {
+                            Circle().fill(serviceColor(service.name)).frame(width: 5, height: 5)
+                            Text(service.displayName).font(.caption).lineLimit(1)
+                            Spacer(minLength: 4)
+                            Text(shortBytes(service.total)).font(.caption2).foregroundStyle(Theme.muted)
+                        }
+                    }
+                    if group.services.isEmpty { Text("暂无流量").font(.caption).foregroundStyle(Theme.muted) }
                 }
-                ServiceRanking(limit: 14).frame(minHeight: 500)
-            }.padding(20)
+                .padding(12)
+                .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
+                .background(Theme.panel)
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border, lineWidth: 0.7))
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+            }
+            if groups.isEmpty {
+                Text("等待设备服务数据").font(.caption).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, minHeight: 108)
+            }
         }
+    }
+}
+
+private struct FilteredServiceList: View {
+    let data: [UsageAggregate]
+    let scope: String
+
+    var body: some View {
+        Panel {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text(scope == "全部设备" ? "全部设备服务流量" : "设备服务明细").sectionLabel()
+                    Spacer()
+                    Text(scope).font(.caption).foregroundStyle(Theme.muted)
+                }
+                if data.isEmpty {
+                    EmptyTelemetry(icon: "square.stack.3d.up", text: "等待服务流量")
+                } else {
+                    let maximum = max(data.first?.total ?? 1, 1)
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 10) {
+                            ForEach(data) { item in
+                                VStack(spacing: 5) {
+                                    HStack {
+                                        Text(item.displayName).font(.system(size: 12, weight: .medium))
+                                        Spacer()
+                                        Text("\(item.connections) 次 · \(shortBytes(item.total))")
+                                            .font(.system(size: 10, design: .monospaced)).foregroundStyle(Theme.muted)
+                                    }
+                                    GeometryReader { geometry in
+                                        Capsule().fill(Theme.cyan.opacity(0.7))
+                                            .frame(width: max(3, geometry.size.width * CGFloat(Double(item.total) / Double(maximum))))
+                                    }.frame(height: 4)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxHeight: .infinity)
     }
 }
 
@@ -435,57 +513,136 @@ private struct DevicesView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                HStack(spacing: 12) {
-                    MetricCard("当前活跃", "\(model.activeDeviceCount)", "desktopcomputer", Theme.lime)
-                    MetricCard("网关地址", model.status?.gateway.localIP.nonEmpty ?? "--", "network", Theme.cyan)
-                    MetricCard("默认路由", model.status?.gateway.router.nonEmpty ?? "--", "wifi.router", Theme.yellow)
+        VStack(spacing: 14) {
+            DeviceAccessSummary()
+            LabeledDevicesStrip()
+            DeviceRanking()
+            SuggestedAddressPanel()
+        }
+        .padding(20)
+    }
+}
+
+private struct LabeledDevicesStrip: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        let labels = model.deviceLabels.sorted { $0.key < $1.key }
+        if !labels.isEmpty {
+            HStack(spacing: 10) {
+                Text("已备注设备").sectionLabel()
+                ForEach(labels, id: \.key) { ip, label in
+                    HStack(spacing: 7) {
+                        Image(systemName: "tag.fill").foregroundStyle(Theme.cyan)
+                        Text(label).font(.caption.weight(.semibold))
+                        Text(ip).font(.system(size: 10, design: .monospaced)).foregroundStyle(Theme.muted)
+                        Button { model.setDeviceLabel("", for: ip) } label: { Image(systemName: "xmark") }
+                            .buttonStyle(.plain).foregroundStyle(Theme.muted).help("移除备注")
+                    }
+                    .padding(.horizontal, 10).frame(height: 30)
+                    .background(Theme.panel)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 0.7))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
-                DeviceRanking().frame(minHeight: 330)
-                DeviceSetupPanel()
-            }.padding(20)
+                Spacer()
+            }
         }
     }
 }
 
-private struct DeviceRanking: View {
+private struct DeviceAccessSummary: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
+        let suggestions = suggestedDeviceIPs(
+            gateway: model.status?.gateway.localIP ?? "",
+            occupied: Set(model.stats?.relay.devices.map(\.name) ?? [])
+        )
+        Panel {
+            HStack(spacing: 20) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 7).fill(Theme.lime.opacity(0.12))
+                    Image(systemName: "desktopcomputer.and.macbook")
+                        .font(.system(size: 22, weight: .medium)).foregroundStyle(Theme.lime)
+                }
+                .frame(width: 52, height: 52)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(model.stats?.relay.devices.count ?? 0) 台设备已接入")
+                        .font(.system(size: 16, weight: .semibold))
+                    Text("其中 \(model.activeDeviceCount) 台正在产生连接")
+                        .font(.caption).foregroundStyle(Theme.muted)
+                }
+                Spacer()
+                CompactSetupValue(
+                    label: "设备 IP 候选",
+                    value: suggestionsRange(suggestions)
+                )
+                CompactSetupValue(label: "网关与 DNS", value: model.status?.gateway.localIP.nonEmpty ?? "--", copyable: true)
+                CompactSetupValue(label: "子网掩码", value: "255.255.255.0", copyable: true)
+            }
+        }
+    }
+}
+
+private struct SuggestedAddressPanel: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        let suggestions = suggestedDeviceIPs(
+            gateway: model.status?.gateway.localIP ?? "",
+            occupied: Set(model.stats?.relay.devices.map(\.name) ?? [])
+        )
         Panel {
             VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Text("设备流量").sectionLabel()
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("设备接入指南").sectionLabel()
+                        Text("先选择候选 IP，再在设备中手动填写网络参数")
+                            .font(.caption).foregroundStyle(Theme.muted)
+                    }
                     Spacer()
-                    Text("本次运行会话").font(.caption).foregroundStyle(Theme.muted)
+                    Label("使用前请确认不在路由器 DHCP 地址池内", systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(Theme.yellow)
                 }
-                let devices = Array((model.stats?.relay.devices ?? []).prefix(12))
-                if devices.isEmpty {
-                    EmptyTelemetry(icon: "desktopcomputer", text: "等待局域网设备接入")
+
+                if suggestions.isEmpty {
+                    Text("暂时无法根据当前网关地址生成候选，请先确认网关网络配置。")
+                        .font(.caption).foregroundStyle(Theme.muted).padding(.vertical, 12)
                 } else {
-                    let maximum = max(devices.first?.total ?? 1, 1)
-                    VStack(spacing: 13) {
-                        ForEach(devices) { item in
-                            VStack(spacing: 6) {
-                                HStack {
-                                    HStack(spacing: 7) {
-                                        Circle().fill(Theme.lime).frame(width: 7, height: 7)
-                                        Text(item.name).font(.system(size: 13, weight: .medium, design: .monospaced))
-                                    }
-                                    Spacer()
-                                    Text("\(item.connections) 个连接").font(.caption).foregroundStyle(Theme.muted)
-                                    Text(shortBytes(item.total)).font(.system(size: 11, design: .monospaced)).frame(width: 72, alignment: .trailing)
+                    HStack(spacing: 0) {
+                        GuideStep(number: "1", title: "选择手动 / 静态 IP", detail: "进入设备的网络或互联网设置")
+                        Image(systemName: "chevron.right").foregroundStyle(Theme.border)
+                        GuideStep(number: "2", title: "填写候选 IP", detail: "从下方选择一个地址")
+                        Image(systemName: "chevron.right").foregroundStyle(Theme.border)
+                        GuideStep(number: "3", title: "填写网关和 DNS", detail: model.status?.gateway.localIP.nonEmpty ?? "--")
+                        Image(systemName: "chevron.right").foregroundStyle(Theme.border)
+                        GuideStep(number: "4", title: "保存并测试", detail: "代理保持关闭或不填写")
+                    }
+                    HStack(spacing: 10) {
+                        ForEach(Array(suggestions.enumerated()), id: \.element) { index, address in
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(address, forType: .string)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Text("\(index + 1)")
+                                        .font(.caption2.weight(.bold)).foregroundStyle(Theme.cyan)
+                                        .frame(width: 22, height: 22)
+                                        .background(Theme.cyan.opacity(0.10))
+                                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                                    Text(address)
+                                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                    Spacer(minLength: 4)
+                                    Image(systemName: "doc.on.doc").foregroundStyle(Theme.cyan)
                                 }
-                                GeometryReader { geometry in
-                                    ZStack(alignment: .leading) {
-                                        Capsule().fill(Theme.panelRaised)
-                                        Capsule().fill(Theme.lime.opacity(0.72))
-                                            .frame(width: geometry.size.width * CGFloat(Double(item.total) / Double(maximum)))
-                                    }
-                                }
-                                .frame(height: 6)
+                                .padding(.horizontal, 10)
+                                .frame(maxWidth: .infinity, minHeight: 42)
+                                .background(Theme.panelRaised)
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 0.7))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
                             }
+                            .buttonStyle(.plain)
+                            .help("复制 \(address)")
                         }
                     }
                 }
@@ -494,22 +651,111 @@ private struct DeviceRanking: View {
     }
 }
 
-private struct DeviceSetupPanel: View {
+private struct GuideStep: View {
+    let number: String, title: String, detail: String
+    var body: some View {
+        HStack(spacing: 9) {
+            Text(number).font(.caption2.weight(.bold)).foregroundStyle(Color.white)
+                .frame(width: 22, height: 22).background(Theme.cyan).clipShape(Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.caption.weight(.semibold)).lineLimit(1)
+                Text(detail).font(.caption2).foregroundStyle(Theme.muted).lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct DeviceRanking: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
+        let activeIPs = Set(model.stats?.relay.active.map(\.srcIP) ?? [])
+        let devices = Array((model.stats?.relay.devices ?? []).prefix(20))
         Panel {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("设备接入参数").sectionLabel()
-                HStack(spacing: 28) {
-                    SetupValue("网关 / 路由器", model.status?.gateway.localIP.nonEmpty ?? "--")
-                    SetupValue("首选 DNS", model.status?.gateway.localIP.nonEmpty ?? "--")
-                    SetupValue("子网掩码", "255.255.255.0")
-                    SetupValue("前缀长度", "24")
-                    SetupValue("代理", "无")
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("已接入设备").sectionLabel()
+                        Text("按本次核心运行期间的流量排序").font(.caption).foregroundStyle(Theme.muted)
+                    }
+                    Spacer()
+                }
+                .padding(.bottom, 14)
+                if devices.isEmpty {
+                    EmptyTelemetry(icon: "desktopcomputer", text: "等待局域网设备接入")
+                        .frame(minHeight: 240)
+                } else {
+                    let maximum = max(devices.first?.total ?? 1, 1)
+                    HStack(spacing: 12) {
+                        Text("设备地址").frame(maxWidth: .infinity, alignment: .leading)
+                        Text("标签备注").frame(width: 150, alignment: .leading)
+                        Text("状态").frame(width: 80, alignment: .leading)
+                        Text("连接").frame(width: 80, alignment: .trailing)
+                        Text("流量").frame(width: 100, alignment: .trailing)
+                    }
+                    .font(.caption2.weight(.medium)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .background(Theme.panelRaised)
+                    VStack(spacing: 0) {
+                        ForEach(devices) { item in
+                            VStack(spacing: 8) {
+                                HStack(spacing: 12) {
+                                    HStack(spacing: 9) {
+                                        Image(systemName: "desktopcomputer")
+                                            .foregroundStyle(activeIPs.contains(item.name) ? Theme.lime : Theme.muted)
+                                        Text(item.name).font(.system(size: 13, weight: .medium, design: .monospaced))
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    TextField("例如：客厅 Switch", text: Binding(
+                                        get: { model.deviceLabel(for: item.name) },
+                                        set: { model.setDeviceLabel($0, for: item.name) }
+                                    ))
+                                    .textFieldStyle(.plain)
+                                    .font(.caption)
+                                    .frame(width: 150)
+                                    Text(activeIPs.contains(item.name) ? "正在使用" : "最近使用")
+                                        .font(.caption).foregroundStyle(activeIPs.contains(item.name) ? Theme.lime : Theme.muted)
+                                        .frame(width: 80, alignment: .leading)
+                                    Text("\(item.connections)").font(.system(.caption, design: .monospaced))
+                                        .frame(width: 80, alignment: .trailing)
+                                    Text(shortBytes(item.total)).font(.system(.caption, design: .monospaced))
+                                        .frame(width: 100, alignment: .trailing)
+                                }
+                                GeometryReader { geometry in
+                                    Capsule().fill(Theme.cyan.opacity(0.65))
+                                        .frame(width: max(3, geometry.size.width * CGFloat(Double(item.total) / Double(maximum))))
+                                }.frame(height: 3)
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 10)
+                            if item.id != devices.last?.id { Divider().overlay(Theme.border.opacity(0.7)) }
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+private struct CompactSetupValue: View {
+    let label: String
+    let value: String
+    var copyable = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(label).font(.caption2).foregroundStyle(Theme.muted)
+            HStack(spacing: 6) {
+                Text(value).font(.system(size: 12, weight: .medium, design: .monospaced)).lineLimit(1)
+                if copyable {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(value, forType: .string)
+                    } label: { Image(systemName: "doc.on.doc") }
+                    .buttonStyle(.plain).foregroundStyle(Theme.cyan).help("复制")
+                }
+            }
+        }
+        .frame(minWidth: 150, alignment: .leading)
     }
 }
 
@@ -517,18 +763,19 @@ private struct StabilityView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                HStack(spacing: 12) {
-                    MetricCard("平均延迟", formatMS(model.stats?.health.latencyMS), "timer", Theme.cyan)
-                    MetricCard("网络抖动", formatMS(model.stats?.health.jitterMS), "waveform.path", Theme.yellow)
-                    MetricCard("可用率", String(format: "%.1f%%", model.stats?.health.availability ?? 0), "checkmark.shield.fill", Theme.lime)
-                    MetricCard("连续失败", "\(model.stats?.health.failCount ?? 0)", "exclamationmark.triangle.fill", Theme.coral)
-                }
-                StabilityChart().frame(minHeight: 420)
-                StabilitySummary()
-            }.padding(20)
+        VStack(spacing: 16) {
+            HStack(spacing: 12) {
+                MetricCard("平均延迟", formatMS(model.stats?.health.latencyMS), "timer", Theme.cyan)
+                MetricCard("网络抖动", formatMS(model.stats?.health.jitterMS), "waveform.path", Theme.yellow)
+                MetricCard("可用率", String(format: "%.1f%%", model.stats?.health.availability ?? 0), "checkmark.shield.fill", Theme.lime)
+                MetricCard("连续失败", "\(model.stats?.health.failCount ?? 0)", "exclamationmark.triangle.fill", Theme.coral)
+            }
+            HStack(alignment: .top, spacing: 16) {
+                StabilityChart().frame(maxWidth: .infinity, maxHeight: .infinity)
+                StabilitySummary().frame(width: 330)
+            }
         }
+        .padding(20)
     }
 }
 
@@ -574,6 +821,11 @@ private struct StabilitySummary: View {
                     .tint(Theme.lime)
                 QualityRow("平均延迟", formatMS(model.stats?.health.latencyMS), Theme.cyan)
                 QualityRow("平均抖动", formatMS(model.stats?.health.jitterMS), Theme.yellow)
+                Divider().overlay(Theme.border)
+                ProbeHistoryStrip(
+                    points: Array((model.stats?.health.history ?? []).suffix(60)),
+                    average: model.stats?.health.latencyMS ?? 0
+                )
                 if let error = model.stats?.health.lastError, !error.isEmpty {
                     Text(error).font(.caption).foregroundStyle(Theme.coral).lineLimit(2)
                 }
@@ -582,14 +834,66 @@ private struct StabilitySummary: View {
     }
 }
 
+private struct ProbeHistoryStrip: View {
+    let points: [ProbePoint]
+    let average: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("最近 \(points.count) 次探测").font(.caption).foregroundStyle(Theme.muted)
+                Spacer()
+                Text("实时更新").font(.caption2).foregroundStyle(Theme.muted)
+            }
+            HStack(alignment: .bottom, spacing: 2) {
+                ForEach(Array(points.enumerated()), id: \.offset) { _, point in
+                    Capsule()
+                        .fill(probeColor(point))
+                        .frame(maxWidth: .infinity, minHeight: 22, maxHeight: 34)
+                        .help(point.ok ? formatMS(point.latencyMS) : "探测失败")
+                }
+                if points.isEmpty {
+                    Text("等待探测记录").font(.caption2).foregroundStyle(Theme.muted)
+                }
+            }
+            HStack {
+                Text("过去"); Spacer(); Text("现在")
+            }.font(.system(size: 9, weight: .medium)).foregroundStyle(Theme.muted)
+        }
+    }
+
+    private func probeColor(_ point: ProbePoint) -> Color {
+        if !point.ok { return Theme.coral }
+        if average > 0, point.latencyMS > max(average * 1.8, 80) { return Theme.yellow }
+        return Theme.lime
+    }
+}
+
 private struct ConnectionsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var search = ""
+    @State private var statusFilter = "全部"
+    @State private var deviceFilter = "全部设备"
+    @State private var routeFilter = "全部出口"
+    @State private var unresolvedOnly = false
 
     private var connections: [ConnectionInfo] {
         let all = (model.stats?.relay.active ?? []) + (model.stats?.relay.recent ?? [])
-        guard !search.isEmpty else { return all }
-        return all.filter { $0.srcIP.localizedCaseInsensitiveContains(search) || $0.dstHost.localizedCaseInsensitiveContains(search) || $0.service.localizedCaseInsensitiveContains(search) }
+        return all.filter { item in
+            let label = model.deviceLabel(for: item.srcIP)
+            let matchesSearch = search.isEmpty || item.srcIP.localizedCaseInsensitiveContains(search) ||
+                label.localizedCaseInsensitiveContains(search) || item.dstHost.localizedCaseInsensitiveContains(search) ||
+                item.service.localizedCaseInsensitiveContains(search)
+            let matchesStatus = statusFilter == "全部" || (statusFilter == "活跃" ? item.endedAt == nil : item.endedAt != nil)
+            let matchesDevice = deviceFilter == "全部设备" || item.srcIP == deviceFilter
+            let matchesRoute = routeFilter == "全部出口" || (routeFilter == "代理" ? item.viaProxy : !item.viaProxy)
+            let matchesResolution = !unresolvedOnly || item.service == "未解析域名"
+            return matchesSearch && matchesStatus && matchesDevice && matchesRoute && matchesResolution
+        }
+    }
+
+    private var devices: [String] {
+        Array(Set(((model.stats?.relay.active ?? []) + (model.stats?.relay.recent ?? [])).map(\.srcIP))).sorted()
     }
 
     var body: some View {
@@ -597,7 +901,24 @@ private struct ConnectionsView: View {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
                 TextField("搜索设备、服务或域名", text: $search).textFieldStyle(.plain)
-                Spacer()
+                    .frame(minWidth: 180)
+                Divider().frame(height: 22)
+                Picker("状态", selection: $statusFilter) {
+                    Text("全部").tag("全部"); Text("活跃").tag("活跃"); Text("完成").tag("完成")
+                }.labelsHidden().pickerStyle(.segmented).frame(width: 180)
+                Picker("设备", selection: $deviceFilter) {
+                    Text("全部设备").tag("全部设备")
+                    ForEach(devices, id: \.self) { ip in
+                        Text(model.deviceLabel(for: ip).nonEmpty ?? ip).tag(ip)
+                    }
+                }.labelsHidden().frame(width: 150)
+                Picker("出口", selection: $routeFilter) {
+                    Text("全部出口").tag("全部出口"); Text("代理").tag("代理"); Text("直连").tag("直连")
+                }.labelsHidden().frame(width: 120)
+                Toggle("仅未解析域名", isOn: $unresolvedOnly).toggleStyle(.checkbox).font(.caption)
+                Image(systemName: "info.circle").foregroundStyle(Theme.muted)
+                    .help("设备直接连接 IP，或 DNS 映射不可用时无法还原域名。仍会记录目标 IP、端口、流量、时间和出口；HTTPS 加密下无法识别具体操作内容。")
+                Spacer(minLength: 8)
                 Text("\(connections.count) 条记录").font(.caption).foregroundStyle(Theme.muted)
             }
             .padding(.horizontal, 16).frame(height: 44).background(Theme.panel)
@@ -606,7 +927,14 @@ private struct ConnectionsView: View {
                 TableColumn("状态") { item in
                     HStack(spacing: 6) { Circle().fill(item.endedAt == nil ? Theme.lime : Theme.muted).frame(width: 6, height: 6); Text(item.endedAt == nil ? "活跃" : "完成") }
                 }.width(70)
-                TableColumn("设备") { Text($0.srcIP).font(.system(.body, design: .monospaced)) }.width(min: 110, ideal: 130)
+                TableColumn("设备") { item in
+                    VStack(alignment: .leading, spacing: 1) {
+                        if let label = model.deviceLabel(for: item.srcIP).nonEmpty {
+                            Text(label).fontWeight(.medium)
+                        }
+                        Text(item.srcIP).font(.system(size: 10, design: .monospaced)).foregroundStyle(Theme.muted)
+                    }
+                }.width(min: 125, ideal: 155)
                 TableColumn("识别服务") { Text($0.service).fontWeight(.medium) }.width(min: 100, ideal: 130)
                 TableColumn("目标域名 / 地址") { Text("\($0.dstHost):\($0.dstPort)").font(.system(.body, design: .monospaced)) }
                 TableColumn("出口") { Text($0.viaProxy ? "PROXY" : "DIRECT").foregroundStyle($0.viaProxy ? Theme.cyan : Theme.yellow) }.width(70)
@@ -621,99 +949,361 @@ private struct ConnectionsView: View {
 
 private struct ProxyView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var showRoutingEditor = false
 
     var body: some View {
-        ScrollView {
-            HStack(alignment: .top, spacing: 16) {
+        VStack(spacing: 16) {
                 Panel {
-                    VStack(alignment: .leading, spacing: 20) {
-                        Text("代理出口").sectionLabel()
-                        Picker("", selection: $model.proxyType) {
-                            Text("SOCKS5").tag("socks5")
-                            Text("HTTP CONNECT").tag("http")
-                        }.pickerStyle(.segmented).tint(Theme.cyan)
-                        VStack(alignment: .leading, spacing: 7) {
-                            Text("代理地址").fieldLabel()
-                            TextField("127.0.0.1", text: $model.proxyHost).textFieldStyle(DarkFieldStyle())
-                        }
-                        VStack(alignment: .leading, spacing: 7) {
-                            Text("代理端口").fieldLabel()
-                            TextField("7897", value: $model.proxyPort, format: .number).textFieldStyle(DarkFieldStyle())
-                        }
-                        HStack {
-                            Button(model.isConfigured ? "应用代理" : "保存代理配置") { model.applyProxy() }.buttonStyle(ActionButtonStyle(tint: Theme.cyan))
-                            Button("切换直连") { model.useDirectConnection() }.buttonStyle(ActionButtonStyle(tint: Theme.yellow))
-                        }.disabled(model.isBusy)
-                        if model.status?.configured == false {
-                            Text("保存后返回顶部启动核心服务。管理员授权仅用于系统网络与网关设置。")
-                                .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }.frame(maxWidth: 520)
-                Panel {
-                    VStack(alignment: .leading, spacing: 20) {
-                        Text("当前链路").sectionLabel()
-                        RouteDiagram()
-                        Divider().overlay(Theme.border)
-                        ValuePair(label: "当前出口", value: model.status?.proxy ?? "DIRECT")
-                        if let identity = model.stats?.health.egressIdentity {
-                            Divider().overlay(Theme.border)
-                            HStack(spacing: 28) {
-                                ValuePair(label: "公网 IP", value: identity.ip)
-                                ValuePair(label: "地区", value: egressLocation(identity))
-                                ValuePair(label: "网络", value: identity.isp?.nonEmpty ?? "--")
+                    VStack(alignment: .leading, spacing: 18) {
+                        HStack(alignment: .top, spacing: 16) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("当前网络出口").sectionLabel()
+                                Text(activeExitTitle)
+                                    .font(.system(size: 22, weight: .semibold, design: .rounded))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.72)
+                                Text(activeExitSubtitle)
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.muted)
                             }
-                        } else {
-                            Text("正在通过当前出口检测公网 IP 和地区...")
-                                .font(.caption).foregroundStyle(Theme.muted)
+                            Spacer()
+                            Button { showRoutingEditor = true } label: {
+                                Label("管理分流规则", systemImage: "list.bullet.rectangle")
+                            }.buttonStyle(.bordered)
+                            LiveBadge(active: model.isRunning && (model.stats?.health.healthy ?? false))
+                        }
+
+                        RouteDiagram(
+                            active: model.isRunning,
+                            gateway: model.status?.gateway.localIP.nonEmpty ?? "--",
+                            upstream: activeEndpoint,
+                            devices: Array((model.stats?.relay.devices ?? []).prefix(3)),
+                            labels: model.deviceLabels,
+                            rules: model.status?.routing ?? []
+                        )
+
+                        Divider().overlay(Theme.border)
+                        HStack(spacing: 0) {
+                            ExitFact(label: "出口模式", value: model.status?.egress == "proxy" ? "代理转发" : "直接连接", icon: "arrow.triangle.branch")
+                            ExitFact(label: "公网 IP", value: model.stats?.health.egressIdentity?.ip ?? "正在检测", icon: "globe.asia.australia")
+                            ExitFact(label: "出口地区", value: egressLocation(model.stats?.health.egressIdentity), icon: "mappin.and.ellipse")
+                            ExitFact(label: "网络服务商", value: model.stats?.health.egressIdentity?.isp?.nonEmpty ?? "--", icon: "building.2")
+                        }
+                        ProbeHistoryStrip(
+                            points: Array((model.stats?.health.history ?? []).suffix(60)),
+                            average: model.stats?.health.latencyMS ?? 0
+                        )
+                    }
+                }
+
+                Panel {
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("修改上游代理").sectionLabel()
+                                Text("修改后会立即应用到局域网设备的新连接")
+                                    .font(.caption).foregroundStyle(Theme.muted)
+                            }
+                            Spacer()
+                            Button("切换直连") { model.useDirectConnection() }
+                                .buttonStyle(.bordered)
+                                .disabled(model.isBusy || model.status?.egress != "proxy")
+                        }
+                        HStack(alignment: .bottom, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 7) {
+                                Text("代理协议").fieldLabel()
+                                Picker("", selection: $model.proxyType) {
+                                    Text("SOCKS5").tag("socks5")
+                                    Text("HTTP CONNECT").tag("http")
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.segmented)
+                                .tint(Theme.cyan)
+                                .frame(width: 260)
+                            }
+                            VStack(alignment: .leading, spacing: 7) {
+                                Text("代理地址").fieldLabel()
+                                TextField("127.0.0.1", text: $model.proxyHost)
+                                    .textFieldStyle(DarkFieldStyle())
+                            }
+                            VStack(alignment: .leading, spacing: 7) {
+                                Text("端口").fieldLabel()
+                                TextField("7897", value: $model.proxyPort, format: .number)
+                                    .textFieldStyle(DarkFieldStyle())
+                                    .frame(width: 130)
+                            }
+                            Button(model.isConfigured ? "应用代理" : "保存配置") { model.applyProxy() }
+                                .buttonStyle(ActionButtonStyle(tint: Theme.cyan))
+                                .frame(height: 36)
+                                .disabled(model.isBusy)
                         }
                     }
                 }
-            }.padding(20)
+        }.padding(20)
+        .sheet(isPresented: $showRoutingEditor) {
+            RoutingRulesEditor(rules: model.status?.routing ?? [])
+                .environmentObject(model)
         }
+    }
+
+    private var activeEndpoint: String {
+        model.status?.egress == "proxy" ? (model.status?.proxy?.nonEmpty ?? "代理未配置") : "DIRECT"
+    }
+
+    private var activeExitTitle: String {
+        model.status?.egress == "proxy" ? activeEndpoint : "DIRECT 直连"
+    }
+
+    private var activeExitSubtitle: String {
+        guard model.status?.egress == "proxy" else { return "局域网流量不经过上游代理" }
+        let count = model.status?.routing?.count ?? 0
+        return count == 0 ? "未配置分流规则，所有新建 TCP 连接通过此上游代理" : "按顺序匹配 \(count) 条规则，未命中时使用此上游代理"
     }
 }
 
 private struct RouteDiagram: View {
+    let active: Bool
+    let gateway: String
+    let upstream: String
+    let devices: [UsageAggregate]
+    let labels: [String: String]
+    let rules: [RoutingRule]
+
+    var body: some View {
+        HStack(spacing: 10) {
+            DeviceRouteCluster(devices: devices, labels: labels)
+            AnimatedRouteLine(color: Theme.lime, active: active)
+            RouteNode(icon: "server.rack", label: "旁路由", detail: gateway)
+            AnimatedRouteLine(color: Theme.cyan, active: active)
+            RouteNode(icon: "arrow.triangle.branch", label: "规则判断", detail: "\(rules.count) 条 · 首条命中")
+            AnimatedRouteBranch(active: active)
+            VStack(spacing: 7) {
+                RouteOutcome(icon: "cloud", title: "上游代理", detail: upstream, count: ruleCount("proxy"), color: Theme.cyan)
+                RouteOutcome(icon: "network", title: "本机直连", detail: "DIRECT", count: ruleCount("direct"), color: Theme.lime)
+                RouteOutcome(icon: "xmark.octagon", title: "拒绝", detail: "REJECT", count: ruleCount("reject"), color: Theme.coral)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+    }
+
+    private func ruleCount(_ action: String) -> Int { rules.filter { $0.action == action }.count }
+}
+
+private struct AnimatedRouteBranch: View {
+    let active: Bool
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !active)) { timeline in
+            Canvas { context, size in
+                let start = CGPoint(x: 0, y: size.height / 2)
+                let ends = [CGPoint(x: size.width, y: 19), CGPoint(x: size.width, y: size.height / 2), CGPoint(x: size.width, y: size.height - 19)]
+                let progress = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
+                for (index, end) in ends.enumerated() {
+                    var path = Path(); path.move(to: start); path.addLine(to: end)
+                    let color = [Theme.cyan, Theme.lime, Theme.coral][index]
+                    context.stroke(path, with: .color(color.opacity(0.28)), lineWidth: 1.5)
+                    let point = CGPoint(x: start.x + (end.x - start.x) * progress, y: start.y + (end.y - start.y) * progress)
+                    context.fill(Path(ellipseIn: CGRect(x: point.x - 3, y: point.y - 3, width: 6, height: 6)), with: .color(color))
+                }
+            }
+        }
+        .frame(width: 52, height: 128)
+        .accessibilityLabel("规则流量分支")
+    }
+}
+
+private struct DeviceRouteCluster: View {
+    let devices: [UsageAggregate]
+    let labels: [String: String]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("局域网设备").font(.caption.weight(.semibold))
+            if devices.isEmpty {
+                Text("等待设备接入").font(.caption2).foregroundStyle(Theme.muted)
+            } else {
+                ForEach(devices) { device in
+                    HStack(spacing: 6) {
+                        Image(systemName: "desktopcomputer").foregroundStyle(Theme.lime)
+                        VStack(alignment: .leading, spacing: 0) {
+                            if let label = labels[device.name]?.nonEmpty { Text(label).font(.caption2.weight(.semibold)) }
+                            Text(device.name).font(.system(size: 9, design: .monospaced)).foregroundStyle(Theme.muted)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(10).frame(width: 155).frame(minHeight: 96, alignment: .leading)
+        .background(Theme.panelRaised).clipShape(RoundedRectangle(cornerRadius: 7))
+    }
+}
+
+private struct RouteOutcome: View {
+    let icon: String, title: String, detail: String
+    let count: Int
+    let color: Color
     var body: some View {
         HStack(spacing: 8) {
-            RouteNode(icon: "desktopcomputer", label: "局域网设备")
-            RouteLine(color: Theme.lime)
-            RouteNode(icon: "server.rack", label: "旁路由")
-            RouteLine(color: Theme.cyan)
-            RouteNode(icon: "cloud", label: "上游代理")
-        }.frame(maxWidth: .infinity).padding(.vertical, 28)
+            Image(systemName: icon).foregroundStyle(color).frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.caption.weight(.semibold))
+                Text(detail).font(.system(size: 8, design: .monospaced)).foregroundStyle(Theme.muted).lineLimit(1)
+            }
+            Spacer(minLength: 5)
+            Text("\(count)").font(.caption2.weight(.bold)).foregroundStyle(color)
+                .frame(minWidth: 20, minHeight: 20).background(color.opacity(0.1)).clipShape(Circle())
+        }
+        .padding(.horizontal, 9).frame(width: 190, height: 38)
+        .background(Theme.panelRaised).clipShape(RoundedRectangle(cornerRadius: 6))
     }
+}
+
+private struct RoutingRulesEditor: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: [RoutingRule]
+
+    init(rules: [RoutingRule]) { _draft = State(initialValue: rules) }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("分流规则").font(.title2.weight(.semibold))
+                    Text("按顺序匹配第一条规则；局域网网关无法识别远端设备的 PROCESS-NAME。")
+                        .font(.caption).foregroundStyle(Theme.muted)
+                }
+                Spacer()
+                Button { addRule() } label: { Label("添加规则", systemImage: "plus") }.buttonStyle(.bordered)
+            }.padding(20)
+            Divider()
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 8) {
+                    ForEach($draft) { $rule in
+                        HStack(spacing: 10) {
+                            Image(systemName: "line.3.horizontal").foregroundStyle(Theme.muted)
+                            Picker("类型", selection: $rule.type) {
+                                Text("完整域名").tag("domain")
+                                Text("域名后缀").tag("domain-suffix")
+                            }.labelsHidden().frame(width: 125)
+                            TextField("例如 openai.com", text: $rule.value).textFieldStyle(DarkFieldStyle())
+                            Picker("动作", selection: $rule.action) {
+                                Text("上游代理").tag("proxy")
+                                Text("本机直连").tag("direct")
+                                Text("拒绝").tag("reject")
+                            }.labelsHidden().frame(width: 120)
+                            Button(role: .destructive) { draft.removeAll { $0.id == rule.id } } label: {
+                                Image(systemName: "trash")
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                    if draft.isEmpty {
+                        EmptyTelemetry(icon: "arrow.triangle.branch", text: "暂无规则，全部流量使用默认出口")
+                            .frame(minHeight: 220)
+                    }
+                }.padding(20)
+            }
+            Divider()
+            HStack {
+                Text("PROXY \(count("proxy")) · DIRECT \(count("direct")) · REJECT \(count("reject"))")
+                    .font(.caption).foregroundStyle(Theme.muted)
+                Spacer()
+                Button("取消") { dismiss() }.buttonStyle(.bordered)
+                Button("应用规则") {
+                    model.applyRoutingRules(draft)
+                    dismiss()
+                }.buttonStyle(ActionButtonStyle(tint: Theme.cyan)).disabled(hasInvalidRule || model.isBusy)
+            }.padding(20)
+        }
+        .frame(width: 760, height: 520).background(Theme.canvas)
+    }
+
+    private var hasInvalidRule: Bool { draft.contains { $0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
+    private func count(_ action: String) -> Int { draft.filter { $0.action == action }.count }
+    private func addRule() { draft.append(RoutingRule(type: "domain-suffix", value: "", action: "proxy")) }
 }
 
 private struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                Panel {
-                    SettingsRow(title: "命令行工具", detail: "/usr/local/bin/gateway") {
-                        Button("安装 CLI") { model.installCLI() }.buttonStyle(ActionButtonStyle(tint: Theme.cyan))
-                    }
-                    Divider().overlay(Theme.border)
-                    SettingsRow(title: "开机自启", detail: "\(model.serviceStatus) · 使用 /usr/local/bin/gateway") {
-                        Button("启用") { model.installService() }.buttonStyle(ActionButtonStyle(tint: Theme.lime))
-                        Button("移除") { model.uninstallService() }.buttonStyle(ActionButtonStyle(tint: Theme.coral))
-                    }
-                    Divider().overlay(Theme.border)
-                    SettingsRow(title: "配置文件", detail: model.status?.configFile ?? "--") { EmptyView() }
+        VStack(spacing: 16) {
+            Panel {
+                SettingsRow(title: "命令行工具", detail: "/usr/local/bin/gateway") {
+                    Button("安装 CLI") { model.installCLI() }.buttonStyle(ActionButtonStyle(tint: Theme.cyan))
                 }
-                Panel {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack { Text("运行日志").sectionLabel(); Spacer(); Button("刷新") { model.reloadLog() }.buttonStyle(.bordered); Button("在访达中显示") { model.revealLog() }.buttonStyle(.bordered) }
-                        ScrollView([.horizontal, .vertical]) {
-                            Text(model.logText).font(.system(size: 11, design: .monospaced)).foregroundStyle(Color.primary.opacity(0.78)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .topLeading)
-                        }.frame(minHeight: 280)
-                    }
+                Divider().overlay(Theme.border)
+                SettingsRow(title: "开机自启", detail: "\(model.serviceStatus) · 使用 /usr/local/bin/gateway") {
+                    Toggle("", isOn: Binding(
+                        get: { model.isServiceInstalled },
+                        set: { model.setServiceEnabled($0) }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(Theme.lime)
+                    .disabled(model.isBusy)
+                    .help(model.isServiceInstalled ? "关闭开机自启" : "启用开机自启")
                 }
-            }.padding(20)
-        }.task { model.updateServiceStatus(); model.reloadLog() }
+                Divider().overlay(Theme.border)
+                SettingsRow(title: "配置文件", detail: model.status?.configFile ?? "--") { EmptyView() }
+                Divider().overlay(Theme.border)
+                SettingsRow(title: "开源项目", detail: "github.com/Tght1211/lan-proxy-gateway") {
+                    Button {
+                        NSWorkspace.shared.open(URL(string: "https://github.com/Tght1211/lan-proxy-gateway")!)
+                    } label: { Label("GitHub", systemImage: "arrow.up.right.square") }
+                    .buttonStyle(.bordered)
+                }
+            }
+            Panel {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("运行日志").sectionLabel()
+                        Text("自动更新").font(.caption2).foregroundStyle(Theme.lime)
+                        Spacer()
+                        Button("刷新") { model.reloadLog() }.buttonStyle(.bordered)
+                        Button("在访达中显示") { model.revealLog() }.buttonStyle(.bordered)
+                    }
+                    LiveLogView(text: model.logText)
+                }
+            }
+            .frame(maxHeight: .infinity)
+        }
+        .padding(20)
+        .task { model.updateServiceStatus(); model.reloadLog() }
+    }
+}
+
+private struct LiveLogView: View {
+    let text: String
+    private let bottomID = "log-bottom"
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView([.horizontal, .vertical], showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(text)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Color.primary.opacity(0.78))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: true, vertical: true)
+                    Color.clear.frame(height: 1).id(bottomID)
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .onAppear { scrollToBottom(proxy, animated: false) }
+            .onChange(of: text) { _ in scrollToBottom(proxy, animated: true) }
+        }
+        .frame(minHeight: 180, maxHeight: .infinity)
+        .clipped()
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
+        DispatchQueue.main.async {
+            if animated {
+                withAnimation(.easeOut(duration: 0.22)) { proxy.scrollTo(bottomID, anchor: .bottom) }
+            } else {
+                proxy.scrollTo(bottomID, anchor: .bottom)
+            }
+        }
     }
 }
 
@@ -800,13 +1390,67 @@ private struct QualityRow: View {
 }
 
 private struct RouteNode: View {
-    let icon: String, label: String
-    var body: some View { VStack(spacing: 8) { ZStack { RoundedRectangle(cornerRadius: 7).fill(Theme.panelRaised); Image(systemName: icon).font(.title2).foregroundStyle(Theme.cyan) }.frame(width: 62, height: 62); Text(label).font(.caption2).foregroundStyle(Theme.muted) } }
+    let icon: String, label: String, detail: String
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 7).fill(Theme.panelRaised)
+                Image(systemName: icon).font(.title2).foregroundStyle(Theme.cyan)
+            }
+            .frame(width: 58, height: 52)
+            Text(label).font(.caption.weight(.medium))
+            Text(detail).font(.system(size: 10, design: .monospaced)).foregroundStyle(Theme.muted)
+                .lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .frame(width: 150)
+    }
 }
 
-private struct RouteLine: View {
+private struct AnimatedRouteLine: View {
     let color: Color
-    var body: some View { HStack(spacing: 3) { ForEach(0..<4, id: \.self) { _ in Capsule().fill(color.opacity(0.75)).frame(width: 8, height: 3) } } }
+    let active: Bool
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !active)) { timeline in
+            GeometryReader { geometry in
+                let width = max(geometry.size.width, 1)
+                let phase = timeline.date.timeIntervalSinceReferenceDate
+                    .truncatingRemainder(dividingBy: 1.35) / 1.35
+                ZStack(alignment: .leading) {
+                    Capsule().fill(color.opacity(active ? 0.18 : 0.10)).frame(height: 2)
+                    ForEach(0..<3, id: \.self) { index in
+                        let progress = (phase + Double(index) / 3).truncatingRemainder(dividingBy: 1)
+                        Circle().fill(color.opacity(active ? 0.9 : 0.25))
+                            .frame(width: 6, height: 6)
+                            .offset(x: max(0, width - 6) * progress)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold)).foregroundStyle(color.opacity(0.7))
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .frame(maxHeight: .infinity)
+            }
+        }
+        .frame(minWidth: 90, maxWidth: .infinity, minHeight: 12, maxHeight: 12)
+        .accessibilityLabel(active ? "流量正在转发" : "链路当前未运行")
+    }
+}
+
+private struct ExitFact: View {
+    let label: String, value: String, icon: String
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).foregroundStyle(Theme.cyan).frame(width: 22)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(label).font(.caption2).foregroundStyle(Theme.muted)
+                Text(value).font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .lineLimit(1).minimumScaleFactor(0.72)
+            }
+            Spacer(minLength: 8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+    }
 }
 
 private struct SettingsRow<Actions: View>: View {
@@ -854,6 +1498,24 @@ private func egressLocation(_ identity: EgressIdentity?) -> String {
     }
     let place = identity.city?.nonEmpty ?? identity.region?.nonEmpty
     return [country, place].compactMap { $0 }.uniqued().joined(separator: " · ").nonEmpty ?? "地区未知"
+}
+
+private func suggestedDeviceIPs(gateway: String, occupied: Set<String>) -> [String] {
+    let octets = gateway.split(separator: ".").compactMap { Int($0) }
+    guard octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) else { return [] }
+    let prefix = "\(octets[0]).\(octets[1]).\(octets[2])"
+    return (201...254)
+        .map { "\(prefix).\($0)" }
+        .filter { $0 != gateway && !occupied.contains($0) }
+        .prefix(5)
+        .map { $0 }
+}
+
+private func suggestionsRange(_ suggestions: [String]) -> String {
+    guard let first = suggestions.first else { return "暂不可用" }
+    guard let last = suggestions.last, last != first else { return first }
+    let lastOctet = last.split(separator: ".").last.map(String.init) ?? last
+    return "\(first)–\(lastOctet)"
 }
 
 private extension Array where Element == String {

@@ -5,6 +5,7 @@ struct GatewayStatus: Decodable {
     let running: Bool
     let egress: String
     let proxy: String?
+    let routing: [RoutingRule]?
     let dns: DNSStatus
     let quicBlock: Bool
     let gateway: NetworkStatus
@@ -13,11 +14,20 @@ struct GatewayStatus: Decodable {
     let logFile: String
 
     enum CodingKeys: String, CodingKey {
-        case configured, running, egress, proxy, dns, gateway, ports
+        case configured, running, egress, proxy, routing, dns, gateway, ports
         case quicBlock = "quic_block"
         case configFile = "config_file"
         case logFile = "log_file"
     }
+}
+
+struct RoutingRule: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var type: String
+    var value: String
+    var action: String
+
+    enum CodingKeys: String, CodingKey { case type, value, action }
 }
 
 struct DNSStatus: Decodable {
@@ -76,9 +86,11 @@ struct RelayStats: Decodable {
     let traffic: [TrafficPoint]
     let devices: [UsageAggregate]
     let services: [UsageAggregate]
+    let deviceServices: [DeviceServiceAggregate]
 
     enum CodingKeys: String, CodingKey {
         case active, recent, traffic, devices, services
+        case deviceServices = "device_services"
         case upTotal = "up_total"
         case downTotal = "down_total"
     }
@@ -92,7 +104,14 @@ struct RelayStats: Decodable {
         traffic = try values.decodeIfPresent([TrafficPoint].self, forKey: .traffic) ?? []
         devices = try values.decodeIfPresent([UsageAggregate].self, forKey: .devices) ?? []
         services = try values.decodeIfPresent([UsageAggregate].self, forKey: .services) ?? []
+        deviceServices = try values.decodeIfPresent([DeviceServiceAggregate].self, forKey: .deviceServices) ?? []
     }
+}
+
+struct DeviceServiceAggregate: Decodable, Identifiable {
+    let device: String
+    let services: [UsageAggregate]
+    var id: String { device }
 }
 
 struct ConnectionInfo: Decodable, Identifiable {
@@ -124,8 +143,8 @@ struct ConnectionInfo: Decodable, Identifiable {
         srcIP = try values.decodeIfPresent(String.self, forKey: .srcIP) ?? "--"
         dstHost = try values.decodeIfPresent(String.self, forKey: .dstHost) ?? "--"
         dstPort = try values.decodeIfPresent(Int.self, forKey: .dstPort) ?? 0
-        let decodedService = try values.decodeIfPresent(String.self, forKey: .service) ?? "IP 地址流量"
-        service = decodedService == "未识别流量" ? "IP 地址流量" : decodedService
+        let decodedService = try values.decodeIfPresent(String.self, forKey: .service) ?? "未解析域名"
+        service = ["未识别流量", "IP 地址流量"].contains(decodedService) ? "未解析域名" : decodedService
         up = try values.decodeIfPresent(Int64.self, forKey: .up) ?? 0
         down = try values.decodeIfPresent(Int64.self, forKey: .down) ?? 0
         startedAt = try values.decode(Date.self, forKey: .startedAt)
@@ -149,7 +168,7 @@ struct UsageAggregate: Decodable, Identifiable {
     let lastSeen: Date
     var id: String { name }
     var total: Int64 { up + down }
-    var displayName: String { name == "未识别流量" ? "IP 地址流量" : name }
+    var displayName: String { ["未识别流量", "IP 地址流量"].contains(name) ? "未解析域名" : name }
 
     enum CodingKeys: String, CodingKey {
         case name, up, down, connections
@@ -236,9 +255,8 @@ struct ProbePoint: Decodable, Identifiable {
 
 enum AppSection: String, CaseIterable, Identifiable {
     case overview = "网络总览"
-    case traffic = "实时流量"
     case services = "服务分析"
-    case devices = "设备洞察"
+    case devices = "局域网设备"
     case stability = "稳定性"
     case connections = "访问记录"
     case proxy = "出口设置"
@@ -249,7 +267,6 @@ enum AppSection: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .overview: return "command"
-        case .traffic: return "waveform.path.ecg"
         case .services: return "square.stack.3d.up.fill"
         case .devices: return "desktopcomputer.and.macbook"
         case .stability: return "dot.radiowaves.left.and.right"

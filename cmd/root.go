@@ -52,6 +52,7 @@ func init() {
 		statusCmd,
 		serviceCmd,
 		systemProxyCmd,
+		routingCmd,
 		updateCmd,
 		runCmd,
 	)

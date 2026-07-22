@@ -204,6 +204,11 @@ func Normalize(cfg *Config) {
 	if cfg.Runtime.FakeIPRange == "" {
 		cfg.Runtime.FakeIPRange = "198.18.0.0/16"
 	}
+	for i := range cfg.Routing.Rules {
+		cfg.Routing.Rules[i].Type = strings.ToLower(strings.TrimSpace(cfg.Routing.Rules[i].Type))
+		cfg.Routing.Rules[i].Value = strings.ToLower(strings.Trim(strings.TrimSpace(cfg.Routing.Rules[i].Value), "."))
+		cfg.Routing.Rules[i].Action = strings.ToLower(strings.TrimSpace(cfg.Routing.Rules[i].Action))
+	}
 }
 
 // Validate checks the config is internally consistent.
@@ -257,6 +262,21 @@ func Validate(cfg *Config) error {
 	}
 	if _, err := netip.ParsePrefix(cfg.Runtime.FakeIPRange); err != nil {
 		return fmt.Errorf("runtime.fake_ip_range 不合法: %q", cfg.Runtime.FakeIPRange)
+	}
+	for i, rule := range cfg.Routing.Rules {
+		switch rule.Type {
+		case RuleDomain, RuleDomainSuffix:
+		default:
+			return fmt.Errorf("routing.rules[%d].type 必须是 domain/domain-suffix", i)
+		}
+		if rule.Value == "" || strings.ContainsAny(rule.Value, " /\t") {
+			return fmt.Errorf("routing.rules[%d].value 不合法", i)
+		}
+		switch rule.Action {
+		case EgressProxy, EgressDirect, RouteReject:
+		default:
+			return fmt.Errorf("routing.rules[%d].action 必须是 proxy/direct/reject", i)
+		}
 	}
 	return nil
 }

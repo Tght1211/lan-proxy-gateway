@@ -47,38 +47,47 @@ type UsageAggregate struct {
 	LastSeen    time.Time `json:"last_seen"`
 }
 
+// DeviceServiceAggregate groups service usage for one LAN device.
+type DeviceServiceAggregate struct {
+	Device   string           `json:"device"`
+	Services []UsageAggregate `json:"services"`
+}
+
 // Snapshot is the full tracker state for the dashboard/API.
 type Snapshot struct {
-	UpTotal   int64            `json:"up_total"`
-	DownTotal int64            `json:"down_total"`
-	Active    []ConnInfo       `json:"active"`
-	Recent    []ConnInfo       `json:"recent"`
-	Traffic   []TrafficPoint   `json:"traffic"`
-	Devices   []UsageAggregate `json:"devices"`
-	Services  []UsageAggregate `json:"services"`
+	UpTotal        int64                    `json:"up_total"`
+	DownTotal      int64                    `json:"down_total"`
+	Active         []ConnInfo               `json:"active"`
+	Recent         []ConnInfo               `json:"recent"`
+	Traffic        []TrafficPoint           `json:"traffic"`
+	Devices        []UsageAggregate         `json:"devices"`
+	Services       []UsageAggregate         `json:"services"`
+	DeviceServices []DeviceServiceAggregate `json:"device_services"`
 }
 
 // Tracker keeps live and bounded historical telemetry in memory. Nothing is
 // persisted or sent off-host; restarting the daemon starts a fresh session.
 type Tracker struct {
-	mu        sync.Mutex
-	conns     map[uint64]*TrackedConn
-	recent    []ConnInfo
-	traffic   []TrafficPoint
-	devices   map[string]*UsageAggregate
-	services  map[string]*UsageAggregate
-	nextID    uint64
-	upTotal   atomic.Int64
-	downTotal atomic.Int64
+	mu             sync.Mutex
+	conns          map[uint64]*TrackedConn
+	recent         []ConnInfo
+	traffic        []TrafficPoint
+	devices        map[string]*UsageAggregate
+	services       map[string]*UsageAggregate
+	deviceServices map[string]map[string]*UsageAggregate
+	nextID         uint64
+	upTotal        atomic.Int64
+	downTotal      atomic.Int64
 }
 
 func NewTracker() *Tracker {
 	return &Tracker{
-		conns:    map[uint64]*TrackedConn{},
-		recent:   make([]ConnInfo, 0),
-		traffic:  make([]TrafficPoint, 0),
-		devices:  map[string]*UsageAggregate{},
-		services: map[string]*UsageAggregate{},
+		conns:          map[uint64]*TrackedConn{},
+		recent:         make([]ConnInfo, 0),
+		traffic:        make([]TrafficPoint, 0),
+		devices:        map[string]*UsageAggregate{},
+		services:       map[string]*UsageAggregate{},
+		deviceServices: map[string]map[string]*UsageAggregate{},
 	}
 }
 
@@ -129,6 +138,7 @@ func (t *Tracker) Snapshot() Snapshot {
 	t.mu.Lock()
 	devices := cloneAggregates(t.devices)
 	services := cloneAggregates(t.services)
+	deviceServices := cloneDeviceServices(t.deviceServices)
 	out := Snapshot{
 		Active:  make([]ConnInfo, 0, len(t.conns)),
 		Recent:  append([]ConnInfo(nil), t.recent...),
@@ -139,13 +149,23 @@ func (t *Tracker) Snapshot() Snapshot {
 		out.Active = append(out.Active, info)
 		updateAggregate(devices, c.srcIP, info, c.startedAt)
 		updateAggregate(services, c.service, info, c.startedAt)
+		updateDeviceService(deviceServices, c.srcIP, c.service, info, c.startedAt)
 	}
 	out.Devices = aggregateSlice(devices)
 	out.Services = aggregateSlice(services)
+	out.DeviceServices = deviceServiceSlice(deviceServices)
 	t.mu.Unlock()
 	sort.Slice(out.Active, func(i, j int) bool { return out.Active[i].StartedAt.After(out.Active[j].StartedAt) })
 	out.UpTotal = t.upTotal.Load()
 	out.DownTotal = t.downTotal.Load()
+	return out
+}
+
+func cloneDeviceServices(source map[string]map[string]*UsageAggregate) map[string]map[string]*UsageAggregate {
+	out := make(map[string]map[string]*UsageAggregate, len(source))
+	for device, services := range source {
+		out[device] = cloneAggregates(services)
+	}
 	return out
 }
 
@@ -195,7 +215,26 @@ func (c *TrackedConn) Close() {
 	c.t.recent = appendBoundedFront(c.t.recent, info, maxRecentConnections)
 	updateAggregate(c.t.devices, c.srcIP, info, now)
 	updateAggregate(c.t.services, c.service, info, now)
+	updateDeviceService(c.t.deviceServices, c.srcIP, c.service, info, now)
 	c.t.mu.Unlock()
+}
+
+func updateDeviceService(target map[string]map[string]*UsageAggregate, device, service string, info ConnInfo, now time.Time) {
+	services := target[device]
+	if services == nil {
+		services = map[string]*UsageAggregate{}
+		target[device] = services
+	}
+	updateAggregate(services, service, info, now)
+}
+
+func deviceServiceSlice(source map[string]map[string]*UsageAggregate) []DeviceServiceAggregate {
+	out := make([]DeviceServiceAggregate, 0, len(source))
+	for device, services := range source {
+		out = append(out, DeviceServiceAggregate{Device: device, Services: aggregateSlice(services)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Device < out[j].Device })
+	return out
 }
 
 func (c *TrackedConn) Up() int64   { return c.up.Load() }
@@ -261,7 +300,7 @@ func classifyService(host string) string {
 		return "未知目标"
 	}
 	if parsed := net.ParseIP(host); parsed != nil {
-		return "IP 地址流量"
+		return "未解析域名"
 	}
 	patterns := []struct {
 		name     string

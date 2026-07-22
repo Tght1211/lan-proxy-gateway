@@ -26,6 +26,10 @@ func TestTrackerArchivesAndAggregates(t *testing.T) {
 	if len(snap.Services) != 1 || snap.Services[0].Name != "YouTube" {
 		t.Fatalf("services = %+v", snap.Services)
 	}
+	if len(snap.DeviceServices) != 1 || snap.DeviceServices[0].Device != "192.168.1.20" ||
+		len(snap.DeviceServices[0].Services) != 1 || snap.DeviceServices[0].Services[0].Name != "YouTube" {
+		t.Fatalf("device services = %+v", snap.DeviceServices)
+	}
 }
 
 func TestTrackerSnapshotIncludesActiveConnectionsInAggregates(t *testing.T) {
@@ -43,6 +47,9 @@ func TestTrackerSnapshotIncludesActiveConnectionsInAggregates(t *testing.T) {
 	}
 	if len(snap.Services) != 1 || snap.Services[0].Name != "YouTube" || snap.Services[0].Connections != 1 {
 		t.Fatalf("services = %+v", snap.Services)
+	}
+	if got := snap.DeviceServices[0].Services[0].Down; got != 880 {
+		t.Fatalf("active device service down = %d, want 880", got)
 	}
 
 	c.Close()
@@ -81,7 +88,7 @@ func TestClassifyService(t *testing.T) {
 		"video.nflxvideo.net":      "Netflix",
 		"api.github.com":           "GitHub",
 		"assets.example.org":       "example.org",
-		"203.0.113.10":             "IP 地址流量",
+		"203.0.113.10":             "未解析域名",
 		"r1---sn.googlevideo.com.": "YouTube",
 		"sns-img-qc.xhscdn.com":    "小红书",
 		"v3-dy-o.zjcdn.com":        "zjcdn.com",

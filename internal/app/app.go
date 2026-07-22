@@ -118,6 +118,22 @@ func (a *App) SetEgress(ctx context.Context, e config.EgressConfig, probe bool) 
 	return nil
 }
 
+// SetRoutingRules validates and hot-applies ordered domain routing rules.
+func (a *App) SetRoutingRules(rules []config.RoutingRule) error {
+	next := *a.Cfg
+	next.Routing.Rules = append([]config.RoutingRule(nil), rules...)
+	config.Normalize(&next)
+	if err := config.Validate(&next); err != nil {
+		return err
+	}
+	a.Cfg.Routing = next.Routing
+	if err := a.Save(); err != nil {
+		return err
+	}
+	a.pokeReload()
+	return nil
+}
+
 // TestEgress probes the currently configured egress end-to-end.
 func (a *App) TestEgress(ctx context.Context) error {
 	return a.TestEgressConfig(ctx, a.Cfg.Egress)
@@ -198,16 +214,17 @@ func dnsOptions(cfg *config.Config, cachePath string, logger *slog.Logger) dns.O
 
 // Status is a read-only snapshot for UI rendering and `gateway status --json`.
 type Status struct {
-	Configured bool           `json:"configured"`
-	Running    bool           `json:"running"`
-	Egress     string         `json:"egress"`
-	Proxy      string         `json:"proxy,omitempty"` // "socks5 127.0.0.1:7897" when egress=proxy
-	DNS        DNSStatus      `json:"dns"`
-	QUICBlock  bool           `json:"quic_block"`
-	Gateway    gateway.Status `json:"gateway"`
-	Ports      PortsStatus    `json:"ports"`
-	ConfigFile string         `json:"config_file"`
-	LogFile    string         `json:"log_file"`
+	Configured bool                 `json:"configured"`
+	Running    bool                 `json:"running"`
+	Egress     string               `json:"egress"`
+	Proxy      string               `json:"proxy,omitempty"` // "socks5 127.0.0.1:7897" when egress=proxy
+	Routing    []config.RoutingRule `json:"routing"`
+	DNS        DNSStatus            `json:"dns"`
+	QUICBlock  bool                 `json:"quic_block"`
+	Gateway    gateway.Status       `json:"gateway"`
+	Ports      PortsStatus          `json:"ports"`
+	ConfigFile string               `json:"config_file"`
+	LogFile    string               `json:"log_file"`
 }
 
 type DNSStatus struct {
@@ -230,6 +247,7 @@ func (a *App) Status() Status {
 		Configured: a.Configured(),
 		Running:    a.Running(),
 		Egress:     a.Cfg.Egress.Mode,
+		Routing:    append([]config.RoutingRule(nil), a.Cfg.Routing.Rules...),
 		DNS: DNSStatus{
 			Enabled: a.Cfg.DNS.Enabled,
 			Port:    a.Cfg.DNS.Port,

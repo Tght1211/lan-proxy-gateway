@@ -76,7 +76,7 @@ func (s *apiServer) Close() error {
 func (s *apiServer) handleStats(w http.ResponseWriter, r *http.Request) {
 	cfg := s.app.getCfg()
 	resp := StatsResponse{
-		SchemaVersion: 2,
+		SchemaVersion: 3,
 		Egress:        cfg.Egress.Mode,
 		UptimeSec:     int64(time.Since(s.started).Seconds()),
 		Relay:         s.rt.tracker.Snapshot(),

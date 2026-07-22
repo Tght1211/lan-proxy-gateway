@@ -171,6 +171,7 @@ func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST re
 		ViaProxy:   a.Cfg.Egress.Mode == config.EgressProxy,
 		Logger:     logger,
 	})
+	rt.applyRouting(a.Cfg)
 	if a.Cfg.DNS.Enabled {
 		rt.dns = dns.New(dnsOptions(a.Cfg, a.Paths.FakeIPCacheFile, logger))
 		rt.bindFakeIP()
@@ -223,6 +224,7 @@ func (rt *daemonRuntime) applyConfig(a *App, cfg *config.Config) {
 	if dialer, err := buildDialer(cfg.Egress); err == nil {
 		rt.relay.SetDialer(dialer, cfg.Egress.Mode == config.EgressProxy)
 	}
+	rt.applyRouting(cfg)
 	if rt.dns != nil {
 		rt.dns.SetUpstreams(cfg.DNS.Upstreams)
 		rt.dns.SetFakeIPEnabled(cfg.Egress.Mode == config.EgressProxy && cfg.DNS.FakeIP)
@@ -234,6 +236,19 @@ func (rt *daemonRuntime) applyConfig(a *App, cfg *config.Config) {
 		}
 	}
 	rt.logger.Info("配置已热应用", "egress", cfg.Egress.Mode)
+}
+
+func (rt *daemonRuntime) applyRouting(cfg *config.Config) {
+	direct, _ := buildDialer(config.EgressConfig{Mode: config.EgressDirect})
+	var proxy relay.Dialer
+	if cfg.Egress.Mode == config.EgressProxy {
+		proxy, _ = buildDialer(cfg.Egress)
+	}
+	rules := make([]relay.RouteRule, 0, len(cfg.Routing.Rules))
+	for _, rule := range cfg.Routing.Rules {
+		rules = append(rules, relay.RouteRule{Type: rule.Type, Value: rule.Value, Action: rule.Action})
+	}
+	rt.relay.SetRouting(cfg.Egress.Mode, direct, proxy, rules)
 }
 
 // bindFakeIP wires the relay's fake-ip lookup to the DNS server's pool.
