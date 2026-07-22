@@ -275,6 +275,7 @@ func (s *Server) handle(client *net.TCPConn) {
 	cancel()
 	if err != nil {
 		s.logger.Warn("出口拨号失败", "src", client.RemoteAddr(), "target", target, "err", err)
+		s.tracker.RecordDialFailure(srcIP, routeHost, int(orig.Port()), viaProxy, classifyDialError(err, viaProxy))
 		return
 	}
 	defer upstream.Close()

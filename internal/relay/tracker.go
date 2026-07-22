@@ -30,6 +30,8 @@ type ConnInfo struct {
 	EndedAt   *time.Time `json:"ended_at,omitempty"`
 	ViaProxy  bool       `json:"via_proxy"`
 	Rejected  bool       `json:"rejected,omitempty"`
+	Status    string     `json:"status,omitempty"`  // "" | "rejected" | "dial_failed"
+	Failure   string     `json:"failure,omitempty"` // human-readable dial failure reason
 }
 
 // TrafficPoint is one five-second throughput sample.
@@ -138,13 +140,23 @@ func (t *Tracker) Open(srcIP, dstHost string, dstPort int, viaProxy bool) *Track
 // RecordRejected archives a connection refused by a routing rule. It appears
 // in the recent history but never counts toward device/service usage.
 func (t *Tracker) RecordRejected(srcIP, dstHost string, dstPort int) {
+	t.recordTerminal(srcIP, dstHost, dstPort, "rejected", "", false)
+}
+
+// RecordDialFailure archives a connection whose egress dial failed.
+func (t *Tracker) RecordDialFailure(srcIP, dstHost string, dstPort int, viaProxy bool, reason string) {
+	t.recordTerminal(srcIP, dstHost, dstPort, "dial_failed", reason, viaProxy)
+}
+
+func (t *Tracker) recordTerminal(srcIP, dstHost string, dstPort int, status, failure string, viaProxy bool) {
 	now := time.Now()
 	t.mu.Lock()
 	t.nextID++
 	info := ConnInfo{
 		ID: t.nextID, SrcIP: srcIP, DstHost: dstHost, DstPort: dstPort,
 		Service: classifyService(dstHost), StartedAt: now, EndedAt: &now,
-		Rejected: true,
+		ViaProxy: viaProxy, Rejected: status == "rejected",
+		Status: status, Failure: failure,
 	}
 	t.recent = appendBoundedFront(t.recent, info, maxRecentConnections)
 	t.mu.Unlock()

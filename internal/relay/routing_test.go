@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"errors"
 	"net/netip"
 	"testing"
 )
@@ -80,5 +81,46 @@ func TestTrackerRecordRejected(t *testing.T) {
 	}
 	if len(snap.Devices) != 0 || len(snap.Services) != 0 {
 		t.Fatal("rejected records must not count toward usage aggregates")
+	}
+}
+
+func TestTrackerRecordDialFailure(t *testing.T) {
+	tr := NewTracker()
+	tr.RecordDialFailure("192.168.1.202", "example.com", 443, true, "连接超时")
+	snap := tr.Snapshot()
+	if len(snap.Recent) != 1 {
+		t.Fatalf("recent should contain the failed record, got %d", len(snap.Recent))
+	}
+	rec := snap.Recent[0]
+	if rec.Status != "dial_failed" || rec.Failure != "连接超时" || !rec.ViaProxy || rec.Rejected {
+		t.Fatalf("unexpected dial-failure record: %+v", rec)
+	}
+	if len(snap.Devices) != 0 || len(snap.Services) != 0 {
+		t.Fatal("failed records must not count toward usage aggregates")
+	}
+}
+
+func TestClassifyDialError(t *testing.T) {
+	cases := []struct {
+		msg      string
+		viaProxy bool
+		want     string
+	}{
+		{"dial tcp 1.2.3.4:443: i/o timeout", false, "连接超时"},
+		{"context deadline exceeded", true, "连接超时"},
+		{"dial tcp 1.2.3.4:443: connect: connection refused", false, "连接被拒"},
+		{"connect: no route to host", false, "目标不可达"},
+		{"connect: network is unreachable", false, "目标不可达"},
+		{"lookup example.com: no such host", true, "域名解析失败"},
+		{"socks connect: general failure", true, "上游代理错误"},
+		{"something odd", false, "连接失败"},
+	}
+	for _, c := range cases {
+		if got := classifyDialError(errors.New(c.msg), c.viaProxy); got != c.want {
+			t.Fatalf("classifyDialError(%q, %v) = %q, want %q", c.msg, c.viaProxy, got, c.want)
+		}
+	}
+	if classifyDialError(nil, false) != "" {
+		t.Fatal("nil error should classify to empty string")
 	}
 }

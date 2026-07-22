@@ -78,3 +78,26 @@ func (p *routingPolicy) selectDialer(host string, ip netip.Addr) (Dialer, bool, 
 	}
 	return p.direct, false, false
 }
+
+// classifyDialError reduces an egress dial error to a short reason shown in
+// the connection history.
+func classifyDialError(err error, viaProxy bool) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline exceeded"):
+		return "连接超时"
+	case strings.Contains(msg, "connection refused"):
+		return "连接被拒"
+	case strings.Contains(msg, "no route to host") || strings.Contains(msg, "network is unreachable") || strings.Contains(msg, "unreachable"):
+		return "目标不可达"
+	case strings.Contains(msg, "no such host") || strings.Contains(msg, "dns"):
+		return "域名解析失败"
+	case viaProxy:
+		return "上游代理错误"
+	default:
+		return "连接失败"
+	}
+}
