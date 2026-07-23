@@ -14,9 +14,9 @@
 - **旁路由**：LAN 设备把网关和 DNS 指向本机，TCP 流量可直连或转发到一个 HTTP/SOCKS5 上游。
 - **macOS 系统代理**：开启或关闭系统 HTTP+HTTPS / SOCKS5 代理。
 
-需要 VLESS、Trojan、订阅或规则分流时，请在本机运行 Clash、Mihomo 或 sing-box，再把它的 HTTP/SOCKS5 端口配置为上游。本项目不实现这些协议，也不管理节点和订阅。
+需要 VLESS、Trojan、订阅或节点管理时，请在本机运行 Clash、Mihomo 或 sing-box，再把它的 HTTP/SOCKS5 端口配置为上游。本项目不实现这些协议，也不管理节点和订阅；但内置了轻量分流规则（域名 / 域名后缀 / IP-CIDR → 代理 / 直连 / 拒绝），并支持"智能回退学习"：默认走代理的域名拨号失败时自动直连重试，24 小时内成功 3 次会自动生成可删除的直连规则。
 
-**是否能访问特定外网，完全取决于所配置的代理服务和节点。gateway 本身不提供代理线路。** 启用系统代理时，旁路由设备会复用同一个代理地址，流量规则全部由代理软件处理。
+**是否能访问特定外网，完全取决于所配置的代理服务和节点。gateway 本身不提供代理线路。** 启用系统代理时，旁路由设备会复用同一个代理地址。
 
 English: [README_EN.md](README_EN.md)
 
@@ -253,7 +253,9 @@ gateway update
 
 仓库同时维护 Go CLI 和原生 SwiftUI App。两者不是两套网关核心：CLI 与 App 都连接同一个 `gateway` 守护进程，共用配置、状态 API、日志和网络规则。服务已经运行时，从另一个前端再次启动只会连接现有服务，不会创建第二个数据面进程。
 
-App 提供实时流量、活动与历史连接、设备/服务流量排行、延迟、抖动和可用率监控。服务名称来自网关可观察到的目标域名，例如 YouTube、Netflix 或 Nintendo；网关无法读取远端设备的本地进程名，因此不会把域名推断伪装成精确的 App 进程识别。
+App 分四个页面：**网络总览**（实时流量、可交互流量拓扑、吞吐与延迟/抖动/可用率监控）、**设备与服务**（设备流量排行、服务识别、接入设备向导——候选 IP 经 ping 探测）、**访问记录**（连接层结果统计：成功 / 失败原因 / 拒绝 / 回退直连，可按结果筛选）和**设置**（外观主题、版本更新检查、CLI 安装、开机自启）。分流规则支持列表编辑和 Clash 风格文本粘贴；"智能回退学习"的候选进度和已生成规则在访问记录页可视化展示。内置四套皮肤（暖沙米 / 经典浅色 / 石墨深色 / 海雾蓝），每套有独立的圆角、字体与质感。
+
+服务名称来自网关可观察到的目标域名，例如 YouTube、Netflix 或 Nintendo；网关无法读取远端设备的本地进程名，因此不会把域名推断伪装成精确的 App 进程识别。连接历史仅保存在内存中（最多 2000 条 / 72 小时），不写入磁盘。
 
 App 会通过当前出口访问 `ipwho.is`，用于显示出口公网 IP、地区和 ISP，结果在内存中缓存 30 分钟。查询失败只影响该项展示，不影响网关转发。目标只暴露当前出口本身可见的公网 IP，不会上传连接记录、设备地址或域名统计。
 
@@ -302,8 +304,11 @@ sudo gateway                    # 控制面板（启停和 macOS 代理需要管
 sudo gateway install            # 初始化、启动、可选开机自启
 sudo gateway start|stop|restart
 gateway status [--json]
+gateway routing list [--json]    # 查看分流规则（含自动学习标记）
+gateway routing set --rules-json '[{"type":"domain-suffix","value":"youtube.com","action":"proxy"}]'
 gateway system-proxy status [--json]
 gateway system-proxy on --type socks5|http --host HOST --port PORT
+gateway system-proxy test --type socks5|http --host HOST --port PORT   # 只测试不保存
 gateway system-proxy off
 gateway service install|uninstall|status
 gateway update [version]         # 完整重构迁移，执行前会提示确认
@@ -317,7 +322,7 @@ gateway update [version]         # 完整重构迁移，执行前会提示确认
 - macOS 使用 pf，Linux 使用 iptables。
 - 当前只支持 macOS 和 Linux，不提供 Windows 构建。
 - 不以普通路由器/OpenWrt 为部署目标；宿主机应是完整、常驻的电脑系统。
-- 不提供订阅、节点、规则集、WebUI、流量图表、UDP 代理和 TUN 模式。
+- 不提供订阅、节点管理、WebUI、UDP 代理和 TUN 模式；分流仅限内置的轻量规则（域名/IP-CIDR），复杂规则集请交给上游代理软件。
 
 ## License
 

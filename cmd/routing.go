@@ -10,7 +10,10 @@ import (
 	"github.com/tght/lan-proxy-gateway/internal/config"
 )
 
-var routingRulesJSON string
+var (
+	routingRulesJSON string
+	routingListJSON  bool
+)
 
 var routingCmd = &cobra.Command{
 	Use:   "routing",
@@ -37,7 +40,35 @@ var routingSetCmd = &cobra.Command{
 	},
 }
 
+var routingListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "按优先级列出分流规则（含自动学习标记）",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		a, err := app.New()
+		if err != nil {
+			return err
+		}
+		rules := a.Cfg.Routing.Rules
+		if routingListJSON {
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(rules)
+		}
+		if len(rules) == 0 {
+			fmt.Fprintln(cmd.OutOrStdout(), "暂无分流规则，全部流量使用默认出口")
+			return nil
+		}
+		for i, rule := range rules {
+			marker := ""
+			if rule.Learned {
+				marker = "  [自动学习]"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%2d. %-14s %-40s %s%s\n", i+1, rule.Type, rule.Value, rule.Action, marker)
+		}
+		return nil
+	},
+}
+
 func init() {
 	routingSetCmd.Flags().StringVar(&routingRulesJSON, "rules-json", "[]", "规则 JSON 数组")
-	routingCmd.AddCommand(routingSetCmd)
+	routingListCmd.Flags().BoolVar(&routingListJSON, "json", false, "JSON 输出")
+	routingCmd.AddCommand(routingSetCmd, routingListCmd)
 }
