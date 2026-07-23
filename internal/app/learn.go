@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,32 @@ func newFallbackLearner(path string, logger *slog.Logger) *fallbackLearner {
 	}
 	l.load()
 	return l
+}
+
+// FallbackCandidate is one host observed via proxy→direct fallback that has
+// not yet reached the auto-learn threshold.
+type FallbackCandidate struct {
+	Host   string    `json:"host"`
+	Count  int       `json:"count"`
+	LastAt time.Time `json:"last_at"`
+}
+
+// Snapshot lists in-window candidates, most recent first.
+func (l *fallbackLearner) Snapshot() []FallbackCandidate {
+	cutoff := l.now().Add(-fallbackLearnWindow)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]FallbackCandidate, 0, len(l.counts))
+	for host, times := range l.counts {
+		pruned := pruneLearnTimes(times, cutoff)
+		if len(pruned) == 0 {
+			continue
+		}
+		l.counts[host] = pruned
+		out = append(out, FallbackCandidate{Host: host, Count: len(pruned), LastAt: pruned[len(pruned)-1]})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LastAt.After(out[j].LastAt) })
+	return out
 }
 
 // Record notes one successful fallback for host and promotes at threshold.

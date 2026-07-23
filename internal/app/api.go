@@ -24,6 +24,15 @@ type StatsResponse struct {
 	Relay         relay.Snapshot `json:"relay"`
 	DNS           *dns.Stats     `json:"dns,omitempty"`
 	Health        HealthSnapshot `json:"health"`
+	Fallback      *FallbackStats `json:"fallback,omitempty"`
+}
+
+// FallbackStats reports the proxy→direct fallback auto-learning state.
+type FallbackStats struct {
+	Threshold   int                  `json:"threshold"`
+	WindowHours int                  `json:"window_hours"`
+	Candidates  []FallbackCandidate  `json:"candidates"`
+	Learned     []config.RoutingRule `json:"learned"`
 }
 
 // apiServer is the daemon's loopback-only status API.
@@ -89,6 +98,20 @@ func (s *apiServer) handleStats(w http.ResponseWriter, r *http.Request) {
 	if s.rt.dns != nil {
 		st := s.rt.dns.Stats()
 		resp.DNS = &st
+	}
+	if s.rt.learner != nil {
+		learned := make([]config.RoutingRule, 0)
+		for _, r := range cfg.Routing.Rules {
+			if r.Learned {
+				learned = append(learned, r)
+			}
+		}
+		resp.Fallback = &FallbackStats{
+			Threshold:   fallbackLearnThreshold,
+			WindowHours: int(fallbackLearnWindow / time.Hour),
+			Candidates:  s.rt.learner.Snapshot(),
+			Learned:     learned,
+		}
 	}
 	writeJSON(w, resp)
 }

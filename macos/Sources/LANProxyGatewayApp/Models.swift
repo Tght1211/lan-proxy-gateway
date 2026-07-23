@@ -88,11 +88,44 @@ struct RuntimeStats: Decodable {
     let relay: RelayStats
     let dns: DNSStats?
     let health: HealthStats
+    let fallback: FallbackStats?
 
     enum CodingKeys: String, CodingKey {
-        case egress, proxy, relay, dns, health
+        case egress, proxy, relay, dns, health, fallback
         case schemaVersion = "schema_version"
         case uptimeSec = "uptime_sec"
+    }
+}
+
+struct FallbackStats: Decodable {
+    let threshold: Int
+    let windowHours: Int
+    let candidates: [FallbackCandidate]
+    let learned: [RoutingRule]
+
+    enum CodingKeys: String, CodingKey {
+        case threshold, candidates, learned
+        case windowHours = "window_hours"
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        threshold = try values.decodeIfPresent(Int.self, forKey: .threshold) ?? 3
+        windowHours = try values.decodeIfPresent(Int.self, forKey: .windowHours) ?? 24
+        candidates = try values.decodeIfPresent([FallbackCandidate].self, forKey: .candidates) ?? []
+        learned = try values.decodeIfPresent([RoutingRule].self, forKey: .learned) ?? []
+    }
+}
+
+struct FallbackCandidate: Decodable, Identifiable {
+    let host: String
+    let count: Int
+    let lastAt: Date
+    var id: String { host }
+
+    enum CodingKeys: String, CodingKey {
+        case host, count
+        case lastAt = "last_at"
     }
 }
 
