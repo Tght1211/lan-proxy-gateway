@@ -257,9 +257,75 @@ private struct TopologyPanel: View {
     }
 }
 
-private struct FallbackLearningPanel: View {
+
+// Compact entry for the fallback auto-learning feature: a status pill that
+// lights up while learning is happening and expands into a detail popover.
+private struct FallbackLearningBadge: View {
     @EnvironmentObject private var model: AppModel
+    @State private var showDetail = false
     @State private var showRoutingEditor = false
+
+    private var candidates: [FallbackCandidate] { model.stats?.fallback?.candidates ?? [] }
+    private var learnedRules: [RoutingRule] { model.stats?.fallback?.learned ?? [] }
+    private var isActive: Bool { !candidates.isEmpty || !learnedRules.isEmpty }
+
+    var body: some View {
+        Button { showDetail = true } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(isActive ? Theme.yellow : Theme.muted)
+                Text("智能学习")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(isActive ? Color.primary : Theme.muted)
+                if !candidates.isEmpty {
+                    Text("\(candidates.count)")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Theme.yellow)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Theme.yellow.opacity(0.14))
+                        .clipShape(Capsule())
+                }
+                if !learnedRules.isEmpty {
+                    HStack(spacing: 3) {
+                        Image(systemName: "checkmark").font(.system(size: 7, weight: .bold))
+                        Text("\(learnedRules.count)")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    }
+                    .foregroundStyle(Theme.lime)
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(Theme.lime.opacity(0.13))
+                    .clipShape(Capsule())
+                }
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(Theme.muted)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .background(isActive ? Theme.yellow.opacity(0.08) : Theme.panel)
+            .overlay(Capsule().stroke(isActive ? Theme.yellow.opacity(0.45) : Theme.border, lineWidth: 0.8))
+            .clipShape(Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("代理拨号失败自动直连重试；多次成功后自动生成直连规则")
+        .popover(isPresented: $showDetail, arrowEdge: .bottom) {
+            FallbackLearningPopover(onEditRules: {
+                showDetail = false
+                showRoutingEditor = true
+            })
+            .environmentObject(model)
+        }
+        .sheet(isPresented: $showRoutingEditor) {
+            RoutingRulesEditor(rules: model.status?.routing ?? [])
+                .environmentObject(model)
+        }
+    }
+}
+
+private struct FallbackLearningPopover: View {
+    @EnvironmentObject private var model: AppModel
+    let onEditRules: () -> Void
 
     private var candidates: [FallbackCandidate] { model.stats?.fallback?.candidates ?? [] }
     private var learnedRules: [RoutingRule] { model.stats?.fallback?.learned ?? [] }
@@ -268,99 +334,135 @@ private struct FallbackLearningPanel: View {
     private var isProxyEgress: Bool { model.status?.egress == "proxy" }
 
     var body: some View {
-        if isProxyEgress || !candidates.isEmpty || !learnedRules.isEmpty {
-            Panel {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("智能回退学习").sectionLabel()
-                        Spacer()
-                        Text("代理拨号失败自动直连重试 · \(windowHours) 小时内成功 \(threshold) 次生成直连规则")
-                            .font(.caption).foregroundStyle(Theme.muted)
-                        Button { showRoutingEditor = true } label: {
-                            Label("管理规则", systemImage: "slider.horizontal.3").font(.caption)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 7).fill(Theme.yellow.opacity(0.14))
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.yellow)
+                }
+                .frame(width: 30, height: 30)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("智能回退学习").font(.system(size: 13, weight: .semibold))
+                    Text("被代理误伤的国内域名，自动学回直连")
+                        .font(.system(size: 10)).foregroundStyle(Theme.muted)
+                }
+                Spacer()
+            }
+            .padding(14)
+
+            HStack(spacing: 0) {
+                FlowStep(icon: "bolt.slash", text: "代理失败", color: Theme.coral)
+                FlowArrow()
+                FlowStep(icon: "arrow.uturn.down", text: "直连重试", color: Theme.cyan)
+                FlowArrow()
+                FlowStep(icon: "checkmark.circle", text: "\(windowHours)h 内 ×\(threshold)", color: Theme.yellow)
+                FlowArrow()
+                FlowStep(icon: "arrow.triangle.branch", text: "直连规则", color: Theme.lime)
+            }
+            .padding(.horizontal, 14).padding(.bottom, 12)
+
+            Divider().overlay(Theme.border)
+
+            VStack(alignment: .leading, spacing: 12) {
+                if !isProxyEgress && candidates.isEmpty && learnedRules.isEmpty {
+                    Label("当前为直连出口，切换到代理出口后开始工作", systemImage: "moon.zzz")
+                        .font(.caption).foregroundStyle(Theme.muted)
+                } else if candidates.isEmpty && learnedRules.isEmpty {
+                    Label("正在守望：还没有域名触发回退", systemImage: "eye")
+                        .font(.caption).foregroundStyle(Theme.muted)
+                }
+                if !candidates.isEmpty {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("学习中 · \(candidates.count)").eyebrow()
+                        ForEach(candidates.prefix(6)) { item in
+                            HStack(spacing: 8) {
+                                Text(item.host)
+                                    .font(.system(size: 11, design: .monospaced)).lineLimit(1)
+                                    .layoutPriority(1)
+                                Spacer(minLength: 8)
+                                GeometryReader { geo in
+                                    ZStack(alignment: .leading) {
+                                        Capsule().fill(Theme.panelRaised)
+                                        Capsule().fill(Theme.yellow)
+                                            .frame(width: geo.size.width * CGFloat(min(item.count, threshold)) / CGFloat(threshold))
+                                    }
+                                }
+                                .frame(width: 54, height: 4)
+                                Text("\(item.count)/\(threshold)")
+                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(Theme.yellow)
+                                    .frame(width: 26, alignment: .trailing)
+                            }
+                            .help("最近回退成功：\(relativeTime(item.lastAt))")
                         }
-                        .buttonStyle(.bordered).controlSize(.small)
+                        if candidates.count > 6 {
+                            Text("还有 \(candidates.count - 6) 个候选…").font(.caption2).foregroundStyle(Theme.muted)
+                        }
                     }
-                    if candidates.isEmpty && learnedRules.isEmpty {
-                        HStack(spacing: 10) {
-                            Image(systemName: "wand.and.stars")
-                                .font(.system(size: 18)).foregroundStyle(Theme.muted)
-                            Text(isProxyEgress
-                                 ? "暂无回退记录。当某个未配置规则的域名走代理失败但直连成功时，会先出现在这里作为候选，累计 \(threshold) 次后自动生成\"自动学习\"直连规则。"
-                                 : "当前是直连出口，不会触发回退学习；切换到代理出口后此区域开始工作。")
-                                .font(.caption).foregroundStyle(Theme.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 0)
+                }
+                if !learnedRules.isEmpty {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("已生成直连规则 · \(learnedRules.count)").eyebrow()
+                        ForEach(learnedRules.prefix(6)) { rule in
+                            HStack(spacing: 8) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 10)).foregroundStyle(Theme.lime)
+                                Text(rule.value)
+                                    .font(.system(size: 11, design: .monospaced)).lineLimit(1)
+                                Spacer(minLength: 0)
+                            }
                         }
-                        .padding(.vertical, 6)
-                    } else {
-                        HStack(alignment: .top, spacing: 16) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("学习中的候选域名（\(candidates.count)）")
-                                    .font(.caption2.weight(.bold)).foregroundStyle(Theme.muted)
-                                if candidates.isEmpty {
-                                    Text("暂无候选").font(.caption).foregroundStyle(Theme.muted)
-                                } else {
-                                    ForEach(candidates.prefix(5)) { item in
-                                        HStack(spacing: 8) {
-                                            Text(item.host)
-                                                .font(.system(size: 11, design: .monospaced)).lineLimit(1)
-                                            Spacer(minLength: 4)
-                                            HStack(spacing: 3) {
-                                                ForEach(0..<threshold, id: \.self) { i in
-                                                    Circle()
-                                                        .fill(i < item.count ? Theme.yellow : Theme.border)
-                                                        .frame(width: 6, height: 6)
-                                                }
-                                            }
-                                            Text("\(item.count)/\(threshold)")
-                                                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                                .foregroundStyle(Theme.yellow)
-                                        }
-                                        .help("最近回退成功：\(relativeTime(item.lastAt))")
-                                    }
-                                    if candidates.count > 5 {
-                                        Text("还有 \(candidates.count - 5) 个候选…").font(.caption2).foregroundStyle(Theme.muted)
-                                    }
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            Divider().overlay(Theme.border)
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("已自动学习的直连规则（\(learnedRules.count)）")
-                                    .font(.caption2.weight(.bold)).foregroundStyle(Theme.muted)
-                                if learnedRules.isEmpty {
-                                    Text("暂无自动学习规则").font(.caption).foregroundStyle(Theme.muted)
-                                } else {
-                                    ForEach(learnedRules.prefix(5)) { rule in
-                                        HStack(spacing: 8) {
-                                            Circle().fill(Theme.lime).frame(width: 6, height: 6)
-                                            Text(rule.value)
-                                                .font(.system(size: 11, design: .monospaced)).lineLimit(1)
-                                            Text("自动学习")
-                                                .font(.system(size: 8, weight: .bold))
-                                                .foregroundStyle(Theme.yellow)
-                                                .padding(.horizontal, 4).padding(.vertical, 1)
-                                                .background(Theme.yellow.opacity(0.12))
-                                                .clipShape(RoundedRectangle(cornerRadius: 3))
-                                            Spacer(minLength: 0)
-                                        }
-                                    }
-                                    if learnedRules.count > 5 {
-                                        Text("还有 \(learnedRules.count - 5) 条，去规则编辑器查看").font(.caption2).foregroundStyle(Theme.muted)
-                                    }
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if learnedRules.count > 6 {
+                            Text("还有 \(learnedRules.count - 6) 条…").font(.caption2).foregroundStyle(Theme.muted)
                         }
                     }
                 }
             }
-            .sheet(isPresented: $showRoutingEditor) {
-                RoutingRulesEditor(rules: model.status?.routing ?? [])
-                    .environmentObject(model)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.canvas)
+
+            Divider().overlay(Theme.border)
+            HStack {
+                Text("学习到的规则可在规则编辑器中随时删除")
+                    .font(.system(size: 10)).foregroundStyle(Theme.muted)
+                Spacer()
+                Button(action: onEditRules) {
+                    Label("管理规则", systemImage: "slider.horizontal.3").font(.caption)
+                }
+                .buttonStyle(.bordered).controlSize(.small)
             }
+            .padding(.horizontal, 14).padding(.vertical, 10)
         }
+        .frame(width: 330)
+    }
+}
+
+private struct FlowStep: View {
+    let icon: String
+    let text: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 9, weight: .semibold)).foregroundStyle(color)
+            Text(text).font(.system(size: 9, weight: .medium)).foregroundStyle(Color.primary.opacity(0.75))
+        }
+        .padding(.horizontal, 7).padding(.vertical, 4)
+        .background(color.opacity(0.09))
+        .overlay(Capsule().stroke(color.opacity(0.28), lineWidth: 0.7))
+        .clipShape(Capsule())
+        .fixedSize()
+    }
+}
+
+private struct FlowArrow: View {
+    var body: some View {
+        Image(systemName: "chevron.compact.right")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(Theme.muted)
+            .frame(maxWidth: .infinity)
     }
 }
 
@@ -1158,6 +1260,7 @@ private struct ConnectionsView: View {
                     OutcomeChip(label: "回退直连", count: outcomeCount("回退直连"), color: Theme.yellow,
                                 selected: outcomeFilter == "回退直连") { outcomeFilter = "回退直连" }
                     Spacer(minLength: 8)
+                    FallbackLearningBadge()
                     HStack(spacing: 5) {
                         Text("连接成功率").font(.caption2).foregroundStyle(Theme.muted)
                         Text(successRateText)
@@ -1166,46 +1269,50 @@ private struct ConnectionsView: View {
                     }
                     .help("成功率 = (活跃 + 成功) / 当前筛选范围内全部记录；仅统计连接层结果，HTTPS 下看不到应用层状态码")
                 }
-                FallbackLearningPanel()
-            }
-            .padding(.horizontal, 16).padding(.vertical, 12)
 
-            Table(connections) {
-                TableColumn("状态") { item in
-                    HStack(spacing: 6) {
-                        Circle().fill(item.endedAt == nil ? Theme.lime : Theme.muted).frame(width: 6, height: 6)
-                        Text(item.endedAt == nil ? "活跃" : "完成")
-                    }
-                }.width(60)
-                TableColumn("设备") { item in
-                    VStack(alignment: .leading, spacing: 1) {
-                        if let label = model.deviceLabel(for: item.srcIP).nonEmpty {
-                            Text(label).fontWeight(.medium)
+                Table(connections) {
+                    TableColumn("设备") { item in
+                        VStack(alignment: .leading, spacing: 1) {
+                            if let label = model.deviceLabel(for: item.srcIP).nonEmpty {
+                                Text(label).fontWeight(.medium)
+                            }
+                            Text(item.srcIP).font(.system(size: 10, design: .monospaced)).foregroundStyle(Theme.muted)
                         }
-                        Text(item.srcIP).font(.system(size: 10, design: .monospaced)).foregroundStyle(Theme.muted)
-                    }
-                }.width(min: 125, ideal: 155)
-                TableColumn("识别服务") { Text($0.service).fontWeight(.medium) }.width(min: 100, ideal: 130)
-                TableColumn("目标域名 / 地址") { Text("\($0.dstHost):\($0.dstPort)").font(.system(.body, design: .monospaced)) }
-                TableColumn("出口") { item in
-                    if item.fallback && !item.rejected {
-                        Text("回退直连")
-                            .foregroundStyle(Theme.yellow)
-                            .help("代理拨号失败后自动回退到直连；同一域名 24 小时内回退成功 3 次会生成\"自动学习\"直连规则")
-                    } else {
-                        Text(item.rejected ? "REJECT" : (item.viaProxy ? "PROXY" : "DIRECT"))
-                            .foregroundStyle(item.rejected ? Theme.coral : (item.viaProxy ? Theme.cyan : Theme.yellow))
-                    }
-                }.width(70)
-                TableColumn("结果") { item in
-                    Text(item.outcome.label)
-                        .foregroundStyle(outcomeColor(item.outcome))
-                        .lineLimit(1)
+                    }.width(min: 110, ideal: 140)
+                    TableColumn("识别服务") { Text($0.service).fontWeight(.medium) }.width(min: 90, ideal: 120)
+                    TableColumn("目标域名 / 地址") { item in
+                        Text("\(item.dstHost):\(item.dstPort)")
+                            .font(.system(.body, design: .monospaced))
+                            .help("\(item.dstHost):\(item.dstPort)")
+                    }.width(min: 220, ideal: 320)
+                    TableColumn("出口") { item in
+                        if item.fallback && !item.rejected {
+                            Text("回退直连")
+                                .foregroundStyle(Theme.yellow)
+                                .help("代理拨号失败后自动回退到直连；同一域名 24 小时内回退成功 3 次会生成\"自动学习\"直连规则")
+                        } else {
+                            Text(item.rejected ? "REJECT" : (item.viaProxy ? "PROXY" : "DIRECT"))
+                                .foregroundStyle(item.rejected ? Theme.coral : (item.viaProxy ? Theme.cyan : Theme.yellow))
+                        }
+                    }.width(72)
+                    TableColumn("结果") { item in
+                        HStack(spacing: 6) {
+                            Circle().fill(outcomeColor(item.outcome)).frame(width: 6, height: 6)
+                            Text(item.outcome.label)
+                                .foregroundStyle(outcomeColor(item.outcome))
+                                .lineLimit(1)
+                        }
                         .help(outcomeHelp(item.outcome))
-                }.width(min: 80, ideal: 120)
-                TableColumn("流量") { Text(bytes($0.up + $0.down)) }.width(80)
+                    }.width(min: 80, ideal: 110)
+                    TableColumn("流量") { Text(bytes($0.up + $0.down)) }.width(76)
+                }
+                .scrollContentBackground(.hidden)
+                .background(Theme.panel)
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border, lineWidth: 0.7))
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .shadow(color: Color.black.opacity(0.035), radius: 7, y: 2)
             }
-            .scrollContentBackground(.hidden)
+            .padding(16)
         }
         .background(Theme.canvas)
     }
