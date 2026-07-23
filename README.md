@@ -47,6 +47,14 @@ English: [README_EN.md](README_EN.md)
 
 ### 2. 安装并启动
 
+有两种使用方式，功能同源（连接同一个网关守护进程），按习惯任选其一：
+
+**方式 A：macOS App（图形界面，推荐 Mac 用户）**
+
+下载最新版 [LANProxyGateway-v4.1.0-macos-arm64.dmg](https://github.com/Tght1211/lan-proxy-gateway/releases/download/v4.1.0/LANProxyGateway-v4.1.0-macos-arm64.dmg)（Apple Silicon，[全部版本](https://github.com/Tght1211/lan-proxy-gateway/releases/latest)），把 **LAN Proxy Gateway** 拖入"应用程序"后打开，按首页提示配置代理并启动核心即可。App 内含同版本 `gateway` CLI，设置页可一键安装到 `/usr/local/bin`。
+
+**方式 B：命令行 CLI（macOS / Linux 通用）**
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.sh | bash
 sudo gateway install
