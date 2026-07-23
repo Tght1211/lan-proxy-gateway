@@ -16,6 +16,14 @@ struct ThemePalette: Identifiable {
     let lime: Color
     let yellow: Color
     let muted: Color
+    // Texture: each skin has its own materiality, not just colors.
+    let radius: CGFloat
+    let radiusSmall: CGFloat
+    let borderWidth: CGFloat
+    let shadowOpacity: Double
+    let shadowRadius: CGFloat
+    let fontDesign: Font.Design
+    let canvasGradient: [Color]
 
     static let light = ThemePalette(
         id: "light",
@@ -30,7 +38,14 @@ struct ThemePalette: Identifiable {
         coral: Color(red: 0.72, green: 0.20, blue: 0.18),
         lime: Color(red: 0.20, green: 0.52, blue: 0.28),
         yellow: Color(red: 0.78, green: 0.47, blue: 0.08),
-        muted: Color(nsColor: .secondaryLabelColor)
+        muted: Color(nsColor: .secondaryLabelColor),
+        radius: 7,
+        radiusSmall: 6,
+        borderWidth: 0.7,
+        shadowOpacity: 0.035,
+        shadowRadius: 7,
+        fontDesign: .default,
+        canvasGradient: []
     )
 
     static let graphite = ThemePalette(
@@ -41,12 +56,22 @@ struct ThemePalette: Identifiable {
         sidebar: Color(red: 0.104, green: 0.114, blue: 0.133),
         panel: Color(red: 0.125, green: 0.137, blue: 0.157),
         panelRaised: Color(red: 0.16, green: 0.175, blue: 0.20),
-        border: Color(red: 0.235, green: 0.258, blue: 0.294),
+        border: Color(red: 0.255, green: 0.28, blue: 0.318),
         cyan: Color(red: 0.30, green: 0.76, blue: 0.66),
         coral: Color(red: 0.94, green: 0.45, blue: 0.40),
         lime: Color(red: 0.55, green: 0.79, blue: 0.40),
         yellow: Color(red: 0.94, green: 0.70, blue: 0.32),
-        muted: Color(red: 0.60, green: 0.64, blue: 0.70)
+        muted: Color(red: 0.60, green: 0.64, blue: 0.70),
+        radius: 3,
+        radiusSmall: 2,
+        borderWidth: 1.0,
+        shadowOpacity: 0.5,
+        shadowRadius: 12,
+        fontDesign: .default,
+        canvasGradient: [
+            Color(red: 0.098, green: 0.106, blue: 0.128),
+            Color(red: 0.066, green: 0.072, blue: 0.086),
+        ]
     )
 
     static let ocean = ThemePalette(
@@ -57,12 +82,22 @@ struct ThemePalette: Identifiable {
         sidebar: Color(red: 0.885, green: 0.913, blue: 0.941),
         panel: Color.white,
         panelRaised: Color(red: 0.945, green: 0.960, blue: 0.975),
-        border: Color(red: 0.775, green: 0.828, blue: 0.878),
+        border: Color(red: 0.80, green: 0.85, blue: 0.895),
         cyan: Color(red: 0.10, green: 0.36, blue: 0.65),
         coral: Color(red: 0.78, green: 0.23, blue: 0.22),
         lime: Color(red: 0.12, green: 0.50, blue: 0.44),
         yellow: Color(red: 0.79, green: 0.50, blue: 0.10),
-        muted: Color(nsColor: .secondaryLabelColor)
+        muted: Color(nsColor: .secondaryLabelColor),
+        radius: 13,
+        radiusSmall: 9,
+        borderWidth: 0.5,
+        shadowOpacity: 0.08,
+        shadowRadius: 16,
+        fontDesign: .rounded,
+        canvasGradient: [
+            Color(red: 0.895, green: 0.925, blue: 0.955),
+            Color(red: 0.945, green: 0.958, blue: 0.968),
+        ]
     )
 
     static let cream = ThemePalette(
@@ -73,12 +108,19 @@ struct ThemePalette: Identifiable {
         sidebar: Color(red: 0.928, green: 0.903, blue: 0.862),
         panel: Color(red: 0.995, green: 0.986, blue: 0.968),
         panelRaised: Color(red: 0.963, green: 0.948, blue: 0.922),
-        border: Color(red: 0.838, green: 0.798, blue: 0.732),
+        border: Color(red: 0.78, green: 0.73, blue: 0.65),
         cyan: Color(red: 0.62, green: 0.31, blue: 0.14),
         coral: Color(red: 0.74, green: 0.22, blue: 0.18),
         lime: Color(red: 0.35, green: 0.51, blue: 0.25),
         yellow: Color(red: 0.71, green: 0.49, blue: 0.10),
-        muted: Color(nsColor: .secondaryLabelColor)
+        muted: Color(nsColor: .secondaryLabelColor),
+        radius: 8,
+        radiusSmall: 6,
+        borderWidth: 1.1,
+        shadowOpacity: 0,
+        shadowRadius: 0,
+        fontDesign: .serif,
+        canvasGradient: []
     )
 
     static let all: [ThemePalette] = [.light, .graphite, .ocean, .cream]
@@ -100,6 +142,17 @@ private enum Theme {
     static var lime: Color { palette.lime }
     static var yellow: Color { palette.yellow }
     static var muted: Color { palette.muted }
+    static var radius: CGFloat { palette.radius }
+    static var radiusSmall: CGFloat { palette.radiusSmall }
+    static var borderWidth: CGFloat { palette.borderWidth }
+    static var shadowOpacity: Double { palette.shadowOpacity }
+    static var shadowRadius: CGFloat { palette.shadowRadius }
+
+    // Page background: flat color or the skin's vertical gradient.
+    static var canvasBackground: LinearGradient {
+        let colors = palette.canvasGradient.isEmpty ? [palette.canvas, palette.canvas] : palette.canvasGradient
+        return LinearGradient(colors: colors, startPoint: .top, endPoint: .bottom)
+    }
 }
 
 struct ContentView: View {
@@ -111,6 +164,7 @@ struct ContentView: View {
         Theme.palette = ThemePalette.named(model.themeID)
         return mainView
             .id(model.themeID)
+            .fontDesign(Theme.palette.fontDesign)
             .preferredColorScheme(Theme.palette.isDark ? .dark : .light)
     }
 
@@ -126,7 +180,7 @@ struct ContentView: View {
                 }
                 detail
             }
-            .background(Theme.canvas)
+            .background(Theme.canvasBackground)
         }
         .tint(Theme.cyan)
         .toolbar(.hidden, for: .windowToolbar)
@@ -150,7 +204,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             HStack(spacing: 11) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 7).fill(Theme.cyan.opacity(0.16))
+                    RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.cyan.opacity(0.16))
                     Image(systemName: "network").foregroundStyle(Theme.cyan).font(.system(size: 17, weight: .semibold))
                 }
                 .frame(width: 32, height: 32)
@@ -253,7 +307,7 @@ private struct TopBar: View {
         }
         .padding(.horizontal, 24)
         .frame(height: 58)
-        .background(Theme.canvas)
+        .background(Theme.canvasBackground)
         .disabled(model.isBusy)
     }
 }
@@ -417,7 +471,7 @@ private struct FallbackLearningPopover: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 7).fill(Theme.yellow.opacity(0.14))
+                    RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.yellow.opacity(0.14))
                     Image(systemName: "wand.and.stars")
                         .font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.yellow)
                 }
@@ -501,7 +555,7 @@ private struct FallbackLearningPopover: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.canvas)
+            .background(Theme.canvasBackground)
 
             Divider().overlay(Theme.border)
             HStack {
@@ -531,7 +585,7 @@ private struct FlowStep: View {
         }
         .padding(.horizontal, 7).padding(.vertical, 4)
         .background(color.opacity(0.09))
-        .overlay(Capsule().stroke(color.opacity(0.28), lineWidth: 0.7))
+        .overlay(Capsule().stroke(color.opacity(0.28), lineWidth: Theme.borderWidth))
         .clipShape(Capsule())
         .fixedSize()
     }
@@ -652,7 +706,7 @@ private struct GettingStartedPanel: View {
         Panel {
             HStack(spacing: 18) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 7).fill(Theme.cyan.opacity(0.14))
+                    RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.cyan.opacity(0.14))
                     Image(systemName: "point.3.connected.trianglepath.dotted")
                         .font(.system(size: 25, weight: .semibold)).foregroundStyle(Theme.cyan)
                 }
@@ -817,8 +871,8 @@ private struct LabeledDevicesStrip: View {
                     }
                     .padding(.horizontal, 10).frame(height: 30)
                     .background(Theme.panel)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 0.7))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(Theme.border, lineWidth: Theme.borderWidth))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSmall))
                 }
                 Spacer()
             }
@@ -836,7 +890,7 @@ private struct DeviceAccessSummary: View {
         Panel {
             HStack(spacing: 20) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 7).fill(Theme.lime.opacity(0.12))
+                    RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.lime.opacity(0.12))
                     Image(systemName: "desktopcomputer.and.macbook")
                         .font(.system(size: 22, weight: .medium)).foregroundStyle(Theme.lime)
                 }
@@ -959,7 +1013,7 @@ private struct DeviceOnboardingSheet: View {
             .background(Theme.panel)
         }
         .frame(width: 580, height: 500)
-        .background(Theme.canvas)
+        .background(Theme.canvasBackground)
         .onAppear { refreshCandidates() }
     }
 
@@ -1171,7 +1225,7 @@ private struct StabilitySummary: View {
                     }
                 }
             }
-            .overlay(RoundedRectangle(cornerRadius: 7).stroke(hovering ? Theme.cyan.opacity(0.5) : Color.clear, lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(hovering ? Theme.cyan.opacity(0.5) : Color.clear, lineWidth: 1))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
@@ -1384,13 +1438,13 @@ private struct ConnectionsView: View {
                 }
                 .scrollContentBackground(.hidden)
                 .background(Theme.panel)
-                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border, lineWidth: 0.7))
-                .clipShape(RoundedRectangle(cornerRadius: 7))
-                .shadow(color: Color.black.opacity(0.035), radius: 7, y: 2)
+                .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(Theme.border, lineWidth: Theme.borderWidth))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.radius))
+                .shadow(color: Color.black.opacity(Theme.shadowOpacity), radius: Theme.shadowRadius, y: 2)
             }
             .padding(16)
         }
-        .background(Theme.canvas)
+        .background(Theme.canvasBackground)
     }
 
     private func outcomeColor(_ outcome: ConnectionOutcome) -> Color {
@@ -1432,8 +1486,8 @@ private struct OutcomeChip: View {
             }
             .padding(.horizontal, 10).padding(.vertical, 5)
             .background(selected ? color.opacity(0.14) : Theme.panel)
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(selected ? color.opacity(0.55) : Theme.border, lineWidth: 0.8))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(selected ? color.opacity(0.55) : Theme.border, lineWidth: 0.8))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSmall))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1576,7 +1630,7 @@ private struct ProxyConfigSheet: View {
             .background(Theme.panel)
         }
         .frame(width: 640, height: 400)
-        .background(Theme.canvas)
+        .background(Theme.canvasBackground)
         .onAppear {
             mode = model.status?.egress == "proxy" ? model.proxyType : "direct"
         }
@@ -1737,7 +1791,7 @@ private struct RouteDiagram: View {
                             .foregroundStyle(Theme.muted)
                             .frame(width: 34, height: 40)
                             .background(Theme.panelRaised)
-                            .clipShape(RoundedRectangle(cornerRadius: 7))
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.radius))
                         }
                         .buttonStyle(.plain)
                         .help(devicesExpanded ? "收起设备" : "展开全部设备")
@@ -1791,7 +1845,7 @@ private struct TopoDeviceChip: View {
     var body: some View {
         HStack(spacing: 8) {
             ZStack {
-                RoundedRectangle(cornerRadius: 6).fill((active ? Theme.lime : Theme.muted).opacity(0.12))
+                RoundedRectangle(cornerRadius: Theme.radiusSmall).fill((active ? Theme.lime : Theme.muted).opacity(0.12))
                 Image(systemName: icon)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(active ? Theme.lime : Theme.muted)
@@ -1807,8 +1861,8 @@ private struct TopoDeviceChip: View {
         }
         .padding(.horizontal, 10).frame(height: 40)
         .background(Theme.panel)
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(active ? Theme.lime.opacity(0.35) : Theme.border, lineWidth: 0.7))
-        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(active ? Theme.lime.opacity(0.35) : Theme.border, lineWidth: Theme.borderWidth))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.radius))
     }
 }
 
@@ -1883,7 +1937,7 @@ private struct TopoOutcome: View {
         } label: {
             VStack(spacing: 3) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 6).fill(color.opacity(0.12))
+                    RoundedRectangle(cornerRadius: Theme.radiusSmall).fill(color.opacity(0.12))
                     Image(systemName: icon).font(.system(size: 11, weight: .semibold)).foregroundStyle(color)
                 }
                 .frame(width: 24, height: 24)
@@ -2174,8 +2228,8 @@ private struct RoutingRulesEditor: View {
                         .scrollIndicators(.hidden)
                         .padding(8)
                         .background(Theme.panel)
-                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border, lineWidth: 0.7))
-                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(Theme.border, lineWidth: Theme.borderWidth))
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.radius))
                     if let parseNote {
                         Text(parseNote).font(.caption2).foregroundStyle(Theme.yellow)
                     }
@@ -2252,8 +2306,8 @@ private struct RoutingRulesEditor: View {
                         }
                         .padding(.horizontal, 12).frame(height: 52)
                         .background(Theme.panel)
-                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border, lineWidth: 0.7))
-                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(Theme.border, lineWidth: Theme.borderWidth))
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.radius))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
@@ -2294,7 +2348,7 @@ private struct RoutingRulesEditor: View {
             .padding(.horizontal, 20).padding(.vertical, 14)
             .background(Theme.panel)
         }
-        .frame(width: 760, height: 520).background(Theme.canvas)
+        .frame(width: 760, height: 520).background(Theme.canvasBackground)
     }
 
     private func save() {
@@ -2514,9 +2568,9 @@ private struct Panel<Content: View>: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .background(Theme.panel)
-            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border, lineWidth: 0.7))
-            .clipShape(RoundedRectangle(cornerRadius: 7))
-            .shadow(color: Color.black.opacity(0.035), radius: 7, y: 2)
+            .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(Theme.border, lineWidth: Theme.borderWidth))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radius))
+            .shadow(color: Color.black.opacity(Theme.shadowOpacity), radius: Theme.shadowRadius, y: 2)
     }
 }
 
@@ -2529,7 +2583,7 @@ private struct MetricCard: View {
             ZStack { Circle().fill(color.opacity(0.11)); Image(systemName: icon).foregroundStyle(color).font(.system(size: 15, weight: .semibold)) }.frame(width: 34, height: 34)
             VStack(alignment: .leading, spacing: 3) { Text(label).font(.caption).foregroundStyle(Theme.muted); Text(value).font(.system(size: 18, weight: .semibold, design: .rounded)).lineLimit(1).minimumScaleFactor(0.7) }
             Spacer(minLength: 0)
-        }.padding(.horizontal, 13).frame(minHeight: 66).background(Theme.panel).overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border, lineWidth: 0.7)).clipShape(RoundedRectangle(cornerRadius: 7))
+        }.padding(.horizontal, 13).frame(minHeight: 66).background(Theme.panel).overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(Theme.border, lineWidth: Theme.borderWidth)).clipShape(RoundedRectangle(cornerRadius: Theme.radius))
     }
 }
 
@@ -2621,7 +2675,7 @@ private struct ThemeCard: View {
         Button(action: action) {
             VStack(spacing: 8) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 7).fill(palette.canvas)
+                    RoundedRectangle(cornerRadius: min(palette.radius, 9)).fill(palette.canvas)
                     HStack(spacing: 5) {
                         RoundedRectangle(cornerRadius: 2.5)
                             .fill(palette.sidebar)
@@ -2665,7 +2719,7 @@ private struct ThemeCard: View {
                 }
                 .frame(width: 128, height: 82)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 7)
+                    RoundedRectangle(cornerRadius: min(palette.radius, 9))
                         .stroke(selected ? Theme.cyan : Theme.border, lineWidth: selected ? 1.8 : 0.7)
                 )
                 .overlay(alignment: .topTrailing) {
@@ -2678,7 +2732,7 @@ private struct ThemeCard: View {
                     }
                 }
                 Text(palette.name)
-                    .font(.system(size: 11, weight: selected ? .semibold : .regular))
+                    .font(.system(size: 11, weight: selected ? .semibold : .regular, design: palette.fontDesign))
                     .foregroundStyle(selected ? Color.primary : Theme.muted)
             }
             .contentShape(Rectangle())
@@ -2689,20 +2743,20 @@ private struct ThemeCard: View {
 
 private struct NoticeBar: View {
     let text: String
-    var body: some View { Label(text, systemImage: "checkmark.circle.fill").font(.subheadline.weight(.medium)).foregroundStyle(Color.black).padding(.horizontal, 14).frame(minHeight: 38).background(Theme.lime).clipShape(RoundedRectangle(cornerRadius: 6)).shadow(color: Color.black.opacity(0.4), radius: 10, y: 4) }
+    var body: some View { Label(text, systemImage: "checkmark.circle.fill").font(.subheadline.weight(.medium)).foregroundStyle(Color.black).padding(.horizontal, 14).frame(minHeight: 38).background(Theme.lime).clipShape(RoundedRectangle(cornerRadius: Theme.radiusSmall)).shadow(color: Color.black.opacity(0.4), radius: 10, y: 4) }
 }
 
 private struct IconButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View { configuration.label.foregroundStyle(Color.primary.opacity(0.8)).frame(width: 30, height: 30).background(configuration.isPressed ? Theme.sidebar : Theme.panel).overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 0.7)).clipShape(RoundedRectangle(cornerRadius: 6)) }
+    func makeBody(configuration: Configuration) -> some View { configuration.label.foregroundStyle(Color.primary.opacity(0.8)).frame(width: 30, height: 30).background(configuration.isPressed ? Theme.sidebar : Theme.panel).overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(Theme.border, lineWidth: Theme.borderWidth)).clipShape(RoundedRectangle(cornerRadius: Theme.radiusSmall)) }
 }
 
 private struct ActionButtonStyle: ButtonStyle {
     let tint: Color
-    func makeBody(configuration: Configuration) -> some View { configuration.label.font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.white).padding(.horizontal, 13).frame(minHeight: 30).background(tint.opacity(configuration.isPressed ? 0.72 : 0.92)).clipShape(RoundedRectangle(cornerRadius: 6)) }
+    func makeBody(configuration: Configuration) -> some View { configuration.label.font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.white).padding(.horizontal, 13).frame(minHeight: 30).background(tint.opacity(configuration.isPressed ? 0.72 : 0.92)).clipShape(RoundedRectangle(cornerRadius: Theme.radiusSmall)) }
 }
 
 private struct DarkFieldStyle: TextFieldStyle {
-    func _body(configuration: TextField<Self._Label>) -> some View { configuration.padding(.horizontal, 11).frame(height: 36).background(Theme.panelRaised).overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 0.8)).clipShape(RoundedRectangle(cornerRadius: 6)) }
+    func _body(configuration: TextField<Self._Label>) -> some View { configuration.padding(.horizontal, 11).frame(height: 36).background(Theme.panelRaised).overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(Theme.border, lineWidth: 0.8)).clipShape(RoundedRectangle(cornerRadius: Theme.radiusSmall)) }
 }
 
 private extension Text {
