@@ -29,7 +29,11 @@ type Options struct {
 	// LookupRealIP labels telemetry for recently forwarded DNS answers. It
 	// never changes the address passed to the egress dialer.
 	LookupRealIP func(netip.Addr) (string, bool)
-	Logger       *slog.Logger
+	// OnFallbackSuccess fires when a default-proxy connection whose proxy dial
+	// failed was retried directly and succeeded. Optional; used for route
+	// auto-learning.
+	OnFallbackSuccess func(host string)
+	Logger            *slog.Logger
 }
 
 // Server accepts transparently redirected TCP connections and relays them
@@ -49,6 +53,8 @@ type Server struct {
 	realLookup atomic.Value // func(netip.Addr) (string, bool)
 	missingMu  sync.Mutex
 	missingLog map[netip.Addr]time.Time
+
+	onFallbackSuccess atomic.Value // func(string)
 
 	mu   sync.Mutex
 	ln   *net.TCPListener
@@ -90,6 +96,9 @@ func New(opts Options) *Server {
 	}
 	if opts.LookupRealIP != nil {
 		s.realLookup.Store(opts.LookupRealIP)
+	}
+	if opts.OnFallbackSuccess != nil {
+		s.onFallbackSuccess.Store(opts.OnFallbackSuccess)
 	}
 	return s
 }
@@ -254,8 +263,15 @@ func (s *Server) handle(client *net.TCPConn) {
 	var dialer Dialer
 	viaProxy := s.viaProxy.Load()
 	rejected := false
+	matchedRule := false
+	var fallbackDialer Dialer
 	if policy := s.routing.Load(); policy != nil {
-		dialer, viaProxy, rejected = policy.selectDialer(routeHost, dstIP)
+		dialer, viaProxy, rejected, matchedRule = policy.selectDialer(routeHost, dstIP)
+		// 默认出口是代理且未命中显式规则时，代理拨号失败允许直连兜底一次：
+		// 国内站点被代理到海外出口常见的"连接失败"可由直连救回。
+		if viaProxy && !matchedRule && policy.direct != nil {
+			fallbackDialer = policy.direct
+		}
 	} else if holder := s.dialer.Load(); holder != nil {
 		dialer = holder.dialer
 	}
@@ -270,25 +286,60 @@ func (s *Server) handle(client *net.TCPConn) {
 	}
 
 	target := net.JoinHostPort(host, strconv.Itoa(int(orig.Port())))
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	upstream, err := dialer.DialContext(ctx, "tcp", target)
-	cancel()
+	upstream, err := dialTarget(dialer, target)
+	fellBack := false
+	if err != nil && fallbackDialer != nil {
+		proxyErr := err
+		s.logger.Info("代理拨号失败，尝试直连回退", "src", client.RemoteAddr(), "target", target, "err", proxyErr)
+		upstream, err = dialTarget(fallbackDialer, target)
+		if err == nil {
+			fellBack = true
+			viaProxy = false
+			s.notifyFallbackSuccess(routeHost)
+		} else {
+			s.logger.Warn("直连回退也失败", "src", client.RemoteAddr(), "target", target, "err", err)
+			err = proxyErr
+		}
+	}
 	if err != nil {
 		s.logger.Warn("出口拨号失败", "src", client.RemoteAddr(), "target", target, "err", err)
 		s.tracker.RecordDialFailure(srcIP, routeHost, int(orig.Port()), viaProxy, classifyDialError(err, viaProxy))
 		return
 	}
 	defer upstream.Close()
-	s.logger.Debug("出口已建立", "src", client.RemoteAddr(), "target", target, "via_proxy", viaProxy)
+	s.logger.Debug("出口已建立", "src", client.RemoteAddr(), "target", target, "via_proxy", viaProxy, "fallback", fellBack)
 	if uc, ok := upstream.(*net.TCPConn); ok {
 		_ = uc.SetNoDelay(true)
 	}
 
 	observedHost := routeHost
 	tc := s.tracker.Open(srcIP, observedHost, int(orig.Port()), viaProxy)
+	if fellBack {
+		tc.MarkFallback()
+	}
 	defer tc.Close()
 
 	pipe(client, upstream, tc)
+}
+
+func dialTarget(d Dialer, target string) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return d.DialContext(ctx, "tcp", target)
+}
+
+// notifyFallbackSuccess reports a successful proxy→direct fallback for domain
+// targets only; IP literals carry no reusable routing signal.
+func (s *Server) notifyFallbackSuccess(host string) {
+	cb, _ := s.onFallbackSuccess.Load().(func(string))
+	if cb == nil {
+		return
+	}
+	if _, err := netip.ParseAddr(host); err == nil {
+		return
+	}
+	// 学习器要做持久化和配置写入，不能阻塞转发链路
+	go cb(host)
 }
 
 func (s *Server) shouldLogMissingFakeIP(ip netip.Addr, now time.Time) bool {

@@ -32,6 +32,7 @@ type ConnInfo struct {
 	Rejected  bool       `json:"rejected,omitempty"`
 	Status    string     `json:"status,omitempty"`  // "" | "rejected" | "dial_failed"
 	Failure   string     `json:"failure,omitempty"` // human-readable dial failure reason
+	Fallback  bool       `json:"fallback,omitempty"` // proxy dial failed, direct retry succeeded
 }
 
 // TrafficPoint is one five-second throughput sample.
@@ -219,7 +220,12 @@ type TrackedConn struct {
 	up        atomic.Int64
 	down      atomic.Int64
 	closed    atomic.Bool
+	fallback  atomic.Bool
 }
+
+// MarkFallback flags the connection as proxy→direct fallback so the history
+// can show why a "should-be-proxy" target went direct.
+func (c *TrackedConn) MarkFallback() { c.fallback.Store(true) }
 
 func (c *TrackedConn) AddUp(n int64) {
 	c.up.Add(n)
@@ -272,7 +278,7 @@ func (c *TrackedConn) info() ConnInfo {
 	return ConnInfo{
 		ID: c.id, SrcIP: c.srcIP, DstHost: c.dstHost, DstPort: c.dstPort,
 		Service: c.service, Up: c.up.Load(), Down: c.down.Load(),
-		StartedAt: c.startedAt, ViaProxy: c.viaProxy,
+		StartedAt: c.startedAt, ViaProxy: c.viaProxy, Fallback: c.fallback.Load(),
 	}
 }
 

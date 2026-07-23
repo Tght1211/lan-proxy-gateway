@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -132,6 +133,42 @@ func (a *App) SetRoutingRules(rules []config.RoutingRule) error {
 	}
 	a.pokeReload()
 	return nil
+}
+
+// PromoteLearnedDirectRule appends a learned direct rule for host unless an
+// existing direct rule already covers it. Returns true when a rule was added.
+// Daemon-safe: takes the config write lock (fallback learner runs async).
+func (a *App) PromoteLearnedDirectRule(host string) (bool, error) {
+	a.cfgMu.Lock()
+	defer a.cfgMu.Unlock()
+	for _, r := range a.Cfg.Routing.Rules {
+		if r.Action != config.EgressDirect {
+			continue
+		}
+		switch r.Type {
+		case config.RuleDomainSuffix:
+			if host == r.Value || strings.HasSuffix(host, "."+r.Value) {
+				return false, nil
+			}
+		case config.RuleDomain:
+			if host == r.Value {
+				return false, nil
+			}
+		}
+	}
+	next := *a.Cfg
+	next.Routing.Rules = append(append([]config.RoutingRule(nil), a.Cfg.Routing.Rules...),
+		config.RoutingRule{Type: config.RuleDomainSuffix, Value: host, Action: config.EgressDirect, Learned: true})
+	config.Normalize(&next)
+	if err := config.Validate(&next); err != nil {
+		return false, err
+	}
+	a.Cfg = &next
+	if err := a.Save(); err != nil {
+		return false, err
+	}
+	a.pokeReload()
+	return true, nil
 }
 
 // TestEgress probes the currently configured egress end-to-end.

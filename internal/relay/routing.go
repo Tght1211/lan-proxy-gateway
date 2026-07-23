@@ -47,9 +47,12 @@ func compileRules(rules []RouteRule) []compiledRule {
 
 // selectDialer picks the egress for one connection. host is the observed
 // domain (or IP literal); ip is the real destination address, invalid when the
-// target came through fake-ip and only the domain is known.
-func (p *routingPolicy) selectDialer(host string, ip netip.Addr) (Dialer, bool, bool) {
+// target came through fake-ip and only the domain is known. The last return
+// reports whether an explicit rule matched (false = default action decided),
+// which the caller uses to gate proxy→direct fallback retries.
+func (p *routingPolicy) selectDialer(host string, ip netip.Addr) (Dialer, bool, bool, bool) {
 	action := p.defaultAction
+	matchedRule := false
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
 	for _, c := range p.rules {
 		rule := c.rule
@@ -65,18 +68,19 @@ func (p *routingPolicy) selectDialer(host string, ip netip.Addr) (Dialer, bool, 
 		}
 		if matched {
 			action = rule.Action
+			matchedRule = true
 			break
 		}
 	}
 	switch action {
 	case RouteReject:
-		return nil, false, true
+		return nil, false, true, matchedRule
 	case RouteProxy:
 		if p.proxy != nil {
-			return p.proxy, true, false
+			return p.proxy, true, false, matchedRule
 		}
 	}
-	return p.direct, false, false
+	return p.direct, false, false, matchedRule
 }
 
 // classifyDialError reduces an egress dial error to a short reason shown in

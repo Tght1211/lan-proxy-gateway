@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -159,17 +160,30 @@ func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST re
 	rt.tracker = relay.NewTracker()
 	rt.tracker.StartSampling(ctx, 5*time.Second)
 
+	rt.learner = newFallbackLearner(filepath.Join(a.Paths.Root, "fallback-learn.json"), logger)
+	rt.learner.promote = func(host string) {
+		added, err := a.PromoteLearnedDirectRule(host)
+		if err != nil {
+			logger.Warn("自动学习规则写入失败", "host", host, "err", err)
+			return
+		}
+		if added {
+			logger.Info("回退直连多次成功，已自动学习直连规则", "host", host)
+		}
+	}
+
 	dialer, err := buildDialer(a.Cfg.Egress)
 	if err != nil {
 		return nil, err
 	}
 	rt.relay = relay.New(relay.Options{
-		ListenAddr: net.JoinHostPort("", strconv.Itoa(a.Cfg.Runtime.RedirPort)),
-		OrigDST:    origDST,
-		Tracker:    rt.tracker,
-		Dialer:     dialer,
-		ViaProxy:   a.Cfg.Egress.Mode == config.EgressProxy,
-		Logger:     logger,
+		ListenAddr:        net.JoinHostPort("", strconv.Itoa(a.Cfg.Runtime.RedirPort)),
+		OrigDST:           origDST,
+		Tracker:           rt.tracker,
+		Dialer:            dialer,
+		ViaProxy:          a.Cfg.Egress.Mode == config.EgressProxy,
+		OnFallbackSuccess: rt.learner.Record,
+		Logger:            logger,
 	})
 	rt.applyRouting(a.Cfg)
 	if a.Cfg.DNS.Enabled {
@@ -203,6 +217,7 @@ type daemonRuntime struct {
 	relay   *relay.Server
 	dns     *dns.Server
 	api     *apiServer
+	learner *fallbackLearner
 }
 
 func (rt *daemonRuntime) shutdown() {
