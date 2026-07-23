@@ -2371,7 +2371,7 @@ private struct RuleCountChip: View {
 private struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
 
-    var body: some View {
+    private var content: some View {
         VStack(spacing: 16) {
             Panel {
                 VStack(alignment: .leading, spacing: 12) {
@@ -2448,11 +2448,17 @@ private struct SettingsView: View {
                         Button("在访达中显示") { model.revealLog() }.buttonStyle(.bordered)
                     }
                     LiveLogView(text: model.logText)
+                        .frame(height: 320)
                 }
             }
-            .frame(maxHeight: .infinity)
         }
         .padding(20)
+    }
+
+    var body: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            content
+        }
         .task { model.updateServiceStatus(); model.reloadLog() }
     }
 }
