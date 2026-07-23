@@ -1,6 +1,25 @@
 # Changelog
 
-## Unreleased
+## v4.1.0 - 2026-07-24
+
+### macOS App
+
+- Rebuilt the native App around four sections: network overview (interactive traffic topology, throughput and latency/jitter/availability), devices & services (usage ranking, ping-probed onboarding wizard), connection history (connection-level outcomes with filter chips and success rate), and settings.
+- Added a routing rules editor with drag reordering and Clash-style text mode; learned rules round-trip a trailing `# 自动学习` comment.
+- Added four built-in themes (暖沙米 default, 经典浅色, 石墨深色, 海雾蓝), each with its own palette, corner radius, typography, shadows and background texture.
+- Added sheet-based proxy configuration with a non-privileged connectivity test, update check against GitHub releases, and a unified scrollable page scaffold.
+
+### Gateway core
+
+- Added ordered first-match routing rules (`domain`, `domain-suffix`, `ip-cidr` → `proxy`/`direct`/`reject`) with hot reload.
+- Recorded connection outcomes in history: rejected, dial-failed with classified reasons, and no-data connections.
+- Added proxy→direct fallback with conservative auto-learning: a host whose proxy dial fails but direct retry succeeds three times within 24 hours is promoted to a deletable learned direct rule, persisted across restarts and surfaced via `/api/stats`.
+- Bounded in-memory connection history to 2000 records and 72 hours; nothing is written to disk.
+
+### CLI
+
+- Added `gateway routing list [--json]` showing rule priority and the learned marker.
+- Added `gateway system-proxy test` to probe a candidate proxy without saving it.
 
 ### Fixed
 
