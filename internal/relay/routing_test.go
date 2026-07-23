@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/netip"
 	"testing"
+	"time"
 )
 
 type namedDialer struct{ Dialer }
@@ -97,6 +98,17 @@ func TestTrackerRecordDialFailure(t *testing.T) {
 	}
 	if len(snap.Devices) != 0 || len(snap.Services) != 0 {
 		t.Fatal("failed records must not count toward usage aggregates")
+	}
+}
+
+func TestTrackerRecentRetention(t *testing.T) {
+	tr := NewTracker()
+	oldAt := time.Now().Add(-recentRetention - time.Hour)
+	tr.recent = []ConnInfo{{ID: 1, DstHost: "stale.example.com", StartedAt: oldAt, EndedAt: &oldAt}}
+	tr.RecordRejected("192.168.1.2", "fresh.example.com", 443)
+	snap := tr.Snapshot()
+	if len(snap.Recent) != 1 || snap.Recent[0].DstHost != "fresh.example.com" {
+		t.Fatalf("expired record should be pruned, got %+v", snap.Recent)
 	}
 }
 

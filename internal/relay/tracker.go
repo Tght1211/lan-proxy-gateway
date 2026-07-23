@@ -13,7 +13,11 @@ import (
 )
 
 const (
-	maxRecentConnections = 240
+	// Recent history is memory-only observability data (never persisted, so a
+	// household's browsing history is not written to disk). Bounded by both
+	// count and age, whichever trims first.
+	maxRecentConnections = 2000
+	recentRetention      = 72 * time.Hour
 	maxTrafficPoints     = 360
 )
 
@@ -160,11 +164,23 @@ func (t *Tracker) recordTerminal(srcIP, dstHost string, dstPort int, status, fai
 		Status: status, Failure: failure,
 	}
 	t.recent = appendBoundedFront(t.recent, info, maxRecentConnections)
+	t.recent = pruneRecent(t.recent, now)
 	t.mu.Unlock()
+}
+
+// pruneRecent trims expired records off the tail (recent is newest-first).
+func pruneRecent(items []ConnInfo, now time.Time) []ConnInfo {
+	cutoff := now.Add(-recentRetention)
+	i := len(items)
+	for i > 0 && items[i-1].StartedAt.Before(cutoff) {
+		i--
+	}
+	return items[:i]
 }
 
 func (t *Tracker) Snapshot() Snapshot {
 	t.mu.Lock()
+	t.recent = pruneRecent(t.recent, time.Now())
 	devices := cloneAggregates(t.devices)
 	services := cloneAggregates(t.services)
 	deviceServices := cloneDeviceServices(t.deviceServices)
@@ -247,6 +263,7 @@ func (c *TrackedConn) Close() {
 	c.t.mu.Lock()
 	delete(c.t.conns, c.id)
 	c.t.recent = appendBoundedFront(c.t.recent, info, maxRecentConnections)
+	c.t.recent = pruneRecent(c.t.recent, now)
 	updateAggregate(c.t.devices, c.srcIP, info, now)
 	updateAggregate(c.t.services, c.service, info, now)
 	updateDeviceService(c.t.deviceServices, c.srcIP, c.service, info, now)
