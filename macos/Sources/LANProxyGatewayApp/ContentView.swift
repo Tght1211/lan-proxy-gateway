@@ -126,12 +126,12 @@ struct ThemePalette: Identifiable {
     static let all: [ThemePalette] = [.light, .graphite, .ocean, .cream]
 
     static func named(_ id: String) -> ThemePalette {
-        all.first { $0.id == id } ?? .light
+        all.first { $0.id == id } ?? .cream
     }
 }
 
 private enum Theme {
-    static var palette = ThemePalette.light
+    static var palette = ThemePalette.cream
     static var canvas: Color { palette.canvas }
     static var sidebar: Color { palette.sidebar }
     static var panel: Color { palette.panel }

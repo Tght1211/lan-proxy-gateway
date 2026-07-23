@@ -17,7 +17,7 @@ final class AppModel: ObservableObject {
     @Published var notice: String?
     @Published var errorMessage: String?
     @Published var coreUpgradeRecommended = false
-    @Published var themeID: String = UserDefaults.standard.string(forKey: "appThemeID") ?? "light" {
+    @Published var themeID: String = UserDefaults.standard.string(forKey: "appThemeID") ?? "cream" {
         didSet { UserDefaults.standard.set(themeID, forKey: "appThemeID") }
     }
 
