@@ -258,27 +258,39 @@ private struct TopBar: View {
     }
 }
 
+// Layout rule: every content page either uses ScrollPage (scrollable, panels
+// stack freely) or is a full-height page where ONLY flexible views (Table,
+// TextEditor) absorb remaining space. Fixed-height stacks that can outgrow
+// the window overflow-center and shove the whole split view off screen.
+private struct ScrollPage<Content: View>: View {
+    @ViewBuilder let content: Content
+    var body: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 16) { content }
+                .padding(20)
+                .frame(maxWidth: .infinity)
+        }
+    }
+}
+
 private struct OverviewView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 16) {
-                if model.status?.configured == false {
-                    GettingStartedPanel()
-                }
-                GatewaySummary()
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
-                    MetricCard("实时下载", speed(model.stats?.relay.traffic.last?.down ?? 0), "arrow.down", Theme.cyan)
-                    MetricCard("实时上传", speed(model.stats?.relay.traffic.last?.up ?? 0), "arrow.up", Theme.yellow)
-                    MetricCard("活动连接", "\(model.stats?.relay.active.count ?? 0)", "point.3.connected.trianglepath.dotted", Theme.lime)
-                    MetricCard("活跃设备", "\(model.activeDeviceCount)", "desktopcomputer", Theme.coral)
-                }
-                TopologyPanel()
-                ThroughputChart(compact: true).frame(minHeight: 270)
-                RecentStrip().frame(minHeight: 210)
+        ScrollPage {
+            if model.status?.configured == false {
+                GettingStartedPanel()
             }
-            .padding(20)
+            GatewaySummary()
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
+                MetricCard("实时下载", speed(model.stats?.relay.traffic.last?.down ?? 0), "arrow.down", Theme.cyan)
+                MetricCard("实时上传", speed(model.stats?.relay.traffic.last?.up ?? 0), "arrow.up", Theme.yellow)
+                MetricCard("活动连接", "\(model.stats?.relay.active.count ?? 0)", "point.3.connected.trianglepath.dotted", Theme.lime)
+                MetricCard("活跃设备", "\(model.activeDeviceCount)", "desktopcomputer", Theme.coral)
+            }
+            TopologyPanel()
+            ThroughputChart(compact: true).frame(minHeight: 270)
+            RecentStrip().frame(minHeight: 210)
         }
     }
 }
@@ -771,19 +783,15 @@ private struct DevicesView: View {
     @State private var showOnboarding = false
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 16) {
-                DeviceAccessSummary { showOnboarding = true }
-                LabeledDevicesStrip()
-                HStack(alignment: .top, spacing: 16) {
-                    DeviceRanking().frame(maxWidth: .infinity)
-                    ServiceUsagePanel()
-                        .frame(minWidth: 280, idealWidth: 360, maxWidth: 380)
-                        .frame(height: 460)
-                }
+        ScrollPage {
+            DeviceAccessSummary { showOnboarding = true }
+            LabeledDevicesStrip()
+            HStack(alignment: .top, spacing: 16) {
+                DeviceRanking().frame(maxWidth: .infinity)
+                ServiceUsagePanel()
+                    .frame(minWidth: 280, idealWidth: 360, maxWidth: 380)
+                    .frame(height: 460)
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .top)
         }
         .sheet(isPresented: $showOnboarding) {
             DeviceOnboardingSheet().environmentObject(model)
@@ -2372,7 +2380,7 @@ private struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
 
     private var content: some View {
-        VStack(spacing: 16) {
+        Group {
             Panel {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
@@ -2452,11 +2460,10 @@ private struct SettingsView: View {
                 }
             }
         }
-        .padding(20)
     }
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
+        ScrollPage {
             content
         }
         .task { model.updateServiceStatus(); model.reloadLog() }
