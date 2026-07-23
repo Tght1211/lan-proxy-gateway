@@ -14,15 +14,25 @@ import (
 	"github.com/tght/lan-proxy-gateway/internal/relay"
 )
 
-// StatsResponse is served by GET /api/stats and consumed by the console
-// dashboard and `gateway status`.
+// StatsResponse is served by GET /api/stats and consumed by the console and
+// native App. Bump SchemaVersion when an incompatible field changes.
 type StatsResponse struct {
-	Egress    string         `json:"egress"`
-	Proxy     string         `json:"proxy,omitempty"`
-	UptimeSec int64          `json:"uptime_sec"`
-	Relay     relay.Snapshot `json:"relay"`
-	DNS       *dns.Stats     `json:"dns,omitempty"`
-	Health    HealthSnapshot `json:"health"`
+	SchemaVersion int            `json:"schema_version"`
+	Egress        string         `json:"egress"`
+	Proxy         string         `json:"proxy,omitempty"`
+	UptimeSec     int64          `json:"uptime_sec"`
+	Relay         relay.Snapshot `json:"relay"`
+	DNS           *dns.Stats     `json:"dns,omitempty"`
+	Health        HealthSnapshot `json:"health"`
+	Fallback      *FallbackStats `json:"fallback,omitempty"`
+}
+
+// FallbackStats reports the proxy→direct fallback auto-learning state.
+type FallbackStats struct {
+	Threshold   int                  `json:"threshold"`
+	WindowHours int                  `json:"window_hours"`
+	Candidates  []FallbackCandidate  `json:"candidates"`
+	Learned     []config.RoutingRule `json:"learned"`
 }
 
 // apiServer is the daemon's loopback-only status API.
@@ -75,10 +85,11 @@ func (s *apiServer) Close() error {
 func (s *apiServer) handleStats(w http.ResponseWriter, r *http.Request) {
 	cfg := s.app.getCfg()
 	resp := StatsResponse{
-		Egress:    cfg.Egress.Mode,
-		UptimeSec: int64(time.Since(s.started).Seconds()),
-		Relay:     s.rt.tracker.Snapshot(),
-		Health:    s.app.Health(),
+		SchemaVersion: 3,
+		Egress:        cfg.Egress.Mode,
+		UptimeSec:     int64(time.Since(s.started).Seconds()),
+		Relay:         s.rt.tracker.Snapshot(),
+		Health:        s.app.Health(),
 	}
 	if cfg.Egress.Mode == "proxy" {
 		p := cfg.Egress.Proxy
@@ -87,6 +98,20 @@ func (s *apiServer) handleStats(w http.ResponseWriter, r *http.Request) {
 	if s.rt.dns != nil {
 		st := s.rt.dns.Stats()
 		resp.DNS = &st
+	}
+	if s.rt.learner != nil {
+		learned := make([]config.RoutingRule, 0)
+		for _, r := range cfg.Routing.Rules {
+			if r.Learned {
+				learned = append(learned, r)
+			}
+		}
+		resp.Fallback = &FallbackStats{
+			Threshold:   fallbackLearnThreshold,
+			WindowHours: int(fallbackLearnWindow / time.Hour),
+			Candidates:  s.rt.learner.Snapshot(),
+			Learned:     learned,
+		}
 	}
 	writeJSON(w, resp)
 }

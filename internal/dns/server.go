@@ -62,6 +62,8 @@ type Server struct {
 	fakeOn    atomic.Bool
 	cachePath string
 	cacheMu   sync.Mutex
+	realMu    sync.RWMutex
+	realNames map[netip.Addr]realIPEntry
 
 	queries      atomic.Int64
 	fakeAnswered atomic.Int64
@@ -103,6 +105,7 @@ func New(opts Options) *Server {
 		pool:      newFakeIPPool(prefix, idle, maxEntries),
 		forwarder: newForwarder(opts.Upstreams),
 		cachePath: opts.CachePath,
+		realNames: make(map[netip.Addr]realIPEntry),
 	}
 	if count, err := s.loadFakeIPCache(time.Now()); err != nil {
 		logger.Warn("fake-ip 缓存恢复失败，使用空映射", "path", opts.CachePath, "err", err)
@@ -264,6 +267,7 @@ func (s *Server) forward(w dns.ResponseWriter, r *dns.Msg) {
 	}
 	resp.Id = r.Id
 	resp.Compress = true
+	s.rememberRealAnswers(resp, time.Now())
 	if err := w.WriteMsg(resp); err != nil {
 		var netErr net.Error
 		if !errors.As(err, &netErr) {

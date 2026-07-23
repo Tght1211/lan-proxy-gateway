@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -118,6 +119,58 @@ func (a *App) SetEgress(ctx context.Context, e config.EgressConfig, probe bool) 
 	return nil
 }
 
+// SetRoutingRules validates and hot-applies ordered domain routing rules.
+func (a *App) SetRoutingRules(rules []config.RoutingRule) error {
+	next := *a.Cfg
+	next.Routing.Rules = append([]config.RoutingRule(nil), rules...)
+	config.Normalize(&next)
+	if err := config.Validate(&next); err != nil {
+		return err
+	}
+	a.Cfg.Routing = next.Routing
+	if err := a.Save(); err != nil {
+		return err
+	}
+	a.pokeReload()
+	return nil
+}
+
+// PromoteLearnedDirectRule appends a learned direct rule for host unless an
+// existing direct rule already covers it. Returns true when a rule was added.
+// Daemon-safe: takes the config write lock (fallback learner runs async).
+func (a *App) PromoteLearnedDirectRule(host string) (bool, error) {
+	a.cfgMu.Lock()
+	defer a.cfgMu.Unlock()
+	for _, r := range a.Cfg.Routing.Rules {
+		if r.Action != config.EgressDirect {
+			continue
+		}
+		switch r.Type {
+		case config.RuleDomainSuffix:
+			if host == r.Value || strings.HasSuffix(host, "."+r.Value) {
+				return false, nil
+			}
+		case config.RuleDomain:
+			if host == r.Value {
+				return false, nil
+			}
+		}
+	}
+	next := *a.Cfg
+	next.Routing.Rules = append(append([]config.RoutingRule(nil), a.Cfg.Routing.Rules...),
+		config.RoutingRule{Type: config.RuleDomainSuffix, Value: host, Action: config.EgressDirect, Learned: true})
+	config.Normalize(&next)
+	if err := config.Validate(&next); err != nil {
+		return false, err
+	}
+	a.Cfg = &next
+	if err := a.Save(); err != nil {
+		return false, err
+	}
+	a.pokeReload()
+	return true, nil
+}
+
 // TestEgress probes the currently configured egress end-to-end.
 func (a *App) TestEgress(ctx context.Context) error {
 	return a.TestEgressConfig(ctx, a.Cfg.Egress)
@@ -198,16 +251,17 @@ func dnsOptions(cfg *config.Config, cachePath string, logger *slog.Logger) dns.O
 
 // Status is a read-only snapshot for UI rendering and `gateway status --json`.
 type Status struct {
-	Configured bool           `json:"configured"`
-	Running    bool           `json:"running"`
-	Egress     string         `json:"egress"`
-	Proxy      string         `json:"proxy,omitempty"` // "socks5 127.0.0.1:7897" when egress=proxy
-	DNS        DNSStatus      `json:"dns"`
-	QUICBlock  bool           `json:"quic_block"`
-	Gateway    gateway.Status `json:"gateway"`
-	Ports      PortsStatus    `json:"ports"`
-	ConfigFile string         `json:"config_file"`
-	LogFile    string         `json:"log_file"`
+	Configured bool                 `json:"configured"`
+	Running    bool                 `json:"running"`
+	Egress     string               `json:"egress"`
+	Proxy      string               `json:"proxy,omitempty"` // "socks5 127.0.0.1:7897" when egress=proxy
+	Routing    []config.RoutingRule `json:"routing"`
+	DNS        DNSStatus            `json:"dns"`
+	QUICBlock  bool                 `json:"quic_block"`
+	Gateway    gateway.Status       `json:"gateway"`
+	Ports      PortsStatus          `json:"ports"`
+	ConfigFile string               `json:"config_file"`
+	LogFile    string               `json:"log_file"`
 }
 
 type DNSStatus struct {
@@ -230,6 +284,7 @@ func (a *App) Status() Status {
 		Configured: a.Configured(),
 		Running:    a.Running(),
 		Egress:     a.Cfg.Egress.Mode,
+		Routing:    append([]config.RoutingRule(nil), a.Cfg.Routing.Rules...),
 		DNS: DNSStatus{
 			Enabled: a.Cfg.DNS.Enabled,
 			Port:    a.Cfg.DNS.Port,

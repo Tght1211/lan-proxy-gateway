@@ -36,8 +36,14 @@ var startCmd = &cobra.Command{
 		if startForeground {
 			return runForeground(cmd, a)
 		}
+		alreadyRunning := a.Running()
 		if err := a.Start(cmd.Context()); err != nil {
 			return err
+		}
+		if alreadyRunning {
+			color.Green("✔ 网关已在运行，当前 CLI 已连接到现有服务")
+			printDeviceGuide(a)
+			return nil
 		}
 		color.Green("✔ 网关已启动")
 		printDeviceGuide(a)

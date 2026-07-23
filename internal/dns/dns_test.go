@@ -323,6 +323,21 @@ func TestHandlerFakeIPAndLookup(t *testing.T) {
 	}
 }
 
+func TestRealIPLookupFromForwardedAnswer(t *testing.T) {
+	s := New(Options{})
+	now := time.Now()
+	msg := new(dns.Msg)
+	msg.Answer = []dns.RR{&dns.A{
+		Hdr: dns.RR_Header{Name: "media.example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 120},
+		A:   net.ParseIP("203.0.113.25").To4(),
+	}}
+	s.rememberRealAnswers(msg, now)
+	name, ok := s.LookupRealIP(netip.MustParseAddr("203.0.113.25"))
+	if !ok || name != "media.example.com." {
+		t.Fatalf("lookup = %q, %v", name, ok)
+	}
+}
+
 func TestHandlerAAAASuppressed(t *testing.T) {
 	s := New(Options{Upstreams: []string{"127.0.0.1:1"}, FakeIPEnabled: true})
 	rw := &fakeRW{remote: lanRemote()}

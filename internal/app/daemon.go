@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -157,19 +158,34 @@ func (a *App) Run(ctx context.Context) error {
 func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST relay.OrigDSTResolver) (*daemonRuntime, error) {
 	rt := &daemonRuntime{logger: logger}
 	rt.tracker = relay.NewTracker()
+	rt.tracker.StartSampling(ctx, 5*time.Second)
+
+	rt.learner = newFallbackLearner(filepath.Join(a.Paths.Root, "fallback-learn.json"), logger)
+	rt.learner.promote = func(host string) {
+		added, err := a.PromoteLearnedDirectRule(host)
+		if err != nil {
+			logger.Warn("自动学习规则写入失败", "host", host, "err", err)
+			return
+		}
+		if added {
+			logger.Info("回退直连多次成功，已自动学习直连规则", "host", host)
+		}
+	}
 
 	dialer, err := buildDialer(a.Cfg.Egress)
 	if err != nil {
 		return nil, err
 	}
 	rt.relay = relay.New(relay.Options{
-		ListenAddr: net.JoinHostPort("", strconv.Itoa(a.Cfg.Runtime.RedirPort)),
-		OrigDST:    origDST,
-		Tracker:    rt.tracker,
-		Dialer:     dialer,
-		ViaProxy:   a.Cfg.Egress.Mode == config.EgressProxy,
-		Logger:     logger,
+		ListenAddr:        net.JoinHostPort("", strconv.Itoa(a.Cfg.Runtime.RedirPort)),
+		OrigDST:           origDST,
+		Tracker:           rt.tracker,
+		Dialer:            dialer,
+		ViaProxy:          a.Cfg.Egress.Mode == config.EgressProxy,
+		OnFallbackSuccess: rt.learner.Record,
+		Logger:            logger,
 	})
+	rt.applyRouting(a.Cfg)
 	if a.Cfg.DNS.Enabled {
 		rt.dns = dns.New(dnsOptions(a.Cfg, a.Paths.FakeIPCacheFile, logger))
 		rt.bindFakeIP()
@@ -201,6 +217,7 @@ type daemonRuntime struct {
 	relay   *relay.Server
 	dns     *dns.Server
 	api     *apiServer
+	learner *fallbackLearner
 }
 
 func (rt *daemonRuntime) shutdown() {
@@ -222,6 +239,7 @@ func (rt *daemonRuntime) applyConfig(a *App, cfg *config.Config) {
 	if dialer, err := buildDialer(cfg.Egress); err == nil {
 		rt.relay.SetDialer(dialer, cfg.Egress.Mode == config.EgressProxy)
 	}
+	rt.applyRouting(cfg)
 	if rt.dns != nil {
 		rt.dns.SetUpstreams(cfg.DNS.Upstreams)
 		rt.dns.SetFakeIPEnabled(cfg.Egress.Mode == config.EgressProxy && cfg.DNS.FakeIP)
@@ -235,6 +253,19 @@ func (rt *daemonRuntime) applyConfig(a *App, cfg *config.Config) {
 	rt.logger.Info("配置已热应用", "egress", cfg.Egress.Mode)
 }
 
+func (rt *daemonRuntime) applyRouting(cfg *config.Config) {
+	direct, _ := buildDialer(config.EgressConfig{Mode: config.EgressDirect})
+	var proxy relay.Dialer
+	if cfg.Egress.Mode == config.EgressProxy {
+		proxy, _ = buildDialer(cfg.Egress)
+	}
+	rules := make([]relay.RouteRule, 0, len(cfg.Routing.Rules))
+	for _, rule := range cfg.Routing.Rules {
+		rules = append(rules, relay.RouteRule{Type: rule.Type, Value: rule.Value, Action: rule.Action})
+	}
+	rt.relay.SetRouting(cfg.Egress.Mode, direct, proxy, rules)
+}
+
 // bindFakeIP wires the relay's fake-ip lookup to the DNS server's pool.
 func (rt *daemonRuntime) bindFakeIP() {
 	if rt.dns == nil || rt.relay == nil {
@@ -242,6 +273,7 @@ func (rt *daemonRuntime) bindFakeIP() {
 	}
 	prefix := rt.dns.FakeIPRange()
 	rt.relay.SetFakeIP(&prefix, rt.dns.LookupFakeIP)
+	rt.relay.SetRealIPLookup(rt.dns.LookupRealIP)
 }
 
 // watchConfig polls the config file mtime and applies changes (belt; the

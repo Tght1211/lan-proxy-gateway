@@ -112,10 +112,33 @@ var systemProxyOffCmd = &cobra.Command{
 	},
 }
 
+var systemProxyTestCmd = &cobra.Command{
+	Use:   "test",
+	Short: "测试候选代理连通性(不保存配置)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		a, err := app.New()
+		if err != nil {
+			return err
+		}
+		candidate := config.EgressConfig{
+			Mode:  config.EgressProxy,
+			Proxy: config.ProxyConfig{Type: systemProxyType, Host: systemProxyHost, Port: systemProxyPort},
+		}
+		if err := a.TestEgressConfig(cmd.Context(), candidate); err != nil {
+			return fmt.Errorf("代理连通性测试失败: %w", err)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "代理连通正常: %s %s:%d\n", systemProxyType, systemProxyHost, systemProxyPort)
+		return nil
+	},
+}
+
 func init() {
 	systemProxyStatusCmd.Flags().BoolVar(&systemProxyJSON, "json", false, "JSON 输出")
 	systemProxyOnCmd.Flags().StringVar(&systemProxyType, "type", "socks5", "http|socks5")
 	systemProxyOnCmd.Flags().StringVar(&systemProxyHost, "host", "127.0.0.1", "代理地址")
 	systemProxyOnCmd.Flags().IntVar(&systemProxyPort, "port", 7897, "代理端口")
-	systemProxyCmd.AddCommand(systemProxyStatusCmd, systemProxyOnCmd, systemProxyOffCmd)
+	systemProxyTestCmd.Flags().StringVar(&systemProxyType, "type", "socks5", "http|socks5")
+	systemProxyTestCmd.Flags().StringVar(&systemProxyHost, "host", "127.0.0.1", "代理地址")
+	systemProxyTestCmd.Flags().IntVar(&systemProxyPort, "port", 7897, "代理端口")
+	systemProxyCmd.AddCommand(systemProxyStatusCmd, systemProxyOnCmd, systemProxyOffCmd, systemProxyTestCmd)
 }

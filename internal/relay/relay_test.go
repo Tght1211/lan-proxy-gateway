@@ -3,6 +3,7 @@ package relay
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -603,4 +604,196 @@ type dialerFunc func(ctx context.Context, network, addr string) (net.Conn, error
 
 func (f dialerFunc) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	return f(ctx, network, addr)
+}
+
+// ---------- proxy→direct fallback ----------
+
+func startEcho(t *testing.T) net.Listener {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go io.Copy(c, c)
+		}
+	}()
+	return ln
+}
+
+func serveAndWait(t *testing.T, srv *Server) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go srv.ListenAndServe(ctx)
+	deadline := time.Now().Add(3 * time.Second)
+	for srv.Addr() == "" && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if srv.Addr() == "" {
+		t.Fatal("server did not bind")
+	}
+}
+
+func fallbackTestServer(t *testing.T, echoLn net.Listener, proxy, direct Dialer, rules []RouteRule, learned chan<- string) *Server {
+	t.Helper()
+	orig := netip.MustParseAddrPort(echoLn.Addr().String())
+	echoIP := orig.Addr()
+	srv := New(Options{
+		ListenAddr: "127.0.0.1:0",
+		OrigDST:    OrigDSTFunc(func(c *net.TCPConn) (netip.AddrPort, error) { return orig, nil }),
+		Dialer:     proxy,
+		ViaProxy:   true,
+		OnFallbackSuccess: func(host string) {
+			select {
+			case learned <- host:
+			default:
+			}
+		},
+	})
+	// routeHost becomes a domain so the fallback learner callback applies
+	srv.SetRealIPLookup(func(ip netip.Addr) (string, bool) {
+		if ip == echoIP {
+			return "example.com", true
+		}
+		return "", false
+	})
+	srv.SetRouting(RouteProxy, direct, proxy, rules)
+	serveAndWait(t, srv)
+	return srv
+}
+
+func TestServerFallbackToDirect(t *testing.T) {
+	echoLn := startEcho(t)
+	proxy := dialerFunc(func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("proxy boom")
+	})
+	direct := dialerFunc(func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, echoLn.Addr().String())
+	})
+	learned := make(chan string, 1)
+	srv := fallbackTestServer(t, echoLn, proxy, direct, nil, learned)
+
+	conn, err := net.Dial("tcp", srv.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err := conn.Write([]byte("hi")); err != nil {
+		t.Fatal(err)
+	}
+	out := make([]byte, 2)
+	if _, err := io.ReadFull(conn, out); err != nil {
+		t.Fatalf("fallback echo read: %v", err)
+	}
+
+	select {
+	case host := <-learned:
+		if host != "example.com" {
+			t.Fatalf("learned host = %q, want example.com", host)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("fallback success callback never fired")
+	}
+
+	snap := srv.Tracker().Snapshot()
+	if len(snap.Active) != 1 {
+		t.Fatalf("active = %+v", snap.Active)
+	}
+	c := snap.Active[0]
+	if c.ViaProxy || !c.Fallback || c.DstHost != "example.com" {
+		t.Fatalf("fallback conn = %+v, want direct + fallback marked", c)
+	}
+}
+
+func TestServerNoFallbackWithExplicitProxyRule(t *testing.T) {
+	echoLn := startEcho(t)
+	proxy := dialerFunc(func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("proxy boom")
+	})
+	direct := dialerFunc(func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, echoLn.Addr().String())
+	})
+	learned := make(chan string, 1)
+	rules := []RouteRule{{Type: "domain-suffix", Value: "example.com", Action: RouteProxy}}
+	srv := fallbackTestServer(t, echoLn, proxy, direct, rules, learned)
+
+	conn, err := net.Dial("tcp", srv.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := conn.Read(make([]byte, 1)); err == nil {
+		t.Fatal("explicit proxy rule must not fall back to direct")
+	}
+
+	select {
+	case host := <-learned:
+		t.Fatalf("fallback callback fired for explicit-rule host %q", host)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		snap := srv.Tracker().Snapshot()
+		if len(snap.Recent) == 1 {
+			rec := snap.Recent[0]
+			if rec.Status != "dial_failed" || !rec.ViaProxy {
+				t.Fatalf("recent = %+v, want proxy dial_failed", rec)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("dial failure never recorded")
+}
+
+func TestServerFallbackBothFail(t *testing.T) {
+	echoLn := startEcho(t)
+	proxy := dialerFunc(func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("proxy boom")
+	})
+	direct := dialerFunc(func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("direct boom")
+	})
+	learned := make(chan string, 1)
+	srv := fallbackTestServer(t, echoLn, proxy, direct, nil, learned)
+
+	conn, err := net.Dial("tcp", srv.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, _ = conn.Read(make([]byte, 1))
+
+	select {
+	case host := <-learned:
+		t.Fatalf("fallback callback fired on double failure for %q", host)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		snap := srv.Tracker().Snapshot()
+		if len(snap.Recent) == 1 {
+			rec := snap.Recent[0]
+			if rec.Status != "dial_failed" || !rec.ViaProxy || rec.Fallback {
+				t.Fatalf("recent = %+v, want proxy dial_failed without fallback flag", rec)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("dial failure never recorded")
 }
