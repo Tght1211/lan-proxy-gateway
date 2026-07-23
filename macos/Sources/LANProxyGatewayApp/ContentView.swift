@@ -2,7 +2,10 @@ import AppKit
 import Charts
 import SwiftUI
 
-struct ThemePalette {
+struct ThemePalette: Identifiable {
+    let id: String
+    let name: String
+    let isDark: Bool
     let canvas: Color
     let sidebar: Color
     let panel: Color
@@ -15,6 +18,9 @@ struct ThemePalette {
     let muted: Color
 
     static let light = ThemePalette(
+        id: "light",
+        name: "经典浅色",
+        isDark: false,
         canvas: Color(red: 0.955, green: 0.961, blue: 0.969),
         sidebar: Color(red: 0.925, green: 0.937, blue: 0.945),
         panel: Color.white,
@@ -26,6 +32,60 @@ struct ThemePalette {
         yellow: Color(red: 0.78, green: 0.47, blue: 0.08),
         muted: Color(nsColor: .secondaryLabelColor)
     )
+
+    static let graphite = ThemePalette(
+        id: "graphite",
+        name: "石墨深色",
+        isDark: true,
+        canvas: Color(red: 0.082, green: 0.09, blue: 0.106),
+        sidebar: Color(red: 0.104, green: 0.114, blue: 0.133),
+        panel: Color(red: 0.125, green: 0.137, blue: 0.157),
+        panelRaised: Color(red: 0.16, green: 0.175, blue: 0.20),
+        border: Color(red: 0.235, green: 0.258, blue: 0.294),
+        cyan: Color(red: 0.30, green: 0.76, blue: 0.66),
+        coral: Color(red: 0.94, green: 0.45, blue: 0.40),
+        lime: Color(red: 0.55, green: 0.79, blue: 0.40),
+        yellow: Color(red: 0.94, green: 0.70, blue: 0.32),
+        muted: Color(red: 0.60, green: 0.64, blue: 0.70)
+    )
+
+    static let ocean = ThemePalette(
+        id: "ocean",
+        name: "海雾蓝",
+        isDark: false,
+        canvas: Color(red: 0.928, green: 0.947, blue: 0.965),
+        sidebar: Color(red: 0.885, green: 0.913, blue: 0.941),
+        panel: Color.white,
+        panelRaised: Color(red: 0.945, green: 0.960, blue: 0.975),
+        border: Color(red: 0.775, green: 0.828, blue: 0.878),
+        cyan: Color(red: 0.10, green: 0.36, blue: 0.65),
+        coral: Color(red: 0.78, green: 0.23, blue: 0.22),
+        lime: Color(red: 0.12, green: 0.50, blue: 0.44),
+        yellow: Color(red: 0.79, green: 0.50, blue: 0.10),
+        muted: Color(nsColor: .secondaryLabelColor)
+    )
+
+    static let cream = ThemePalette(
+        id: "cream",
+        name: "暖沙米",
+        isDark: false,
+        canvas: Color(red: 0.960, green: 0.943, blue: 0.912),
+        sidebar: Color(red: 0.928, green: 0.903, blue: 0.862),
+        panel: Color(red: 0.995, green: 0.986, blue: 0.968),
+        panelRaised: Color(red: 0.963, green: 0.948, blue: 0.922),
+        border: Color(red: 0.838, green: 0.798, blue: 0.732),
+        cyan: Color(red: 0.62, green: 0.31, blue: 0.14),
+        coral: Color(red: 0.74, green: 0.22, blue: 0.18),
+        lime: Color(red: 0.35, green: 0.51, blue: 0.25),
+        yellow: Color(red: 0.71, green: 0.49, blue: 0.10),
+        muted: Color(nsColor: .secondaryLabelColor)
+    )
+
+    static let all: [ThemePalette] = [.light, .graphite, .ocean, .cream]
+
+    static func named(_ id: String) -> ThemePalette {
+        all.first { $0.id == id } ?? .light
+    }
 }
 
 private enum Theme {
@@ -46,6 +106,15 @@ struct ContentView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
+        // Swap the palette before subviews evaluate; .id forces a full rebuild
+        // so every cached view picks up the new colors.
+        Theme.palette = ThemePalette.named(model.themeID)
+        return mainView
+            .id(model.themeID)
+            .preferredColorScheme(Theme.palette.isDark ? .dark : .light)
+    }
+
+    private var mainView: some View {
         NavigationSplitView {
             sidebar
         } detail: {
@@ -60,7 +129,6 @@ struct ContentView: View {
             .background(Theme.canvas)
         }
         .tint(Theme.cyan)
-        .preferredColorScheme(.light)
         .toolbar(.hidden, for: .windowToolbar)
         .alert("操作失败", isPresented: Binding(
             get: { model.errorMessage != nil },
@@ -2306,6 +2374,25 @@ private struct SettingsView: View {
     var body: some View {
         VStack(spacing: 16) {
             Panel {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("外观主题").font(.system(size: 13, weight: .semibold))
+                            Text("即时生效，自动记住选择").font(.caption2).foregroundStyle(Theme.muted)
+                        }
+                        Spacer()
+                    }
+                    HStack(spacing: 12) {
+                        ForEach(ThemePalette.all) { palette in
+                            ThemeCard(palette: palette, selected: model.themeID == palette.id) {
+                                model.themeID = palette.id
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+            Panel {
                 SettingsRow(title: "版本与更新", detail: model.updateStatus ?? "当前版本 v\(model.appVersion)") {
                     if model.updateAvailable {
                         Button {
@@ -2508,6 +2595,83 @@ private struct SettingsRow<Actions: View>: View {
     let title: String, detail: String
     @ViewBuilder let actions: Actions
     var body: some View { HStack { VStack(alignment: .leading, spacing: 4) { Text(title).fontWeight(.semibold); Text(detail).font(.caption).foregroundStyle(Theme.muted).lineLimit(1) }; Spacer(); HStack { actions } }.padding(.vertical, 10) }
+}
+
+// Miniature app mock-up rendered in a palette's own colors, used as the
+// theme switcher preview so users see the skin before applying it.
+private struct ThemeCard: View {
+    let palette: ThemePalette
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 7).fill(palette.canvas)
+                    HStack(spacing: 5) {
+                        RoundedRectangle(cornerRadius: 2.5)
+                            .fill(palette.sidebar)
+                            .frame(width: 22)
+                            .overlay(alignment: .top) {
+                                VStack(spacing: 3) {
+                                    Capsule().fill(palette.cyan.opacity(0.85)).frame(width: 14, height: 3)
+                                    Capsule().fill(palette.muted.opacity(0.5)).frame(width: 14, height: 3)
+                                    Capsule().fill(palette.muted.opacity(0.5)).frame(width: 14, height: 3)
+                                }
+                                .padding(.top, 7)
+                            }
+                        VStack(spacing: 4) {
+                            RoundedRectangle(cornerRadius: 2.5)
+                                .fill(palette.panel)
+                                .overlay(
+                                    HStack(spacing: 3) {
+                                        Circle().fill(palette.cyan).frame(width: 5, height: 5)
+                                        Circle().fill(palette.lime).frame(width: 5, height: 5)
+                                        Circle().fill(palette.yellow).frame(width: 5, height: 5)
+                                        Circle().fill(palette.coral).frame(width: 5, height: 5)
+                                    }
+                                )
+                                .overlay(RoundedRectangle(cornerRadius: 2.5).stroke(palette.border, lineWidth: 0.5))
+                            RoundedRectangle(cornerRadius: 2.5)
+                                .fill(palette.panel)
+                                .overlay(alignment: .bottomLeading) {
+                                    HStack(alignment: .bottom, spacing: 2.5) {
+                                        ForEach(0..<7, id: \.self) { i in
+                                            Capsule()
+                                                .fill(palette.cyan.opacity(0.75))
+                                                .frame(width: 3, height: [7, 11, 5, 13, 9, 15, 6][i])
+                                        }
+                                    }
+                                    .padding(5)
+                                }
+                                .overlay(RoundedRectangle(cornerRadius: 2.5).stroke(palette.border, lineWidth: 0.5))
+                        }
+                    }
+                    .padding(6)
+                }
+                .frame(width: 128, height: 82)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(selected ? Theme.cyan : Theme.border, lineWidth: selected ? 1.8 : 0.7)
+                )
+                .overlay(alignment: .topTrailing) {
+                    if selected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.cyan)
+                            .background(Circle().fill(palette.panel))
+                            .offset(x: 5, y: -5)
+                    }
+                }
+                Text(palette.name)
+                    .font(.system(size: 11, weight: selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? Color.primary : Theme.muted)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
 }
 
 private struct NoticeBar: View {

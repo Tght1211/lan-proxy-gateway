@@ -17,6 +17,9 @@ final class AppModel: ObservableObject {
     @Published var notice: String?
     @Published var errorMessage: String?
     @Published var coreUpgradeRecommended = false
+    @Published var themeID: String = UserDefaults.standard.string(forKey: "appThemeID") ?? "light" {
+        didSet { UserDefaults.standard.set(themeID, forKey: "appThemeID") }
+    }
 
     private let client = GatewayClient()
     private var timer: Timer?
