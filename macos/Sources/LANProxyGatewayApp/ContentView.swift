@@ -207,7 +207,6 @@ private struct OverviewView: View {
                     MetricCard("活跃设备", "\(model.activeDeviceCount)", "desktopcomputer", Theme.coral)
                 }
                 TopologyPanel()
-                FallbackLearningPanel()
                 ThroughputChart(compact: true).frame(minHeight: 270)
                 RecentStrip().frame(minHeight: 210)
             }
@@ -1052,19 +1051,20 @@ private struct ProbeHistoryStrip: View {
 private struct ConnectionsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var search = ""
-    @State private var statusFilter = "全部"
+    @State private var outcomeFilter = "全部"
     @State private var deviceFilter = "全部设备"
     @State private var routeFilter = "全部出口"
     @State private var unresolvedOnly = false
 
-    private var connections: [ConnectionInfo] {
+    // All records passing search/device/route filters; outcome chips filter on
+    // top of this so their counts stay stable while one chip is selected.
+    private var baseConnections: [ConnectionInfo] {
         let all = (model.stats?.relay.active ?? []) + (model.stats?.relay.recent ?? [])
         return all.filter { item in
             let label = model.deviceLabel(for: item.srcIP)
             let matchesSearch = search.isEmpty || item.srcIP.localizedCaseInsensitiveContains(search) ||
                 label.localizedCaseInsensitiveContains(search) || item.dstHost.localizedCaseInsensitiveContains(search) ||
                 item.service.localizedCaseInsensitiveContains(search)
-            let matchesStatus = statusFilter == "全部" || (statusFilter == "活跃" ? item.endedAt == nil : item.endedAt != nil)
             let matchesDevice = deviceFilter == "全部设备" || item.srcIP == deviceFilter
             let matchesRoute: Bool
             switch routeFilter {
@@ -1074,8 +1074,42 @@ private struct ConnectionsView: View {
             default: matchesRoute = true
             }
             let matchesResolution = !unresolvedOnly || item.service == "未解析域名"
-            return matchesSearch && matchesStatus && matchesDevice && matchesRoute && matchesResolution
+            return matchesSearch && matchesDevice && matchesRoute && matchesResolution
         }
+    }
+
+    private var connections: [ConnectionInfo] {
+        baseConnections.filter { matchesOutcome($0) }
+    }
+
+    private func outcomeName(_ item: ConnectionInfo) -> String {
+        switch item.outcome {
+        case .active: return "活跃"
+        case .success: return "成功"
+        case .noData: return "无数据"
+        case .failed: return "失败"
+        case .rejected: return "拒绝"
+        }
+    }
+
+    private func matchesOutcome(_ item: ConnectionInfo) -> Bool {
+        switch outcomeFilter {
+        case "全部": return true
+        case "回退直连": return item.fallback
+        default: return outcomeName(item) == outcomeFilter
+        }
+    }
+
+    private func outcomeCount(_ name: String) -> Int {
+        if name == "回退直连" { return baseConnections.filter(\.fallback).count }
+        return baseConnections.filter { outcomeName($0) == name }.count
+    }
+
+    private var successRateText: String {
+        let total = baseConnections.count
+        guard total > 0 else { return "--" }
+        let good = baseConnections.filter { $0.outcome == .active || $0.outcome == .success }.count
+        return "\(good * 100 / total)%"
     }
 
     private var devices: [String] {
@@ -1089,9 +1123,6 @@ private struct ConnectionsView: View {
                 TextField("搜索设备、服务或域名", text: $search).textFieldStyle(.plain)
                     .frame(minWidth: 180)
                 Divider().frame(height: 22)
-                Picker("状态", selection: $statusFilter) {
-                    Text("全部").tag("全部"); Text("活跃").tag("活跃"); Text("完成").tag("完成")
-                }.labelsHidden().pickerStyle(.segmented).frame(width: 180)
                 Picker("设备", selection: $deviceFilter) {
                     Text("全部设备").tag("全部设备")
                     ForEach(devices, id: \.self) { ip in
@@ -1108,6 +1139,36 @@ private struct ConnectionsView: View {
                 Text("\(connections.count) 条记录").font(.caption).foregroundStyle(Theme.muted)
             }
             .padding(.horizontal, 16).frame(height: 44).background(Theme.panel)
+            Divider().overlay(Theme.border)
+
+            VStack(spacing: 12) {
+                HStack(spacing: 8) {
+                    OutcomeChip(label: "全部", count: baseConnections.count, color: Theme.muted,
+                                selected: outcomeFilter == "全部") { outcomeFilter = "全部" }
+                    OutcomeChip(label: "活跃", count: outcomeCount("活跃"), color: Theme.cyan,
+                                selected: outcomeFilter == "活跃") { outcomeFilter = "活跃" }
+                    OutcomeChip(label: "成功", count: outcomeCount("成功"), color: Theme.lime,
+                                selected: outcomeFilter == "成功") { outcomeFilter = "成功" }
+                    OutcomeChip(label: "无数据", count: outcomeCount("无数据"), color: Theme.muted,
+                                selected: outcomeFilter == "无数据") { outcomeFilter = "无数据" }
+                    OutcomeChip(label: "失败", count: outcomeCount("失败"), color: Theme.yellow,
+                                selected: outcomeFilter == "失败") { outcomeFilter = "失败" }
+                    OutcomeChip(label: "拒绝", count: outcomeCount("拒绝"), color: Theme.coral,
+                                selected: outcomeFilter == "拒绝") { outcomeFilter = "拒绝" }
+                    OutcomeChip(label: "回退直连", count: outcomeCount("回退直连"), color: Theme.yellow,
+                                selected: outcomeFilter == "回退直连") { outcomeFilter = "回退直连" }
+                    Spacer(minLength: 8)
+                    HStack(spacing: 5) {
+                        Text("连接成功率").font(.caption2).foregroundStyle(Theme.muted)
+                        Text(successRateText)
+                            .font(.system(size: 13, weight: .bold, design: .monospaced))
+                            .foregroundStyle(Theme.lime)
+                    }
+                    .help("成功率 = (活跃 + 成功) / 当前筛选范围内全部记录；仅统计连接层结果，HTTPS 下看不到应用层状态码")
+                }
+                FallbackLearningPanel()
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
 
             Table(connections) {
                 TableColumn("状态") { item in
@@ -1167,6 +1228,33 @@ private struct ConnectionsView: View {
         case .failed(let reason): return "出口拨号失败：\(reason)。HTTPS 加密流量无法看到 404/502 等应用层状态码"
         case .rejected: return "被分流规则拒绝"
         }
+    }
+}
+
+private struct OutcomeChip: View {
+    let label: String
+    let count: Int
+    let color: Color
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Circle().fill(color).frame(width: 6, height: 6)
+                Text(label).font(.system(size: 11, weight: .medium))
+                Text("\(count)")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(color)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .background(selected ? color.opacity(0.14) : Theme.panel)
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(selected ? color.opacity(0.55) : Theme.border, lineWidth: 0.8))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("点击筛选\(label == "全部" ? "全部记录" : "「\(label)」的记录")")
     }
 }
 
@@ -1894,7 +1982,7 @@ private struct RoutingRulesEditor: View {
 
             if editorMode == "text" {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("每行一条：类型,值,动作。支持 Clash 风格（DOMAIN / DOMAIN-SUFFIX / IP-CIDR；DIRECT / REJECT，其他目标视为代理）。# 开头为注释，PROCESS-NAME 等不支持的类型会被跳过。")
+                    Text("每行一条：类型,值,动作。支持 Clash 风格（DOMAIN / DOMAIN-SUFFIX / IP-CIDR；DIRECT / REJECT，其他目标视为代理）。# 开头为注释；行尾 “# 自动学习” 备注表示由回退学习自动生成；PROCESS-NAME 等不支持的类型会被跳过。")
                         .font(.caption).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     TextEditor(text: $text)
@@ -2065,15 +2153,7 @@ private struct RoutingRulesEditor: View {
 
     private func syncTextToDraft() {
         let result = parseRuleLines(text)
-        let previous = draft
-        // 文本格式不表达 learned，往返时按 (类型,值,动作) 把标记带回来
-        draft = result.rules.map { rule in
-            var rule = rule
-            rule.learned = previous.contains {
-                $0.learned && $0.type == rule.type && $0.value == rule.value && $0.action == rule.action
-            }
-            return rule
-        }
+        draft = result.rules
         parseNote = result.skipped.isEmpty
             ? nil
             : "已跳过 \(result.skipped.count) 行不支持的规则：\(result.skipped.prefix(3).joined(separator: "；"))\(result.skipped.count > 3 ? " …" : "")"
@@ -2365,7 +2445,10 @@ private func egressLocation(_ identity: EgressIdentity?) -> String {
 }
 
 // Parses Clash-style rule lines ("DOMAIN-SUFFIX,example.com,DIRECT").
-// Unsupported types (PROCESS-NAME, ...) are skipped; unknown targets map to proxy.
+// Unsupported types (PROCESS-NAME, ...) are skipped; unknown targets map to
+// proxy. A trailing "# 自动学习" comment restores the learned marker.
+private let learnedRuleComment = "自动学习"
+
 private func parseRuleLines(_ text: String) -> (rules: [RoutingRule], skipped: [String]) {
     var rules: [RoutingRule] = []
     var skipped: [String] = []
@@ -2373,6 +2456,12 @@ private func parseRuleLines(_ text: String) -> (rules: [RoutingRule], skipped: [
         var line = rawLine.trimmingCharacters(in: .whitespaces)
         guard !line.isEmpty else { continue }
         if line.hasPrefix("#") || line.hasPrefix("//") { continue }
+        var learned = false
+        if let hashIndex = line.firstIndex(of: "#") {
+            let comment = line[line.index(after: hashIndex)...]
+            learned = comment.contains(learnedRuleComment)
+            line = String(line[..<hashIndex])
+        }
         line = line.trimmingCharacters(in: CharacterSet(charactersIn: "\"'，,"))
             .trimmingCharacters(in: .whitespaces)
         guard !line.isEmpty else { continue }
@@ -2402,7 +2491,7 @@ private func parseRuleLines(_ text: String) -> (rules: [RoutingRule], skipped: [
             default: action = "proxy"
             }
         }
-        rules.append(RoutingRule(type: type, value: parts[1], action: action))
+        rules.append(RoutingRule(type: type, value: parts[1], action: action, learned: learned))
     }
     return (rules, skipped)
 }
@@ -2422,7 +2511,7 @@ private func serializeRuleLines(_ rules: [RoutingRule]) -> String {
         case "reject": action = "REJECT"
         default: action = "PROXY"
         }
-        return "\(type),\(rule.value),\(action)"
+        return "\(type),\(rule.value),\(action)\(rule.learned ? " # \(learnedRuleComment)" : "")"
     }.joined(separator: "\n")
 }
 
