@@ -52,6 +52,8 @@ curl -fsSL https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/ins
 sudo gateway install
 ```
 
+`sudo` 只在这一步需要：防火墙规则、IP 转发和 53 端口监听要求管理员权限。安装时选择开机自启后，守护进程由系统自动以特权拉起，日常查看状态、改分流规则、测试代理都不再需要 `sudo`。
+
 也可以从源码构建：
 
 ```bash
