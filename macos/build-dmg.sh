@@ -53,7 +53,11 @@ cp "$MACOS_DIR/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $PLIST_VERSION" "$APP_BUNDLE/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP_BUNDLE/Contents/Info.plist"
 
-swift "$MACOS_DIR/scripts/generate_icon.swift" "$TEMP_DIR/icon-1024.png"
+if [[ -f "$MACOS_DIR/AppIcon-1024.png" ]]; then
+    cp "$MACOS_DIR/AppIcon-1024.png" "$TEMP_DIR/icon-1024.png"
+else
+    swift "$MACOS_DIR/scripts/generate_icon.swift" "$TEMP_DIR/icon-1024.png"
+fi
 ICONSET="$TEMP_DIR/AppIcon.iconset"
 mkdir -p "$ICONSET"
 for spec in "16:icon_16x16.png" "32:icon_16x16@2x.png" "32:icon_32x32.png" "64:icon_32x32@2x.png" "128:icon_128x128.png" "256:icon_128x128@2x.png" "256:icon_256x256.png" "512:icon_256x256@2x.png" "512:icon_512x512.png" "1024:icon_512x512@2x.png"; do
