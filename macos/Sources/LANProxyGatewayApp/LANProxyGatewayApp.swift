@@ -10,6 +10,7 @@ struct LANProxyGatewayApp: App {
                 .environmentObject(model)
                 .frame(minWidth: 1080, minHeight: 700)
         }
+        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 820)
 
         MenuBarExtra {
