@@ -183,7 +183,6 @@ struct ContentView: View {
             .background(Theme.canvasBackground)
         }
         .tint(Theme.cyan)
-        .toolbar(.hidden, for: .windowToolbar)
         .alert("操作失败", isPresented: Binding(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
@@ -215,7 +214,8 @@ struct ContentView: View {
                 Spacer()
             }
             .padding(.horizontal, 16)
-            .frame(height: 68)
+            .padding(.top, 26)
+            .frame(height: 92)
 
             List(AppSection.allCases, selection: $model.selectedSection) { section in
                 Label(section.rawValue, systemImage: section.systemImage)
