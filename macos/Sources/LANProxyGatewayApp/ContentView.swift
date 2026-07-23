@@ -2529,20 +2529,25 @@ private struct LiveLogView: View {
     private let bottomID = "log-bottom"
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView([.horizontal, .vertical], showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(text)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Color.primary.opacity(0.78))
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: true, vertical: true)
-                    Color.clear.frame(height: 1).id(bottomID)
+        // Two-axis ScrollViews center content narrower than the viewport;
+        // pin the log block to at least viewport width, leading-aligned.
+        GeometryReader { geo in
+            ScrollViewReader { proxy in
+                ScrollView([.horizontal, .vertical], showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(text)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(Color.primary.opacity(0.78))
+                            .textSelection(.enabled)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: true, vertical: true)
+                        Color.clear.frame(height: 1).id(bottomID)
+                    }
+                    .frame(minWidth: geo.size.width, alignment: .topLeading)
                 }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .onAppear { scrollToBottom(proxy, animated: false) }
+                .onChange(of: text) { _ in scrollToBottom(proxy, animated: true) }
             }
-            .onAppear { scrollToBottom(proxy, animated: false) }
-            .onChange(of: text) { _ in scrollToBottom(proxy, animated: true) }
         }
         .frame(minHeight: 180, maxHeight: .infinity)
         .clipped()
