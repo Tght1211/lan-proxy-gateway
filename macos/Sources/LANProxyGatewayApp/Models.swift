@@ -26,8 +26,26 @@ struct RoutingRule: Codable, Identifiable, Equatable {
     var type: String
     var value: String
     var action: String
+    var learned: Bool
 
-    enum CodingKeys: String, CodingKey { case type, value, action }
+    init(id: UUID = UUID(), type: String, value: String, action: String, learned: Bool = false) {
+        self.id = id
+        self.type = type
+        self.value = value
+        self.action = action
+        self.learned = learned
+    }
+
+    enum CodingKeys: String, CodingKey { case type, value, action, learned }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = UUID()
+        type = try values.decode(String.self, forKey: .type)
+        value = try values.decode(String.self, forKey: .value)
+        action = try values.decode(String.self, forKey: .action)
+        learned = try values.decodeIfPresent(Bool.self, forKey: .learned) ?? false
+    }
 }
 
 struct DNSStatus: Decodable {
@@ -126,11 +144,17 @@ struct ConnectionInfo: Decodable, Identifiable {
     let endedAt: Date?
     let viaProxy: Bool
     let rejected: Bool
+    let status: String
+    let failure: String
+    let fallback: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, up, down
         case service
         case rejected
+        case status
+        case failure
+        case fallback
         case srcIP = "src_ip"
         case dstHost = "dst_host"
         case dstPort = "dst_port"
@@ -153,7 +177,40 @@ struct ConnectionInfo: Decodable, Identifiable {
         endedAt = try values.decodeIfPresent(Date.self, forKey: .endedAt)
         viaProxy = try values.decodeIfPresent(Bool.self, forKey: .viaProxy) ?? false
         rejected = try values.decodeIfPresent(Bool.self, forKey: .rejected) ?? false
+        status = try values.decodeIfPresent(String.self, forKey: .status) ?? (rejected ? "rejected" : "")
+        failure = try values.decodeIfPresent(String.self, forKey: .failure) ?? ""
+        fallback = try values.decodeIfPresent(Bool.self, forKey: .fallback) ?? false
     }
+
+    var outcome: ConnectionOutcome {
+        if status == "rejected" || rejected { return .rejected }
+        if status == "dial_failed" { return .failed(failure.nonEmptyValue ?? "连接失败") }
+        if endedAt == nil { return .active }
+        if up + down == 0 { return .noData }
+        return .success
+    }
+}
+
+enum ConnectionOutcome: Equatable {
+    case active
+    case success
+    case noData
+    case failed(String)
+    case rejected
+
+    var label: String {
+        switch self {
+        case .active: return "活跃"
+        case .success: return "成功"
+        case .noData: return "无数据"
+        case .failed(let reason): return "失败·\(reason)"
+        case .rejected: return "拒绝"
+        }
+    }
+}
+
+private extension String {
+    var nonEmptyValue: String? { isEmpty ? nil : self }
 }
 
 struct TrafficPoint: Decodable, Identifiable {
@@ -258,11 +315,8 @@ struct ProbePoint: Decodable, Identifiable {
 
 enum AppSection: String, CaseIterable, Identifiable {
     case overview = "网络总览"
-    case services = "服务分析"
-    case devices = "局域网设备"
-    case stability = "稳定性"
+    case devices = "设备与服务"
     case connections = "访问记录"
-    case proxy = "出口设置"
     case settings = "设置"
 
     var id: String { rawValue }
@@ -270,11 +324,8 @@ enum AppSection: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .overview: return "command"
-        case .services: return "square.stack.3d.up.fill"
         case .devices: return "desktopcomputer.and.macbook"
-        case .stability: return "dot.radiowaves.left.and.right"
         case .connections: return "list.bullet.rectangle.portrait"
-        case .proxy: return "arrow.triangle.branch"
         case .settings: return "gearshape"
         }
     }

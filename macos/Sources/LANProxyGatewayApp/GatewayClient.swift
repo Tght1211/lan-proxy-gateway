@@ -86,6 +86,13 @@ struct GatewayClient {
         )
     }
 
+    func testProxy(type: String, host: String, port: Int) async throws -> String {
+        try await output(
+            arguments: ["system-proxy", "test", "--type", type, "--host", host, "--port", String(port)],
+            privileged: false
+        )
+    }
+
     func setDirect() async throws -> String {
         try await output(arguments: ["system-proxy", "off"], privileged: true)
     }

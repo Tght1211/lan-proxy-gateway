@@ -21,6 +21,7 @@ final class AppModel: ObservableObject {
     private let client = GatewayClient()
     private var timer: Timer?
     private var isRefreshing = false
+    private var isLiveScrolling = false
     private var didLoadProxyConfig = false
     private var noticeTask: Task<Void, Never>?
     private let deviceLabelsKey = "deviceLabels"
@@ -29,8 +30,17 @@ final class AppModel: ObservableObject {
         if let stored = UserDefaults.standard.dictionary(forKey: deviceLabelsKey) as? [String: String] {
             deviceLabels = stored
         }
+        NotificationCenter.default.addObserver(forName: NSScrollView.willStartLiveScrollNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.isLiveScrolling = true
+        }
+        NotificationCenter.default.addObserver(forName: NSScrollView.didEndLiveScrollNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.isLiveScrolling = false
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.refresh(silent: true) }
+            Task { @MainActor in
+                guard let self, !self.isLiveScrolling else { return }
+                await self.refresh(silent: true)
+            }
         }
         Task { await refresh(silent: true) }
     }
@@ -103,20 +113,54 @@ final class AppModel: ObservableObject {
         }
     }
 
+    @discardableResult
+    func applyProxyAsync() async -> Bool {
+        let host = proxyHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty, (1...65535).contains(proxyPort) else {
+            errorMessage = "请输入有效的代理地址和端口。"
+            return false
+        }
+        return await performAsync("代理出口已更新") {
+            try await self.client.setProxy(type: self.proxyType, host: host, port: self.proxyPort)
+        }
+    }
+
+    @discardableResult
+    func useDirectConnectionAsync() async -> Bool {
+        await performAsync("已切换为直连出口") { try await self.client.setDirect() }
+    }
+
+    func testProxyAsync() async -> (ok: Bool, message: String) {
+        let host = proxyHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty, (1...65535).contains(proxyPort) else {
+            return (false, "请输入有效的代理地址和端口")
+        }
+        do {
+            _ = try await client.testProxy(type: proxyType, host: host, port: proxyPort)
+            return (true, "代理连通正常")
+        } catch {
+            return (false, error.localizedDescription)
+        }
+    }
+
     func useDirectConnection() {
         perform("已切换为直连出口") { try await self.client.setDirect() }
     }
 
     @discardableResult
     func applyRoutingRules(_ rules: [RoutingRule]) async -> Bool {
+        await performAsync("分流规则已更新") { try await self.client.setRoutingRules(rules) }
+    }
+
+    private func performAsync(_ success: String, operation: @escaping () async throws -> String) async -> Bool {
         guard !isBusy else { return false }
         isBusy = true
         notice = nil
         errorMessage = nil
         defer { isBusy = false }
         do {
-            _ = try await client.setRoutingRules(rules)
-            showNotice("分流规则已更新")
+            _ = try await operation()
+            showNotice(success)
             await refresh(silent: true)
             return true
         } catch {
@@ -162,6 +206,41 @@ final class AppModel: ObservableObject {
         Task {
             let latestLog = await client.readLog(path: path)
             if latestLog != logText { logText = latestLog }
+        }
+    }
+
+    var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+    }
+
+    @Published var updateStatus: String?
+    @Published var updateAvailable = false
+    @Published var isCheckingUpdate = false
+
+    func checkForUpdates() {
+        guard !isCheckingUpdate else { return }
+        isCheckingUpdate = true
+        updateStatus = "正在检查..."
+        updateAvailable = false
+        Task {
+            defer { isCheckingUpdate = false }
+            do {
+                var request = URLRequest(url: URL(string: "https://api.github.com/repos/Tght1211/lan-proxy-gateway/releases/latest")!)
+                request.setValue("lan-proxy-gateway-app", forHTTPHeaderField: "User-Agent")
+                request.timeoutInterval = 15
+                let (data, _) = try await URLSession.shared.data(for: request)
+                struct Release: Decodable { let tag_name: String }
+                let latest = try JSONDecoder().decode(Release.self, from: data).tag_name
+                let current = appVersion.hasPrefix("v") ? appVersion : "v\(appVersion)"
+                if latest == current || latest == appVersion {
+                    updateStatus = "已是最新版本（\(latest)）"
+                } else {
+                    updateStatus = "发现新版本 \(latest)，当前 \(current)"
+                    updateAvailable = true
+                }
+            } catch {
+                updateStatus = "检查失败：\(error.localizedDescription)"
+            }
         }
     }
 
