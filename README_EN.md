@@ -1,158 +1,100 @@
 # LAN Proxy Gateway
 
-[![Release](https://img.shields.io/github/v/release/Tght1211/lan-proxy-gateway)](https://github.com/Tght1211/lan-proxy-gateway/releases)
+[![Release](https://img.shields.io/github/v/release/Tght1211/lan-proxy-gateway)](https://github.com/Tght1211/lan-proxy-gateway/releases/latest)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)]()
 [![License](https://img.shields.io/github/license/Tght1211/lan-proxy-gateway)](LICENSE)
 
-Turn a Mac mini or small Linux computer into a LAN gateway. Switch, PS5, Apple TV, iPhone, and other devices can share an existing Clash/sing-box proxy without installing proxy apps: configure only a static IP, gateway, and DNS.
+Turn an always-on Mac mini or small Linux host into a LAN gateway. Switch, PS5, Apple TV, phones, and TVs can reuse an existing Clash, Mihomo, sing-box, or HTTP/SOCKS5 proxy by pointing their gateway and DNS at this host. No proxy app is needed on the client device.
 
-The project targets low-power, always-on computers and can also manage the host's macOS system proxy. It reuses an existing Clash, Mihomo, or sing-box service locally or elsewhere on the LAN; it does not provide proxy nodes.
+> [!IMPORTANT]
+> This project provides no proxy nodes, subscriptions, or streaming unlocks. Service availability depends on your external proxy software and node.
 
-The project intentionally has two responsibilities:
+[中文](README.md) · [Latest release](https://github.com/Tght1211/lan-proxy-gateway/releases/latest) · [Documentation](docs/README.md)
 
-- **LAN gateway:** devices point their gateway and DNS at this host; TCP exits directly or through one HTTP/SOCKS5 upstream.
-- **macOS system proxy:** enable or disable the host's HTTP+HTTPS or SOCKS5 proxy settings.
+<p align="center">
+  <img src="docs/images/app-network-overview.png" alt="Network overview with gateway status, traffic topology, and network quality" width="49%">
+  <img src="docs/images/app-devices-services.png" alt="Connected devices and service traffic" width="49%">
+  <img src="docs/images/app-access-log.png" alt="Live connections and result filters" width="49%">
+  <img src="docs/images/app-settings.png" alt="Themes, updates, and runtime options" width="49%">
+</p>
 
-Run Clash, Mihomo, or sing-box separately for VLESS, subscriptions, node selection, and routing rules, then configure its local HTTP/SOCKS5 port as the upstream.
+## Features
 
-Access to a particular external site depends entirely on that proxy service and its selected node. Gateway provides no proxy nodes. Enabling the macOS system proxy also makes LAN gateway traffic use the same proxy endpoint.
+- **LAN gateway:** route client IPv4 TCP traffic directly or through one HTTP/SOCKS5 upstream.
+- **Original-domain forwarding:** fake-IP preserves domains for Clash/sing-box routing without requiring TUN mode.
+- **Lightweight routing:** ordered domain, domain-suffix, and IP-CIDR rules can select proxy, direct, or reject behavior, with automatic learning from successful direct fallbacks.
+- **Native macOS app:** inspect traffic topology, clients, services, connection outcomes, and network quality; manage rules, proxy settings, and the gateway core.
+- **Native networking:** `pf` on macOS and `iptables` on Linux, with precise cleanup of rules and system state on shutdown.
 
-中文: [README.md](README.md)
+LAN Proxy Gateway is designed for an always-on computer with an existing proxy application or HTTP/SOCKS5 endpoint. It does not target Windows, consumer routers/OpenWrt, IPv6 transparent proxying, or proxied game/voice UDP. Proxy mode rejects QUIC (UDP/443) so clients fall back to TCP; other UDP remains direct.
 
-## Intended audience
+## Quick start
 
-This project is for users who:
+### 1. Install
 
-- keep a low-power Mac mini or small Linux computer online;
-- already run Clash, Mihomo, or sing-box, or have a reachable HTTP/SOCKS5 endpoint on the LAN;
-- want phones, TVs, and consoles to reuse that proxy software by changing only gateway and DNS settings;
-- prefer a focused gateway that does not duplicate subscriptions, nodes, or routing rules.
+On macOS, download the DMG from [GitHub Releases](https://github.com/Tght1211/lan-proxy-gateway/releases/latest). The app and CLI share the same `gateway` core.
 
-It is not intended for Windows, consumer routers/OpenWrt, built-in proxy services, general game/voice UDP proxying, or IPv6 transparent routing.
-
-## How it works
-
-```mermaid
-flowchart LR
-    DEV[LAN devices<br/>phones / TVs / consoles]
-    DNS[Gateway DNS<br/>fake-IP in proxy mode]
-    FW[pf / iptables<br/>TCP capture]
-    RELAY[Transparent relay<br/>domain recovery]
-    PROXY[Clash / Mihomo / sing-box<br/>nodes and routing rules]
-    NET[Internet]
-
-    DEV -->|gateway + DNS = host| DNS
-    DEV --> FW --> RELAY
-    DNS -. fake-IP mapping .-> RELAY
-    RELAY -->|SOCKS5 / HTTP CONNECT| PROXY --> NET
-```
-
-```mermaid
-sequenceDiagram
-    participant D as LAN device
-    participant G as gateway
-    participant P as External proxy software
-    participant I as Destination
-
-    D->>G: Resolve www.youtube.com
-    G-->>D: Return fake-IP
-    D->>G: Connect to fake-IP:443
-    G->>G: Recover www.youtube.com
-    G->>P: CONNECT using original domain
-    P->>P: Apply node and routing rules
-    P->>I: Open outbound connection
-    I-->>D: Return TCP traffic
-```
-
-Gateway neither provides proxy nodes nor chooses routes. It reliably hands LAN TCP traffic and original domains to the existing proxy software. In proxy mode, QUIC (UDP/443) is rejected so clients immediately fall back to proxyable TCP. Neither gateway nor the external proxy needs TUN mode.
-
-## Real-device results
-
-With the same upstream proxy, Fast.com measured about `320 Mbps` on a PC using the third-party proxy directly and about `400 Mbps` on a LAN phone using gateway. Speed tests fluctuate with time and node conditions; this comparison demonstrates that gateway does not impose a fixed throughput ceiling, not that it can make the physical connection faster.
-
-| PC using the third-party proxy directly | LAN phone using the same proxy through gateway |
-|---|---|
-| <img src="docs/images/direct-proxy-fast-test.jpg" alt="PC direct proxy Fast.com result: 320 Mbps" width="480"> | <img src="docs/images/gateway-phone-fast-test.jpg" alt="Phone through gateway Fast.com result: 400 Mbps" width="300"> |
-
-A Switch can reuse the configured HTTP/SOCKS5 endpoint by pointing its gateway and DNS at the gateway host. This real-device connection test measured approximately `72.0 Mbps` down and `8.9 Mbps` up.
-
-![Nintendo Switch network test through the gateway](docs/images/switch-speed-test.jpg)
-
-With the proxy egress enabled, the Switch can access YouTube. Game downloads can also improve when the external proxy node has a better route to Nintendo's download servers.
-
-![Nintendo Switch accessing YouTube through the gateway](docs/images/switch-youtube.jpg)
-
-Throughput, NAT type, content availability, and download improvements depend on Wi-Fi, ISP, external proxy software, node quality, and routing rules. Gateway itself provides neither proxy nodes nor streaming-unlock services.
-
-## Upgrading from v3 to v4
-
-v4 is a complete rewrite rather than an in-place compatible update. The bundled mihomo engine, subscriptions, nodes, rule sets, WebUI, old dashboard, and Windows build have been removed. Existing configuration is backed up and v4 requires initialization again. Move all proxy nodes and routing rules to a separately running Clash, Mihomo, or sing-box service before running `gateway update`.
-
-## Install
+For the CLI on macOS or Linux:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.sh | bash
+sudo gateway install
 ```
 
-Or build locally:
+Administrator access is required to bind DNS, enable IP forwarding, and configure the firewall. Routine status and configuration commands do not require persistent root access after service installation.
 
-```bash
-make build
-sudo make install
-```
+### 2. Configure egress
 
-## Terminal control panel
-
-Run `sudo gateway` to open the focused control panel (gateway lifecycle and macOS proxy changes require administrator privileges):
+Set the proxy in the app, or run `sudo gateway` and choose **Set proxy**. A proxy on the same host commonly looks like this; use the actual port shown by your proxy software:
 
 ```text
-1  Start/stop gateway (one action based on current state)
-2  Set proxy (SOCKS5 / HTTP / direct)
-3  Show device settings
-4  Show recent logs
-Q  Exit
+Type     HTTP
+Address  127.0.0.1
+Port     7897
 ```
 
-## LAN gateway
+Direct egress is also supported when you only need a LAN gateway.
+
+### 3. Connect a device
+
+Run `gateway status`, then enter the reported values on the phone, TV, or console:
+
+| Device setting | Value |
+|---|---|
+| IP configuration | Manual / static |
+| IP address | An unused address in the same subnet; unique per device |
+| Subnet mask | `255.255.255.0`; usually prefix length `24` on Android |
+| Gateway / router | Gateway host's LAN IP |
+| DNS 1 | Gateway host's LAN IP |
+| DNS 2 | Same value, or blank if duplicates are rejected |
+| Device proxy | None / disabled |
+
+Reconnect Wi-Fi and run `gateway status` again. Only the device IP differs between clients; gateway and DNS always use the gateway host's IP.
+
+Detailed device guides are available from the [documentation index](docs/README.md). Troubleshooting is covered in the [FAQ](docs/faq.md).
+
+## Documentation
+
+| Topic | Links |
+|---|---|
+| Device setup | [Overview](docs/device-setup.md) · [Phone](docs/phone-setup.md) · [Switch](docs/switch-setup.md) · [PS5](docs/ps5-setup.md) · [Apple TV](docs/appletv-setup.md) · [TV](docs/tv-setup.md) |
+| Operation | [macOS app](docs/app.md) · [Commands](docs/commands.md) · [Configuration](docs/advanced.md) · [Scenarios](docs/scenarios.md) |
+| Internals | [Architecture](docs/architecture.md) · [Real-device results](docs/real-device-results.md) · [FAQ](docs/faq.md) |
+| Upgrade and automation | [v3 migration](docs/migration-v4.md) · [AI-assisted setup](docs/ai-setup.md) · [Changelog](CHANGELOG.md) |
+
+Most detailed guides are currently written in Chinese. Start from [docs/README.md](docs/README.md).
+
+## Build from source
 
 ```bash
-sudo gateway install
-sudo gateway start
-gateway status
-
+make build       # CLI
+make test        # Go tests
+make build-app   # macOS app
 ```
 
-Use a manual/static address on each LAN device. The device IP must be an unused address in the same subnet and must differ between devices. Set Gateway/Router, DNS 1, and DNS 2 to the gateway host's LAN IPv4 address; leave DNS 2 empty only when the device rejects duplicate values. Use prefix length `24` on Android (`255.255.255.0` elsewhere), disable Private DNS, and leave the device-level proxy disabled. Treat the IP suggested by `gateway status` as a recommendation and reserve or verify it before use.
-
-Proxy mode uses fake-IP so the relay can pass original domains to Clash/sing-box for resolution and rule matching. DNS queries sent to other resolvers are not hijacked. UDP/443 is rejected so browsers fall back to TCP, while other UDP remains direct. This setup does not require TUN mode in gateway or the third-party proxy.
-
-## macOS system proxy
-
-```bash
-gateway system-proxy status
-gateway system-proxy on --type socks5 --host 127.0.0.1 --port 7897
-gateway system-proxy on --type http --host 127.0.0.1 --port 7897
-gateway system-proxy off
-```
-
-The HTTP mode configures both HTTP and HTTPS Web Proxy settings. Enabling either mode disables the other one and synchronizes the LAN gateway egress. Turning it off returns LAN traffic to direct mode.
-
-See [docs/commands.md](docs/commands.md) and [docs/architecture.md](docs/architecture.md) for details.
-
-## Scope
-
-- Gateway mode supports macOS and Linux, focused on IPv4 TCP.
-- No subscriptions, node selection, rule sets, WebUI, traffic dashboard, UDP proxying, or TUN mode.
-- Only macOS and Linux builds are provided.
-- Consumer routers and OpenWrt are not deployment targets; use a complete always-on computer OS.
+See the [app guide](docs/app.md) and [architecture](docs/architecture.md) for packaging and repository structure.
 
 ## License
 
 [MIT](LICENSE) © 2025-2026 [Tght1211](https://github.com/Tght1211)
-
-## Star History
-
-[![Star History Chart](docs/images/star-history.svg)](https://star-history.com/#Tght1211/lan-proxy-gateway&Date)
-
-[Open the online Star History](https://star-history.com/#Tght1211/lan-proxy-gateway&Date). The embedded repository-local chart is generated from GitHub Stargazer data so a third-party image outage cannot leave the README broken.

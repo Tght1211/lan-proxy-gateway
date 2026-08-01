@@ -38,7 +38,16 @@ gateway system-proxy off
 
 这些命令通过 `networksetup` 修改 macOS 网络服务。HTTP 模式同时设置 HTTP 和 HTTPS 代理；启用 HTTP 或 SOCKS5 时会关闭另一种模式，并把同一地址同步为旁路由上游。执行 `off` 时旁路由切回直连。
 
-是否能访问特定外网取决于该地址背后的代理服务和节点。gateway 不实现规则或节点选择。
+是否能访问特定外网主要取决于该地址背后的代理服务和节点。gateway 支持域名 / IP-CIDR 的轻量分流，但不负责订阅、节点选择或复杂规则集。
+
+## 分流规则
+
+```bash
+gateway routing list [--json]
+gateway routing set --rules-json '[{"type":"domain-suffix","value":"example.com","action":"direct"}]'
+```
+
+规则按顺序首次命中，类型支持 `domain`、`domain-suffix`、`ip-cidr`，动作支持 `proxy`、`direct`、`reject`。macOS App 提供可视化编辑器，日常使用不必手写 JSON。
 
 ## 开机自启
 

@@ -1,6 +1,6 @@
 # 架构
 
-项目只管理 LAN 旁路由和 macOS 系统代理。两者复用同一个 HTTP/SOCKS5 代理地址，规则与节点由外部代理软件负责。
+项目管理 LAN 旁路由和 macOS 系统代理。两者复用同一个 HTTP/SOCKS5 代理地址。gateway 提供少量有序分流规则；订阅、节点选择和复杂规则集仍由外部代理软件负责。
 
 部署目标是常驻的 Mac mini 或完整 Linux 小主机，不是普通路由器/OpenWrt，也不内置第三方代理软件。
 
@@ -19,9 +19,13 @@ LAN DNS 查询 -> 内置 DNS 转发器 -> 上游 DNS
 - Linux 使用 iptables `REDIRECT` 与 `SO_ORIGINAL_DST`。
 - 单接口 macOS 即使选择直连，也让 TCP 经过 relay，避免同接口 pf NAT 无法正确回包。
 - 代理模式阻断 UDP/443，让浏览器从 QUIC 回退到可代理的 TCP。
-- 默认不开启 fake-IP 和 DNS 劫持；相关字段保留用于旧配置兼容和内部实现。
+- 代理模式默认启用 fake-IP，把原始域名交给上游代理解析和分流；默认不劫持设备主动发往其他 DNS 的查询。
+- 有序规则支持 `domain`、`domain-suffix`、`ip-cidr` 匹配，并选择 `proxy`、`direct` 或 `reject`。没有显式规则时使用当前出口。
+- 默认代理拨号失败而直连成功的域名可以进入回退学习，并在达到阈值后生成可删除的直连规则。
 
 `gateway start` 启动脱离终端的 `gateway run` 守护进程。守护进程负责防火墙、DNS、relay、配置热加载和本机回环状态 API。`gateway stop` 会拆除规则并恢复由本程序开启的 IP 转发/pf 状态。
+
+原生 macOS App 通过本机回环状态 API 读取流量、设备、服务、网络质量和连接结果。连接历史只保存在守护进程内存中，不是远程 WebUI。
 
 ## macOS 系统代理
 
@@ -50,4 +54,4 @@ internal/systemproxy/ macOS 系统代理
 
 ## 不在范围内
 
-订阅、节点管理、分流规则、WebUI、实时流量面板和 UDP 代理均不在项目范围内。
+代理订阅、节点管理、复杂规则集、远程 WebUI、TUN、IPv6 透明代理和通用 UDP 代理均不在项目范围内。
