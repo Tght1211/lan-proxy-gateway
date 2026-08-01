@@ -56,6 +56,67 @@ egress:
 	}
 }
 
+func TestParseHealsUnsafeProxyConfig(t *testing.T) {
+	// v4.0.0 persisted fake_ip: false as its default; such configs break
+	// domain routing behind mainland DNS and must self-heal on load.
+	cfg, err := Parse([]byte(`
+version: 4
+egress:
+  mode: proxy
+  proxy:
+    type: http
+    host: 127.0.0.1
+    port: 7897
+dns:
+  enabled: true
+  fake_ip: false
+quic_block: false
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.DNS.FakeIP || !cfg.QUICBlock {
+		t.Fatalf("proxy mode must force fake_ip and quic_block on: %+v", cfg)
+	}
+}
+
+func TestRoutingRuleGroupRoundtrip(t *testing.T) {
+	cfg, err := Parse([]byte(`
+version: 4
+egress:
+  mode: direct
+routing:
+  rules:
+    - type: domain-suffix
+      value: youtube.com
+      action: proxy
+      group: " YouTube "
+    - type: domain-suffix
+      value: example.com
+      action: direct
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Routing.Rules[0].Group != "YouTube" {
+		t.Fatalf("group not trimmed: %q", cfg.Routing.Rules[0].Group)
+	}
+	if cfg.Routing.Rules[1].Group != "" {
+		t.Fatalf("unexpected group: %q", cfg.Routing.Rules[1].Group)
+	}
+	path := filepath.Join(t.TempDir(), "gateway.yaml")
+	if err := Save(cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Routing.Rules[0].Group != "YouTube" || got.Routing.Rules[1].Group != "" {
+		t.Fatalf("group lost in roundtrip: %+v", got.Routing.Rules)
+	}
+}
+
 func TestParseIgnoresExperimentalUDPFieldsAndKeepsQUICBlocked(t *testing.T) {
 	cfg, err := Parse([]byte(`
 version: 4

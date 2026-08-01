@@ -26,17 +26,19 @@ struct RoutingRule: Codable, Identifiable, Equatable {
     var type: String
     var value: String
     var action: String
+    var group: String
     var learned: Bool
 
-    init(id: UUID = UUID(), type: String, value: String, action: String, learned: Bool = false) {
+    init(id: UUID = UUID(), type: String, value: String, action: String, group: String = "", learned: Bool = false) {
         self.id = id
         self.type = type
         self.value = value
         self.action = action
+        self.group = group
         self.learned = learned
     }
 
-    enum CodingKeys: String, CodingKey { case type, value, action, learned }
+    enum CodingKeys: String, CodingKey { case type, value, action, group, learned }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -44,6 +46,7 @@ struct RoutingRule: Codable, Identifiable, Equatable {
         type = try values.decode(String.self, forKey: .type)
         value = try values.decode(String.self, forKey: .value)
         action = try values.decode(String.self, forKey: .action)
+        group = try values.decodeIfPresent(String.self, forKey: .group) ?? ""
         learned = try values.decodeIfPresent(Bool.self, forKey: .learned) ?? false
     }
 }
@@ -89,12 +92,51 @@ struct RuntimeStats: Decodable {
     let dns: DNSStats?
     let health: HealthStats
     let fallback: FallbackStats?
+    let egressHealth: EgressHealthStats?
 
     enum CodingKeys: String, CodingKey {
         case egress, proxy, relay, dns, health, fallback
         case schemaVersion = "schema_version"
         case uptimeSec = "uptime_sec"
+        case egressHealth = "egress_health"
     }
+}
+
+struct EgressHealthStats: Decodable {
+    let proxyDown: Bool
+    let since: Date?
+    let actions: [EgressAction]
+    let alerts: [String]
+    let directFailures: [DirectFailure]
+
+    enum CodingKeys: String, CodingKey {
+        case actions, alerts
+        case proxyDown = "proxy_down"
+        case since
+        case directFailures = "direct_failures"
+    }
+
+    init(from decoder: Decoder) throws {
+        let v = try decoder.container(keyedBy: CodingKeys.self)
+        proxyDown = try v.decodeIfPresent(Bool.self, forKey: .proxyDown) ?? false
+        since = try v.decodeIfPresent(Date.self, forKey: .since)
+        actions = try v.decodeIfPresent([EgressAction].self, forKey: .actions) ?? []
+        alerts = try v.decodeIfPresent([String].self, forKey: .alerts) ?? []
+        directFailures = try v.decodeIfPresent([DirectFailure].self, forKey: .directFailures) ?? []
+    }
+}
+
+struct EgressAction: Decodable, Identifiable {
+    let at: Date
+    let text: String
+    var id: String { "\(at.timeIntervalSince1970)-\(text)" }
+}
+
+struct DirectFailure: Decodable, Identifiable {
+    let device: String
+    let host: String
+    let reason: String
+    var id: String { "\(device)-\(host)" }
 }
 
 struct FallbackStats: Decodable {

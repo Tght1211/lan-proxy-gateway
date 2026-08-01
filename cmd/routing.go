@@ -58,8 +58,11 @@ var routingListCmd = &cobra.Command{
 		}
 		for i, rule := range rules {
 			marker := ""
+			if rule.Group != "" {
+				marker += "  [" + rule.Group + "]"
+			}
 			if rule.Learned {
-				marker = "  [自动学习]"
+				marker += "  [自动学习]"
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "%2d. %-14s %-40s %s%s\n", i+1, rule.Type, rule.Value, rule.Action, marker)
 		}

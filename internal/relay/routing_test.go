@@ -21,13 +21,13 @@ func TestRoutingPolicyFirstMatchWins(t *testing.T) {
 			{Type: "domain-suffix", Value: "example.com", Action: RouteDirect},
 		}),
 	}
-	if _, _, rejected, _ := p.selectDialer("api.example.com", netip.Addr{}); !rejected {
+	if _, _, rejected, _ := p.selectDialer("", "api.example.com", netip.Addr{}); !rejected {
 		t.Fatal("exact rule should reject before suffix rule")
 	}
-	if got, viaProxy, _, _ := p.selectDialer("www.example.com", netip.Addr{}); got != direct || viaProxy {
+	if got, viaProxy, _, _ := p.selectDialer("", "www.example.com", netip.Addr{}); got != direct || viaProxy {
 		t.Fatal("suffix rule should use direct")
 	}
-	if got, viaProxy, _, _ := p.selectDialer("other.test", netip.Addr{}); got != proxy || !viaProxy {
+	if got, viaProxy, _, _ := p.selectDialer("", "other.test", netip.Addr{}); got != proxy || !viaProxy {
 		t.Fatal("unmatched host should use default proxy")
 	}
 }
@@ -44,17 +44,17 @@ func TestRoutingPolicyIPCIDR(t *testing.T) {
 			{Type: "ip-cidr", Value: "203.0.113.0/24", Action: RouteReject},
 		}),
 	}
-	if got, _, _, _ := p.selectDialer("10.1.2.3", netip.MustParseAddr("10.1.2.3")); got != direct {
+	if got, _, _, _ := p.selectDialer("", "10.1.2.3", netip.MustParseAddr("10.1.2.3")); got != direct {
 		t.Fatal("in-range IP should match ip-cidr direct rule")
 	}
-	if _, _, rejected, _ := p.selectDialer("203.0.113.9", netip.MustParseAddr("203.0.113.9")); !rejected {
+	if _, _, rejected, _ := p.selectDialer("", "203.0.113.9", netip.MustParseAddr("203.0.113.9")); !rejected {
 		t.Fatal("in-range IP should match ip-cidr reject rule")
 	}
-	if got, viaProxy, _, _ := p.selectDialer("198.51.100.1", netip.MustParseAddr("198.51.100.1")); got != proxy || !viaProxy {
+	if got, viaProxy, _, _ := p.selectDialer("", "198.51.100.1", netip.MustParseAddr("198.51.100.1")); got != proxy || !viaProxy {
 		t.Fatal("out-of-range IP should fall through to default proxy")
 	}
 	// Fake-ip targets expose only the domain; ip-cidr rules must not match.
-	if got, viaProxy, _, _ := p.selectDialer("fake.example.com", netip.Addr{}); got != proxy || !viaProxy {
+	if got, viaProxy, _, _ := p.selectDialer("", "fake.example.com", netip.Addr{}); got != proxy || !viaProxy {
 		t.Fatal("invalid dest IP should never match ip-cidr rules")
 	}
 }

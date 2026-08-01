@@ -45,19 +45,25 @@ func compileRules(rules []RouteRule) []compiledRule {
 	return out
 }
 
-// selectDialer picks the egress for one connection. host is the observed
-// domain (or IP literal); ip is the real destination address, invalid when the
-// target came through fake-ip and only the domain is known. The last return
-// reports whether an explicit rule matched (false = default action decided),
-// which the caller uses to gate proxy→direct fallback retries.
-func (p *routingPolicy) selectDialer(host string, ip netip.Addr) (Dialer, bool, bool, bool) {
+// selectDialer picks the egress for one connection. srcIP is the LAN device
+// address; host is the observed domain (or IP literal); ip is the real
+// destination address, invalid when the target came through fake-ip and only
+// the domain is known. matchedRule reports whether an explicit rule matched
+// (false = default action decided), which the caller uses to gate proxy→direct
+// fallback retries.
+func (p *routingPolicy) selectDialer(srcIP, host string, ip netip.Addr) (Dialer, bool, bool, bool) {
 	action := p.defaultAction
 	matchedRule := false
+	deviceOverride := false
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
 	for _, c := range p.rules {
 		rule := c.rule
 		matched := false
 		switch rule.Type {
+		case "src-ip":
+			// Device-level override: exact IP match. Highest priority; once
+			// matched it fixes the egress and skips all domain rules.
+			matched = rule.Value == srcIP
 		case "domain":
 			matched = host == strings.ToLower(strings.Trim(rule.Value, "."))
 		case "domain-suffix":
@@ -69,8 +75,24 @@ func (p *routingPolicy) selectDialer(host string, ip netip.Addr) (Dialer, bool, 
 		if matched {
 			action = rule.Action
 			matchedRule = true
+			if rule.Type == "src-ip" {
+				deviceOverride = true
+			}
 			break
 		}
+	}
+	// src-ip override fixes the egress: no proxy→direct fallback, no health
+	// state interaction. reject is still honored.
+	if deviceOverride {
+		switch action {
+		case RouteReject:
+			return nil, false, true, true
+		case RouteProxy:
+			if p.proxy != nil {
+				return p.proxy, true, false, true
+			}
+		}
+		return p.direct, false, false, true
 	}
 	switch action {
 	case RouteReject:
@@ -81,6 +103,36 @@ func (p *routingPolicy) selectDialer(host string, ip netip.Addr) (Dialer, bool, 
 		}
 	}
 	return p.direct, false, false, matchedRule
+}
+
+// matchType returns the type of the first rule matching the given connection,
+// or "" when only the default action applies. Used to detect src-ip device
+// overrides without re-implementing the matching loop.
+func (p *routingPolicy) matchType(srcIP, host string, ip netip.Addr) string {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	for _, c := range p.rules {
+		rule := c.rule
+		switch rule.Type {
+		case "src-ip":
+			if rule.Value == srcIP {
+				return rule.Type
+			}
+		case "domain":
+			if host == strings.ToLower(strings.Trim(rule.Value, ".")) {
+				return rule.Type
+			}
+		case "domain-suffix":
+			value := strings.ToLower(strings.Trim(rule.Value, "."))
+			if host == value || strings.HasSuffix(host, "."+value) {
+				return rule.Type
+			}
+		case "ip-cidr":
+			if ip.IsValid() && c.prefix.Contains(ip.Unmap()) {
+				return rule.Type
+			}
+		}
+	}
+	return ""
 }
 
 // classifyDialError reduces an egress dial error to a short reason shown in

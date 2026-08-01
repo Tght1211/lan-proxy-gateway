@@ -204,10 +204,19 @@ func Normalize(cfg *Config) {
 	if cfg.Runtime.FakeIPRange == "" {
 		cfg.Runtime.FakeIPRange = "198.18.0.0/16"
 	}
+	// Proxy mode requires fake-ip + QUIC block: without them devices resolve
+	// via mainland upstreams (polluted answers) and the egress proxy receives
+	// bare IPs that domain rules can never match. v4.0.0 shipped fake_ip:false
+	// as the default, so persisted configs are healed here on every load/save.
+	if cfg.Egress.Mode == EgressProxy {
+		cfg.DNS.FakeIP = true
+		cfg.QUICBlock = true
+	}
 	for i := range cfg.Routing.Rules {
 		cfg.Routing.Rules[i].Type = strings.ToLower(strings.TrimSpace(cfg.Routing.Rules[i].Type))
 		cfg.Routing.Rules[i].Value = strings.ToLower(strings.Trim(strings.TrimSpace(cfg.Routing.Rules[i].Value), "."))
 		cfg.Routing.Rules[i].Action = strings.ToLower(strings.TrimSpace(cfg.Routing.Rules[i].Action))
+		cfg.Routing.Rules[i].Group = strings.TrimSpace(cfg.Routing.Rules[i].Group)
 	}
 }
 
@@ -273,8 +282,12 @@ func Validate(cfg *Config) error {
 			if _, err := netip.ParsePrefix(rule.Value); err != nil {
 				return fmt.Errorf("routing.rules[%d].value 不是合法 CIDR: %q", i, rule.Value)
 			}
+		case RuleSrcIP:
+			if _, err := netip.ParseAddr(rule.Value); err != nil {
+				return fmt.Errorf("routing.rules[%d].value 不是合法 IP: %q", i, rule.Value)
+			}
 		default:
-			return fmt.Errorf("routing.rules[%d].type 必须是 domain/domain-suffix/ip-cidr", i)
+			return fmt.Errorf("routing.rules[%d].type 必须是 domain/domain-suffix/ip-cidr/src-ip", i)
 		}
 		switch rule.Action {
 		case EgressProxy, EgressDirect, RouteReject:

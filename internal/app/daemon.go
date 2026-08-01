@@ -186,6 +186,7 @@ func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST re
 		Logger:            logger,
 	})
 	rt.applyRouting(a.Cfg)
+	rt.startEgressMonitor(ctx, a, logger)
 	if a.Cfg.DNS.Enabled {
 		rt.dns = dns.New(dnsOptions(a.Cfg, a.Paths.FakeIPCacheFile, logger))
 		rt.bindFakeIP()
@@ -264,6 +265,30 @@ func (rt *daemonRuntime) applyRouting(cfg *config.Config) {
 		rules = append(rules, relay.RouteRule{Type: rule.Type, Value: rule.Value, Action: rule.Action})
 	}
 	rt.relay.SetRouting(cfg.Egress.Mode, direct, proxy, rules)
+	rt.setEgressProbe(cfg, proxy)
+}
+
+// setEgressProbe arms the global outage monitor with the upstream proxy
+// address + dialer so it can probe the port and run per-host recovery.
+func (rt *daemonRuntime) setEgressProbe(cfg *config.Config, proxy relay.Dialer) {
+	if cfg.Egress.Mode != config.EgressProxy {
+		rt.relay.SetEgressProbe("", nil)
+		return
+	}
+	addr := net.JoinHostPort(cfg.Egress.Proxy.Host, strconv.Itoa(cfg.Egress.Proxy.Port))
+	rt.relay.SetEgressProbe(addr, proxy)
+}
+
+// startEgressMonitor launches the port-probe and per-host recovery loop once;
+// on proxy-recovery success it removes the learned direct rule for that host.
+func (rt *daemonRuntime) startEgressMonitor(ctx context.Context, a *App, logger *slog.Logger) {
+	rt.relay.StartEgressMonitor(ctx, func(host string) {
+		if removed, err := a.RemoveLearnedDirectRule(host); err != nil {
+			logger.Warn("移除学习规则失败", "host", host, "err", err)
+		} else if removed {
+			logger.Info("代理恢复探测成功，已移除自动学习直连规则", "host", host)
+		}
+	})
 }
 
 // bindFakeIP wires the relay's fake-ip lookup to the DNS server's pool.

@@ -13,6 +13,7 @@ final class AppModel: ObservableObject {
     @Published var serviceStatus = "正在检查..."
     @Published var isServiceInstalled = false
     @Published var deviceLabels: [String: String] = [:]
+    @Published var autoDeviceLabels: [String: String] = [:]
     @Published var isBusy = false
     @Published var notice: String?
     @Published var errorMessage: String?
@@ -80,6 +81,7 @@ final class AppModel: ObservableObject {
                 stats = nil
                 coreUpgradeRecommended = false
             }
+            recomputeAutoDeviceLabels()
             if selectedSection == .settings {
                 let latestLog = await client.readLog(path: latest.logFile)
                 if latestLog != logText { logText = latestLog }
@@ -186,6 +188,66 @@ final class AppModel: ObservableObject {
 
     func deviceLabel(for ip: String) -> String { deviceLabels[ip] ?? "" }
 
+    // effectiveDeviceLabel prefers the user's manual label; otherwise the
+    // traffic-inferred auto label (in-memory only, cleared when offline).
+    func effectiveDeviceLabel(for ip: String) -> String {
+        if let manual = deviceLabels[ip], !manual.isEmpty { return manual }
+        return autoDeviceLabels[ip] ?? ""
+    }
+
+    func isAutoLabeled(_ ip: String) -> Bool {
+        (deviceLabels[ip] ?? "").isEmpty && autoDeviceLabels[ip] != nil
+    }
+
+    var egressAlert: EgressHealthStats? { stats?.egressHealth }
+    var hasEgressAlert: Bool {
+        guard let eh = egressAlert else { return false }
+        return eh.proxyDown || !eh.alerts.isEmpty || !eh.directFailures.isEmpty
+    }
+
+    func deviceOverride(for ip: String) -> String {
+        for rule in status?.routing ?? [] where rule.type == "src-ip" && rule.value == ip {
+            return rule.action
+        }
+        return ""
+    }
+
+    func setDeviceOverride(_ ip: String, action: String) {
+        var rules = status?.routing ?? []
+        rules.removeAll { $0.type == "src-ip" && $0.value == ip }
+        if action == "proxy" || action == "direct" {
+            rules.insert(RoutingRule(type: "src-ip", value: ip, action: action, group: "设备开关"), at: 0)
+        }
+        Task {
+            _ = await applyRoutingRules(rules)
+            await refresh(silent: true)
+        }
+    }
+
+    private func recomputeAutoDeviceLabels() {
+        guard let deviceGroups = stats?.relay.deviceServices, !deviceGroups.isEmpty else {
+            if !autoDeviceLabels.isEmpty { autoDeviceLabels = [:] }
+            return
+        }
+        let now = Date()
+        var labels: [String: String] = [:]
+        for group in deviceGroups {
+            guard let lastSeen = group.services.map(\.lastSeen).max(),
+                  now.timeIntervalSince(lastSeen) < 600 else { continue }
+            let names = Set(group.services.map(\.name))
+            if names.contains("Nintendo") {
+                labels[group.device] = "Switch"
+            } else if names.contains("PlayStation") {
+                labels[group.device] = "PlayStation"
+            } else if names.contains("Steam") {
+                labels[group.device] = "电脑"
+            } else if !names.isDisjoint(with: ["微信", "抖音", "小红书", "TikTok"]) {
+                labels[group.device] = "手机"
+            }
+        }
+        if labels != autoDeviceLabels { autoDeviceLabels = labels }
+    }
+
     func setDeviceLabel(_ label: String, for ip: String) {
         let value = label.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.isEmpty { deviceLabels.removeValue(forKey: ip) } else { deviceLabels[ip] = value }
@@ -200,8 +262,24 @@ final class AppModel: ObservableObject {
         perform("开机自启已移除") { try await self.client.uninstallService() }
     }
 
+    @Published var isInstallingCLI = false
+    @Published var cliNeedsCoreRestart = false
+
     func installCLI() {
-        perform("CLI 已安装到 /usr/local/bin/gateway") { try await self.client.installCLI() }
+        guard !isInstallingCLI else { return }
+        isInstallingCLI = true
+        Task {
+            let ok = await performAsync("CLI 已安装到 /usr/local/bin/gateway") { try await self.client.installCLI() }
+            isInstallingCLI = false
+            if ok && isRunning { cliNeedsCoreRestart = true }
+        }
+    }
+
+    func restartForNewCLI() {
+        Task {
+            let ok = await performAsync("核心服务已用新版本重启") { try await self.client.restart() }
+            if ok { cliNeedsCoreRestart = false }
+        }
     }
 
     func reloadLog() {

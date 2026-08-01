@@ -158,7 +158,49 @@ func (a *App) PromoteLearnedDirectRule(host string) (bool, error) {
 	}
 	next := *a.Cfg
 	next.Routing.Rules = append(append([]config.RoutingRule(nil), a.Cfg.Routing.Rules...),
-		config.RoutingRule{Type: config.RuleDomainSuffix, Value: host, Action: config.EgressDirect, Learned: true})
+		config.RoutingRule{Type: config.RuleDomainSuffix, Value: host, Action: config.EgressDirect, Group: "自动学习", Learned: true})
+	config.Normalize(&next)
+	if err := config.Validate(&next); err != nil {
+		return false, err
+	}
+	a.Cfg = &next
+	if err := a.Save(); err != nil {
+		return false, err
+	}
+	a.pokeReload()
+	return true, nil
+}
+
+// RemoveLearnedDirectRule drops the learned direct rule for host when the
+// proxy-recovery probe succeeds. Only learned (auto-generated) rules are
+// removed; user-authored rules are preserved.
+func (a *App) RemoveLearnedDirectRule(host string) (bool, error) {
+	a.cfgMu.Lock()
+	defer a.cfgMu.Unlock()
+	changed := false
+	next := *a.Cfg
+	next.Routing.Rules = make([]config.RoutingRule, 0, len(a.Cfg.Routing.Rules))
+	for _, r := range a.Cfg.Routing.Rules {
+		if !r.Learned {
+			next.Routing.Rules = append(next.Routing.Rules, r)
+			continue
+		}
+		covers := false
+		switch r.Type {
+		case config.RuleDomainSuffix:
+			covers = host == r.Value || strings.HasSuffix(host, "."+r.Value)
+		case config.RuleDomain:
+			covers = host == r.Value
+		}
+		if covers {
+			changed = true
+			continue
+		}
+		next.Routing.Rules = append(next.Routing.Rules, r)
+	}
+	if !changed {
+		return false, nil
+	}
 	config.Normalize(&next)
 	if err := config.Validate(&next); err != nil {
 		return false, err

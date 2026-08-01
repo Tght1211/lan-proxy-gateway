@@ -124,9 +124,10 @@ func TestDNSOptionsFakeIPOnlyInProxyMode(t *testing.T) {
 		t.Fatal("proxy mode must fake-ip by default")
 	}
 	cfg.DNS.FakeIP = false
+	config.Normalize(cfg)
 	opts = dnsOptions(cfg, "", nil)
-	if opts.FakeIPEnabled {
-		t.Fatal("explicit fake_ip=false must be honored")
+	if !opts.FakeIPEnabled {
+		t.Fatal("proxy mode must heal fake_ip=false back to enabled")
 	}
 }
 

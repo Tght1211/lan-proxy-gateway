@@ -25,6 +25,22 @@ type StatsResponse struct {
 	DNS           *dns.Stats     `json:"dns,omitempty"`
 	Health        HealthSnapshot `json:"health"`
 	Fallback      *FallbackStats `json:"fallback,omitempty"`
+	EgressHealth  *egressHealthJSON `json:"egress_health,omitempty"`
+}
+
+// egressHealthJSON exposes the global outage state and post-direct failures.
+type egressHealthJSON struct {
+	ProxyDown      bool                 `json:"proxy_down"`
+	Since          *time.Time           `json:"since,omitempty"`
+	Actions        []relay.EgressAction `json:"actions,omitempty"`
+	Alerts         []string             `json:"alerts,omitempty"`
+	DirectFailures []directFailure      `json:"direct_failures,omitempty"`
+}
+
+type directFailure struct {
+	Device string `json:"device"`
+	Host   string `json:"host"`
+	Reason string `json:"reason"`
 }
 
 // FallbackStats reports the proxy→direct fallback auto-learning state.
@@ -113,7 +129,42 @@ func (s *apiServer) handleStats(w http.ResponseWriter, r *http.Request) {
 			Learned:     learned,
 		}
 	}
+	eh := s.rt.relay.EgressHealth()
+	resp.EgressHealth = buildEgressHealthJSON(eh, resp.Relay.Recent)
 	writeJSON(w, resp)
+}
+
+// buildEgressHealthJSON merges the relay monitor snapshot with the recent
+// connection log to list devices/hosts still failing after being switched
+// to direct (proxy down or learned direct).
+func buildEgressHealthJSON(snap relay.EgressSnapshot, recent []relay.ConnInfo) *egressHealthJSON {
+	out := &egressHealthJSON{
+		ProxyDown: snap.ProxyDown,
+		Actions:   snap.Actions,
+		Alerts:    snap.Alerts,
+	}
+	if !snap.Since.IsZero() {
+		since := snap.Since
+		out.Since = &since
+	}
+	cutoff := time.Now().Add(-10 * time.Minute)
+	seen := map[[2]string]string{}
+	for _, c := range recent {
+		if c.EndedAt == nil || c.EndedAt.Before(cutoff) {
+			continue
+		}
+		if c.ViaProxy || c.Rejected || c.Status != "dial_failed" || c.Failure == "" {
+			continue
+		}
+		key := [2]string{c.SrcIP, c.DstHost}
+		seen[key] = c.Failure
+	}
+	for key, reason := range seen {
+		out.DirectFailures = append(out.DirectFailures, directFailure{
+			Device: key[0], Host: key[1], Reason: reason,
+		})
+	}
+	return out
 }
 
 func (s *apiServer) handleHealth(w http.ResponseWriter, r *http.Request) {
