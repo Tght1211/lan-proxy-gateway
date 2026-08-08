@@ -87,10 +87,11 @@ type DNSConfig struct {
 
 // RuntimeConfig holds ports and logging.
 type RuntimeConfig struct {
-	RedirPort   int    `yaml:"redir_port"`
-	APIPort     int    `yaml:"api_port"` // 127.0.0.1-only status API
-	LogLevel    string `yaml:"log_level"`
-	FakeIPRange string `yaml:"fake_ip_range"`
+	RedirPort    int    `yaml:"redir_port"`
+	UDPRedirPort int    `yaml:"udp_redir_port"` // UDP fake-IP relay port
+	APIPort      int    `yaml:"api_port"`        // 127.0.0.1-only status API
+	LogLevel     string `yaml:"log_level"`
+	FakeIPRange  string `yaml:"fake_ip_range"`
 }
 
 // Default returns the recommended v4 configuration.
@@ -117,10 +118,11 @@ func Default() *Config {
 		},
 		QUICBlock: true,
 		Runtime: RuntimeConfig{
-			RedirPort:   17892,
-			APIPort:     19090,
-			LogLevel:    "info",
-			FakeIPRange: "198.18.0.0/16",
+			RedirPort:    17892,
+			UDPRedirPort: 17893,
+			APIPort:      19090,
+			LogLevel:     "info",
+			FakeIPRange:  "198.18.0.0/16",
 		},
 	}
 }

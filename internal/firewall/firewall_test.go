@@ -265,3 +265,53 @@ func TestDarwinApplyFailsWithoutWildcardAnchor(t *testing.T) {
 		t.Fatalf("want wildcard-anchor error, got %v", err)
 	}
 }
+
+func TestRenderPFAnchorUDPFakeIP(t *testing.T) {
+	cfg := Config{
+		Iface:          "en0",
+		GatewayIP:      "192.168.1.100",
+		RedirPort:      17892,
+		UDPRedirPort:   17893,
+		FakeIPRange:    "198.18.0.0/16",
+		DNSPort:        53,
+		TCPRedirect:    true,
+		UDPFakeIPRedir: true,
+		DNSHijack:      true,
+		QUICBlock:      true,
+	}
+	got := renderPFAnchor(cfg)
+	wantLine := "rdr pass on en0 proto udp from any to 198.18.0.0/16 -> 127.0.0.1 port 17893"
+	if !strings.Contains(got, wantLine) {
+		t.Fatalf("anchor missing UDP fake-IP rdr rule %q in:\n%s", wantLine, got)
+	}
+	dnsIdx := strings.Index(got, "port 53")
+	udpIdx := strings.Index(got, "198.18.0.0/16")
+	tcpIdx := strings.Index(got, "17892")
+	if udpIdx < dnsIdx {
+		t.Fatalf("UDP fake-IP rdr should come after DNS hijack:\n%s", got)
+	}
+	if udpIdx > tcpIdx {
+		t.Fatalf("UDP fake-IP rdr should come before TCP rdr:\n%s", got)
+	}
+}
+
+func TestRenderLinuxRulesUDPFakeIP(t *testing.T) {
+	cfg := testCfg
+	cfg.TCPRedirect = true
+	cfg.UDPFakeIPRedir = true
+	cfg.UDPRedirPort = 17893
+	cfg.FakeIPRange = "198.18.0.0/16"
+	nat, _ := renderLinuxRules(cfg)
+	rules := joinRules(nat)
+	wantRule := "PREROUTING -i eth0 -p udp -d 198.18.0.0/16 -m comment --comment lan-proxy-gateway -j REDIRECT --to-ports 17893"
+	found := false
+	for _, r := range rules {
+		if r == wantRule {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("UDP fake-IP REDIRECT rule missing, got:\n%s", strings.Join(rules, "\n"))
+	}
+}

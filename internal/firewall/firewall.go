@@ -15,13 +15,16 @@ var ErrNotSupported = errors.New("当前平台不支持防火墙规则管理")
 
 // Config is the desired rule set.
 type Config struct {
-	Iface       string // LAN interface, e.g. "eth0" / "en0"
-	GatewayIP   string // this host's LAN IP (excluded from redirect on macOS)
-	RedirPort   int    // transparent TCP relay port
-	DNSPort     int    // DNS server port
-	TCPRedirect bool   // REDIRECT all LAN TCP into the relay
-	DNSHijack   bool   // REDIRECT any LAN UDP/TCP :53 into our DNS
-	QUICBlock   bool   // REJECT LAN UDP/443 so clients fall back to TCP
+	Iface          string // LAN interface, e.g. "eth0" / "en0"
+	GatewayIP      string // this host's LAN IP (excluded from redirect on macOS)
+	RedirPort      int    // transparent TCP relay port
+	UDPRedirPort   int    // UDP fake-IP relay port (0 = disabled)
+	FakeIPRange    string // fake-IP prefix for UDP redirect, e.g. "198.18.0.0/16"
+	DNSPort        int    // DNS server port
+	TCPRedirect    bool   // REDIRECT all LAN TCP into the relay
+	UDPFakeIPRedir bool   // REDIRECT LAN UDP destined for fake-IP range into UDP relay
+	DNSHijack      bool   // REDIRECT any LAN UDP/TCP :53 into our DNS
+	QUICBlock      bool   // REJECT LAN UDP/443 so clients fall back to TCP
 }
 
 // Report tells the caller what Apply changed about global state, for
