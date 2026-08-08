@@ -23,6 +23,11 @@ func renderPFAnchor(c Config) string {
 		fmt.Fprintf(&b, "rdr pass on %s proto udp from any to ! %s port %d -> 127.0.0.1 port %d\n", c.Iface, c.GatewayIP, c.DNSPort, c.DNSPort)
 		fmt.Fprintf(&b, "rdr pass on %s proto tcp from any to ! %s port %d -> 127.0.0.1 port %d\n", c.Iface, c.GatewayIP, c.DNSPort, c.DNSPort)
 	}
+	if c.UDPFakeIPRedir && c.FakeIPRange != "" && c.UDPRedirPort > 0 {
+		// Redirect UDP packets destined for the fake-IP range into the UDP relay,
+		// so game voice / video calls reach their real destination.
+		fmt.Fprintf(&b, "rdr pass on %s proto udp from any to %s -> 127.0.0.1 port %d\n", c.Iface, c.FakeIPRange, c.UDPRedirPort)
+	}
 	if c.TCPRedirect {
 		fmt.Fprintf(&b, "rdr pass on %s proto tcp from any to ! %s -> 127.0.0.1 port %d\n", c.Iface, c.GatewayIP, c.RedirPort)
 	}
