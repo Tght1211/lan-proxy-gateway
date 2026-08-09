@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -56,6 +57,7 @@ type Server struct {
 
 	onFallbackSuccess atomic.Value // func(string)
 	health            *proxyHealth
+	deviceHealth      *deviceHealth
 	monitor           *egressMonitor
 
 	mu   sync.Mutex
@@ -71,12 +73,13 @@ type dialerHolder struct {
 
 func New(opts Options) *Server {
 	s := &Server{
-		origDST:    opts.OrigDST,
-		tracker:    opts.Tracker,
-		logger:     opts.Logger,
-		done:       make(chan struct{}),
-		missingLog: make(map[netip.Addr]time.Time),
-		health:     newProxyHealth(),
+		origDST:      opts.OrigDST,
+		tracker:      opts.Tracker,
+		logger:       opts.Logger,
+		done:         make(chan struct{}),
+		missingLog:   make(map[netip.Addr]time.Time),
+		health:       newProxyHealth(),
+		deviceHealth: newDeviceHealth(),
 	}
 	s.monitor = newEgressMonitor(s.health)
 	if s.tracker == nil {
@@ -141,14 +144,15 @@ func (s *Server) EgressHealth() EgressSnapshot {
 	return s.monitor.snapshot()
 }
 
+// DeviceAdaptiveHealth reports per-device failure aggregation and temporary
+// direct-mode circuit breakers.
+func (s *Server) DeviceAdaptiveHealth() DeviceAdaptiveSnapshot {
+	return s.deviceHealth.snapshot(time.Now())
+}
+
 // SetRouting atomically replaces the domain routing policy for new connections.
 func (s *Server) SetRouting(defaultAction string, direct, proxy Dialer, rules []RouteRule) {
-	s.routing.Store(&routingPolicy{
-		defaultAction: defaultAction,
-		direct:        direct,
-		proxy:         proxy,
-		rules:         compileRules(rules),
-	})
+	s.routing.Store(BuildRoutingPolicy(defaultAction, direct, proxy, rules))
 }
 
 // SetFakeIP installs (or with nil prefix, removes) fake-ip domain lookup.
@@ -289,7 +293,8 @@ func (s *Server) handle(client *net.TCPConn) {
 	matchedRule := false
 	var fallbackDialer Dialer
 	deviceOverride := false
-	if policy := s.routing.Load(); policy != nil {
+	var policy *routingPolicy
+	if policy = s.routing.Load(); policy != nil {
 		dialer, viaProxy, rejected, matchedRule = policy.selectDialer(srcIP, routeHost, dstIP)
 		// src-ip device override fixes the egress; skip all fallback/health.
 		deviceOverride = matchedRule && srcIP != "" && policy.matchType(srcIP, routeHost, dstIP) == "src-ip"
@@ -312,6 +317,14 @@ func (s *Server) handle(client *net.TCPConn) {
 
 	// 代理端口全局异常：默认走代理且未命中显式规则时强制直连。
 	eligible := fallbackDialer != nil
+	adaptiveEligible := policy != nil && !deviceOverride && viaProxy && policy.direct != nil
+	if adaptiveEligible && s.deviceHealth.directDecision(srcIP, time.Now()) {
+		dialer = policy.direct
+		fallbackDialer = nil
+		eligible = false
+		viaProxy = false
+		s.logger.Debug("设备处于临时直连保护", "src", client.RemoteAddr(), "target", host)
+	}
 	if eligible && s.monitor.isDown() {
 		dialer = fallbackDialer
 		fallbackDialer = nil
@@ -351,6 +364,11 @@ func (s *Server) handle(client *net.TCPConn) {
 				fellBack = true
 				viaProxy = false
 				s.notifyFallbackSuccess(routeHost)
+				// Device adaptive: only count when proxy failed but direct
+				// succeeded — proof that egress is the problem for this device.
+				if adaptiveEligible {
+					s.recordDeviceProxyFailure(srcIP, routeHost)
+				}
 			}
 		} else {
 			s.logger.Warn("回退出口也失败", "src", client.RemoteAddr(), "target", target, "err", err)
@@ -371,7 +389,7 @@ func (s *Server) handle(client *net.TCPConn) {
 	}
 
 	observedHost := routeHost
-	tc := s.tracker.Open(srcIP, observedHost, int(orig.Port()), viaProxy)
+	tc := s.tracker.Open(srcIP, observedHost, int(orig.Port()), viaProxy, "tcp")
 	if fellBack || directTest {
 		tc.MarkFallback()
 	}
@@ -394,6 +412,21 @@ func (s *Server) handle(client *net.TCPConn) {
 			}
 		}
 	}
+	// Device adaptive: successful proxy traffic clears the failure candidate.
+	if adaptiveEligible && viaProxy && tc.Down() > 0 {
+		s.deviceHealth.recordProxyOK(srcIP, routeHost, time.Now())
+	}
+}
+
+func (s *Server) recordDeviceProxyFailure(device, host string) bool {
+	if !s.deviceHealth.recordProxyFailure(device, host, time.Now()) {
+		return false
+	}
+	text := fmt.Sprintf("设备 %s 短时间内多个目标代理失败，已临时切换直连 %d 分钟", device, int(deviceDirectFor/time.Minute))
+	s.monitor.recordAction(text)
+	s.logger.Warn("触发设备临时直连保护", "device", device, "host", host,
+		"threshold", deviceFailThreshold, "window", deviceFailWindow, "until", time.Now().Add(deviceDirectFor))
+	return true
 }
 
 func dialTarget(d Dialer, target string) (net.Conn, error) {

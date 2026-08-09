@@ -27,6 +27,7 @@ type ConnInfo struct {
 	SrcIP     string     `json:"src_ip"`
 	DstHost   string     `json:"dst_host"`
 	DstPort   int        `json:"dst_port"`
+	Proto     string     `json:"proto,omitempty"` // "tcp" (default) or "udp"
 	Service   string     `json:"service"`
 	Up        int64      `json:"up"`
 	Down      int64      `json:"down"`
@@ -124,7 +125,8 @@ func (t *Tracker) StartSampling(ctx context.Context, interval time.Duration) {
 }
 
 // Open registers a new connection; Close on the returned handle archives it.
-func (t *Tracker) Open(srcIP, dstHost string, dstPort int, viaProxy bool) *TrackedConn {
+// proto should be "tcp" or "udp".
+func (t *Tracker) Open(srcIP, dstHost string, dstPort int, viaProxy bool, proto string) *TrackedConn {
 	t.mu.Lock()
 	t.nextID++
 	c := &TrackedConn{
@@ -133,7 +135,8 @@ func (t *Tracker) Open(srcIP, dstHost string, dstPort int, viaProxy bool) *Track
 		srcIP:     srcIP,
 		dstHost:   dstHost,
 		dstPort:   dstPort,
-		service:   classifyService(dstHost),
+		proto:     proto,
+		service:   ClassifyService(dstHost),
 		viaProxy:  viaProxy,
 		startedAt: time.Now(),
 	}
@@ -145,21 +148,26 @@ func (t *Tracker) Open(srcIP, dstHost string, dstPort int, viaProxy bool) *Track
 // RecordRejected archives a connection refused by a routing rule. It appears
 // in the recent history but never counts toward device/service usage.
 func (t *Tracker) RecordRejected(srcIP, dstHost string, dstPort int) {
-	t.recordTerminal(srcIP, dstHost, dstPort, "rejected", "", false)
+	t.recordTerminal(srcIP, dstHost, dstPort, "tcp", "rejected", "", false)
+}
+
+// RecordRejectedProto is like RecordRejected but accepts an explicit protocol.
+func (t *Tracker) RecordRejectedProto(srcIP, dstHost string, dstPort int, proto string) {
+	t.recordTerminal(srcIP, dstHost, dstPort, proto, "rejected", "", false)
 }
 
 // RecordDialFailure archives a connection whose egress dial failed.
 func (t *Tracker) RecordDialFailure(srcIP, dstHost string, dstPort int, viaProxy bool, reason string) {
-	t.recordTerminal(srcIP, dstHost, dstPort, "dial_failed", reason, viaProxy)
+	t.recordTerminal(srcIP, dstHost, dstPort, "tcp", "dial_failed", reason, viaProxy)
 }
 
-func (t *Tracker) recordTerminal(srcIP, dstHost string, dstPort int, status, failure string, viaProxy bool) {
+func (t *Tracker) recordTerminal(srcIP, dstHost string, dstPort int, proto, status, failure string, viaProxy bool) {
 	now := time.Now()
 	t.mu.Lock()
 	t.nextID++
 	info := ConnInfo{
 		ID: t.nextID, SrcIP: srcIP, DstHost: dstHost, DstPort: dstPort,
-		Service: classifyService(dstHost), StartedAt: now, EndedAt: &now,
+		Proto: proto, Service: ClassifyService(dstHost), StartedAt: now, EndedAt: &now,
 		ViaProxy: viaProxy, Rejected: status == "rejected",
 		Status: status, Failure: failure,
 	}
@@ -230,6 +238,7 @@ type TrackedConn struct {
 	srcIP     string
 	dstHost   string
 	dstPort   int
+	proto     string // "tcp" or "udp"
 	service   string
 	viaProxy  bool
 	startedAt time.Time
@@ -294,7 +303,7 @@ func (c *TrackedConn) Down() int64 { return c.down.Load() }
 func (c *TrackedConn) info() ConnInfo {
 	return ConnInfo{
 		ID: c.id, SrcIP: c.srcIP, DstHost: c.dstHost, DstPort: c.dstPort,
-		Service: c.service, Up: c.up.Load(), Down: c.down.Load(),
+		Proto: c.proto, Service: c.service, Up: c.up.Load(), Down: c.down.Load(),
 		StartedAt: c.startedAt, ViaProxy: c.viaProxy, Fallback: c.fallback.Load(),
 	}
 }
@@ -342,10 +351,10 @@ func appendBoundedFront[T any](items []T, item T, limit int) []T {
 	return items
 }
 
-// classifyService reports an observable network service, not a process name on
+// ClassifyService reports an observable network service, not a process name on
 // the remote device. Unknown domains are reduced to a readable registrable-like
 // suffix without requiring an external classification service.
-func classifyService(host string) string {
+func ClassifyService(host string) string {
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
 	if host == "" {
 		return "未知目标"

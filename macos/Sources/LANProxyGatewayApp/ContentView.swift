@@ -400,10 +400,13 @@ private struct OverviewView: View {
                 GettingStartedPanel()
             }
             GatewaySummary()
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: model.stats?.udpRelay != nil ? 5 : 4), spacing: 12) {
                 MetricCard("实时下载", speed(model.stats?.relay.traffic.last?.down ?? 0), "arrow.down", Theme.cyan)
                 MetricCard("实时上传", speed(model.stats?.relay.traffic.last?.up ?? 0), "arrow.up", Theme.yellow)
                 MetricCard("活动连接", "\(model.stats?.relay.active.count ?? 0)", "point.3.connected.trianglepath.dotted", Theme.lime)
+                if let udp = model.stats?.udpRelay {
+                    MetricCard("UDP 会话", "\(udp.sessions)", "waveform.path", Theme.yellow)
+                }
                 MetricCard("活跃设备", "\(model.activeDeviceCount)", "desktopcomputer", Theme.coral)
             }
             TopologyPanel()
@@ -600,19 +603,29 @@ private struct FallbackLearningPopover: View {
                     }
                 }
                 if !learnedRules.isEmpty {
+                    let grouped = learnedRulesByGroup(learnedRules)
                     VStack(alignment: .leading, spacing: 7) {
                         Text("已生成直连规则 · \(learnedRules.count)").eyebrow()
-                        ForEach(learnedRules.prefix(6)) { rule in
-                            HStack(spacing: 8) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 10)).foregroundStyle(Theme.lime)
-                                Text(rule.value)
-                                    .font(.system(size: 11, design: .monospaced)).lineLimit(1)
-                                Spacer(minLength: 0)
+                        ForEach(grouped, id: \.name) { section in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(section.displayName)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(Theme.lime.opacity(0.8))
+                                ForEach(section.rules.prefix(4)) { rule in
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.system(size: 10)).foregroundStyle(Theme.lime)
+                                        Text(rule.value)
+                                            .font(.system(size: 11, design: .monospaced)).lineLimit(1)
+                                        Spacer(minLength: 0)
+                                    }
+                                }
+                                if section.rules.count > 4 {
+                                    Text("还有 \(section.rules.count - 4) 条…")
+                                        .font(.caption2).foregroundStyle(Theme.muted)
+                                        .padding(.leading, 18)
+                                }
                             }
-                        }
-                        if learnedRules.count > 6 {
-                            Text("还有 \(learnedRules.count - 6) 条…").font(.caption2).foregroundStyle(Theme.muted)
                         }
                     }
                 }
@@ -696,6 +709,9 @@ private struct GatewaySummary: View {
                 SummaryFact("网络接口", model.status?.gateway.interface.nonEmpty ?? "--")
                 SummaryFact("出口", model.status?.egress == "proxy" ? "代理" : "直连")
                 SummaryFact("DNS", model.status?.dns.enabled == true ? "已启用" : "未启用")
+                if model.stats?.udpRelay != nil {
+                    SummaryFact("UDP 中继", "已启用")
+                }
                 ExitIdentityFact(identity: model.stats?.health.egressIdentity)
                 SummaryFact("运行时间", uptime(model.stats?.uptimeSec ?? 0))
             }
@@ -1166,22 +1182,26 @@ private struct DeviceRanking: View {
                                             .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
+									let ov = model.deviceOverride(for: item.name)
+									let adaptive = model.adaptiveDeviceState(for: item.name)
+									let protected = ov.isEmpty && adaptive?.mode == "direct"
+									let observing = ov.isEmpty && adaptive?.mode == "observing"
                                     Menu {
                                         Button("默认（跟随规则）") { model.setDeviceOverride(item.name, action: "") }
                                         Button("强制直连") { model.setDeviceOverride(item.name, action: "direct") }
                                         Button("强制代理") { model.setDeviceOverride(item.name, action: "proxy") }
+										Button("拒绝联网") { model.setDeviceOverride(item.name, action: "reject") }
                                     } label: {
-                                        let ov = model.deviceOverride(for: item.name)
                                         HStack(spacing: 3) {
-                                            Circle().fill(ov.isEmpty ? Theme.muted : (ov == "direct" ? Theme.lime : Theme.cyan)).frame(width: 6, height: 6)
-                                            Text(ov.isEmpty ? "默认" : (ov == "direct" ? "直连" : "代理"))
+											Circle().fill((protected || observing) ? Theme.yellow : (ov.isEmpty ? Theme.muted : (ov == "direct" ? Theme.lime : (ov == "reject" ? Theme.coral : Theme.cyan)))).frame(width: 6, height: 6)
+											Text(protected ? "保护直连" : (observing ? "观察 \(adaptive?.failureCount ?? 0)/\(model.stats?.deviceAdaptive?.threshold ?? 5)" : (ov.isEmpty ? "默认" : (ov == "direct" ? "直连" : (ov == "reject" ? "拒绝" : "代理")))))
                                                 .font(.caption2.weight(.medium))
                                         }
                                     }
                                     .menuStyle(.borderlessButton)
                                     .menuIndicator(.hidden)
                                     .frame(width: 64, alignment: .leading)
-                                    .help("设备级前置开关：优先级高于域名规则")
+									.help(protected ? "检测到短时间多目标代理失败，已临时切换整台设备直连；手动策略优先级更高" : (observing ? "正在聚合同一设备的不同失败目标，达到阈值后仅将该设备临时切换直连" : "设备级前置开关：优先级高于域名规则"))
                                     TextField(
                                         model.autoDeviceLabels[item.name].map { "\($0)（自动识别）" } ?? "例如：客厅 Switch",
                                         text: Binding(
@@ -1499,9 +1519,19 @@ private struct ConnectionsView: View {
                     }.width(min: 110, ideal: 140)
                     TableColumn("识别服务") { Text($0.service).fontWeight(.medium) }.width(min: 90, ideal: 120)
                     TableColumn("目标域名 / 地址") { item in
-                        Text("\(item.dstHost):\(item.dstPort)")
-                            .font(.system(.body, design: .monospaced))
-                            .help("\(item.dstHost):\(item.dstPort)")
+                        HStack(spacing: 4) {
+                            if item.isUDP {
+                                Text("UDP")
+                                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                    .padding(.horizontal, 3).padding(.vertical, 1)
+                                    .background(Theme.yellow.opacity(0.15))
+                                    .foregroundStyle(Theme.yellow)
+                                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                            }
+                            Text("\(item.dstHost):\(item.dstPort)")
+                                .font(.system(.body, design: .monospaced))
+                                .help("\(item.isUDP ? "UDP " : "")\(item.dstHost):\(item.dstPort)")
+                        }
                     }.width(min: 220, ideal: 320)
                     TableColumn("出口") { item in
                         if item.fallback && !item.rejected {
@@ -2151,6 +2181,7 @@ private struct RuleListPopover: View {
         case "domain": return "完整域名"
         case "domain-suffix": return "域名后缀"
         case "ip-cidr": return "IP-CIDR"
+		case "src-ip": return "设备 IP"
         default: return type
         }
     }
@@ -2374,7 +2405,7 @@ private struct RoutingRulesEditor: View {
 
             if editorMode == "text" {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("每行一条：类型,值,动作。支持 Clash 风格（DOMAIN / DOMAIN-SUFFIX / IP-CIDR；DIRECT / REJECT，其他目标视为代理）。「# == 分组: 名称 ==」行开始一个分组，「# == 未分组 ==」结束分组；其他 # 行为注释。")
+					Text("每行一条：类型,值,动作。支持 DOMAIN / DOMAIN-SUFFIX / IP-CIDR / SRC-IP；DIRECT / REJECT，其他目标视为代理。SRC-IP 是设备级前置规则，优先于域名规则。「# == 分组: 名称 ==」行开始一个分组，「# == 未分组 ==」结束分组；其他 # 行为注释。")
                         .font(.caption).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     TextEditor(text: $text)
@@ -2688,6 +2719,7 @@ private struct RoutingRulesEditor: View {
                 Text("完整域名").tag("domain")
                 Text("域名后缀").tag("domain-suffix")
                 Text("IP-CIDR").tag("ip-cidr")
+				Text("设备 IP").tag("src-ip")
             }.labelsHidden().frame(width: 104)
             TextField(placeholder(for: rule.wrappedValue.type), text: rule.value)
                 .textFieldStyle(DarkFieldStyle())
@@ -2919,7 +2951,9 @@ private struct RoutingRulesEditor: View {
     }
 
     private func placeholder(for type: String) -> String {
-        type == "ip-cidr" ? "例如 192.168.1.0/24" : "例如 openai.com"
+		if type == "ip-cidr" { return "例如 192.168.1.0/24" }
+		if type == "src-ip" { return "例如 192.168.1.50" }
+		return "例如 openai.com"
     }
 
     private func actionColor(_ action: String) -> Color {
@@ -3164,7 +3198,16 @@ private struct RecentStrip: View {
                 ForEach(Array((model.stats?.relay.recent ?? []).prefix(5))) { item in
                     HStack(spacing: 12) {
                         Circle().fill(serviceColor(item.service)).frame(width: 7, height: 7)
-                        Text(item.service).fontWeight(.medium).frame(width: 105, alignment: .leading)
+                        HStack(spacing: 4) {
+                            Text(item.service).fontWeight(.medium)
+                            if item.isUDP {
+                                Text("UDP").font(.system(size: 7, weight: .bold, design: .monospaced))
+                                    .padding(.horizontal, 2).padding(.vertical, 1)
+                                    .background(Theme.yellow.opacity(0.15))
+                                    .foregroundStyle(Theme.yellow)
+                                    .clipShape(RoundedRectangle(cornerRadius: 2))
+                            }
+                        }.frame(width: 125, alignment: .leading)
                         Text(item.dstHost).font(.system(.caption, design: .monospaced)).foregroundStyle(Theme.muted).lineLimit(1)
                         Spacer()
                         Text(item.srcIP).font(.system(.caption, design: .monospaced)).foregroundStyle(Theme.muted)
@@ -3325,6 +3368,30 @@ private func shortBytes(_ value: Int64) -> String { ByteCountFormatter.string(fr
 private func speed(_ fiveSecondBytes: Int64) -> String { bytes(fiveSecondBytes / 5) + "/s" }
 private func uptime(_ seconds: Int64) -> String { seconds > 3600 ? "\(seconds / 3600)H" : "\(max(seconds / 60, 0))M" }
 private func formatMS(_ value: Double?) -> String { guard let value, value > 0 else { return "--" }; return String(format: "%.1f ms", value) }
+private struct LearnedRuleSection {
+    let name: String
+    let rules: [RoutingRule]
+    var displayName: String {
+        if name.hasPrefix("自动学习 · ") { return String(name.dropFirst(6)) }
+        if name == "自动学习" { return "其他" }
+        return name
+    }
+}
+
+private func learnedRulesByGroup(_ rules: [RoutingRule]) -> [LearnedRuleSection] {
+    var order: [String] = []
+    var bucket: [String: [RoutingRule]] = [:]
+    for rule in rules {
+        let key = rule.group.isEmpty ? "自动学习" : rule.group
+        if bucket[key] == nil { order.append(key) }
+        bucket[key, default: []].append(rule)
+    }
+    return order.compactMap { key in
+        guard let items = bucket[key] else { return nil }
+        return LearnedRuleSection(name: key, rules: items)
+    }
+}
+
 private func serviceColor(_ service: String) -> Color { [Theme.cyan, Theme.lime, Theme.coral, Theme.yellow][Int(service.hashValue.magnitude % 4)] }
 private func egressLocation(_ identity: EgressIdentity?) -> String {
     guard let identity else { return "地区待检测" }
@@ -3378,6 +3445,7 @@ private func parseRuleLines(_ text: String) -> (rules: [RoutingRule], skipped: [
         case "DOMAIN": type = "domain"
         case "DOMAIN-SUFFIX": type = "domain-suffix"
         case "IP-CIDR", "IP-CIDR6": type = "ip-cidr"
+		case "SRC-IP": type = "src-ip"
         default:
             skipped.append(String(rawLine.prefix(40)))
             continue
@@ -3411,6 +3479,7 @@ private func serializeRuleLines(_ rules: [RoutingRule]) -> String {
         case "domain": type = "DOMAIN"
         case "domain-suffix": type = "DOMAIN-SUFFIX"
         case "ip-cidr": type = "IP-CIDR"
+		case "src-ip": type = "SRC-IP"
         default: type = rule.type.uppercased()
         }
         let action: String

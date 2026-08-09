@@ -79,8 +79,19 @@ struct NetworkStatus: Decodable {
 
 struct PortsStatus: Decodable {
     let redir: Int
+    let udpRedir: Int?
     let api: Int
     let dns: Int
+
+    enum CodingKeys: String, CodingKey {
+        case redir, api, dns
+        case udpRedir = "udp_redir"
+    }
+}
+
+struct UDPRelayStats: Decodable {
+    let sessions: Int
+    let listen: String
 }
 
 struct RuntimeStats: Decodable {
@@ -89,17 +100,67 @@ struct RuntimeStats: Decodable {
     let proxy: String?
     let uptimeSec: Int64
     let relay: RelayStats
+    let udpRelay: UDPRelayStats?
     let dns: DNSStats?
     let health: HealthStats
     let fallback: FallbackStats?
     let egressHealth: EgressHealthStats?
+	let deviceAdaptive: DeviceAdaptiveStats?
 
     enum CodingKeys: String, CodingKey {
         case egress, proxy, relay, dns, health, fallback
         case schemaVersion = "schema_version"
         case uptimeSec = "uptime_sec"
-        case egressHealth = "egress_health"
+        case udpRelay = "udp_relay"
+		case egressHealth = "egress_health"
+		case deviceAdaptive = "device_adaptive"
     }
+}
+
+struct DeviceAdaptiveStats: Decodable {
+	let threshold: Int
+	let windowSeconds: Int
+	let directSeconds: Int
+	let devices: [DeviceAdaptiveState]
+
+	enum CodingKeys: String, CodingKey {
+		case threshold, devices
+		case windowSeconds = "window_seconds"
+		case directSeconds = "direct_seconds"
+	}
+
+	init(from decoder: Decoder) throws {
+		let v = try decoder.container(keyedBy: CodingKeys.self)
+		threshold = try v.decodeIfPresent(Int.self, forKey: .threshold) ?? 5
+		windowSeconds = try v.decodeIfPresent(Int.self, forKey: .windowSeconds) ?? 120
+		directSeconds = try v.decodeIfPresent(Int.self, forKey: .directSeconds) ?? 900
+		devices = try v.decodeIfPresent([DeviceAdaptiveState].self, forKey: .devices) ?? []
+	}
+}
+
+struct DeviceAdaptiveState: Decodable, Identifiable {
+	let device: String
+	let mode: String
+	let failureCount: Int
+	let hosts: [String]
+	let since: Date?
+	let until: Date?
+	var id: String { device }
+
+	enum CodingKeys: String, CodingKey {
+		case device, mode, hosts, since, until
+		case failureCount = "failure_count"
+	}
+
+	init(from decoder: Decoder) throws {
+		let v = try decoder.container(keyedBy: CodingKeys.self)
+		device = try v.decode(String.self, forKey: .device)
+		mode = try v.decodeIfPresent(String.self, forKey: .mode) ?? "observing"
+		failureCount = try v.decodeIfPresent(Int.self, forKey: .failureCount) ?? 0
+		hosts = try v.decodeIfPresent([String].self, forKey: .hosts) ?? []
+		since = try v.decodeIfPresent(Date.self, forKey: .since)
+		until = try v.decodeIfPresent(Date.self, forKey: .until)
+	}
 }
 
 struct EgressHealthStats: Decodable {
@@ -212,6 +273,7 @@ struct ConnectionInfo: Decodable, Identifiable {
     let srcIP: String
     let dstHost: String
     let dstPort: Int
+    let proto: String
     let service: String
     let up: Int64
     let down: Int64
@@ -223,8 +285,10 @@ struct ConnectionInfo: Decodable, Identifiable {
     let failure: String
     let fallback: Bool
 
+    var isUDP: Bool { proto == "udp" }
+
     enum CodingKeys: String, CodingKey {
-        case id, up, down
+        case id, up, down, proto
         case service
         case rejected
         case status
@@ -244,6 +308,7 @@ struct ConnectionInfo: Decodable, Identifiable {
         srcIP = try values.decodeIfPresent(String.self, forKey: .srcIP) ?? "--"
         dstHost = try values.decodeIfPresent(String.self, forKey: .dstHost) ?? "--"
         dstPort = try values.decodeIfPresent(Int.self, forKey: .dstPort) ?? 0
+        proto = try values.decodeIfPresent(String.self, forKey: .proto) ?? "tcp"
         let decodedService = try values.decodeIfPresent(String.self, forKey: .service) ?? "未解析域名"
         service = ["未识别流量", "IP 地址流量"].contains(decodedService) ? "未解析域名" : decodedService
         up = try values.decodeIfPresent(Int64.self, forKey: .up) ?? 0

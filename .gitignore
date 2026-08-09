@@ -26,6 +26,7 @@ script.js
 # IDE
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
 *~

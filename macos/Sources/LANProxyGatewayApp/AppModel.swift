@@ -202,8 +202,13 @@ final class AppModel: ObservableObject {
     var egressAlert: EgressHealthStats? { stats?.egressHealth }
     var hasEgressAlert: Bool {
         guard let eh = egressAlert else { return false }
-        return eh.proxyDown || !eh.alerts.isEmpty || !eh.directFailures.isEmpty
+		return eh.proxyDown || !eh.alerts.isEmpty || !eh.directFailures.isEmpty ||
+			(stats?.deviceAdaptive?.devices.contains { $0.mode == "direct" } == true)
     }
+
+	func adaptiveDeviceState(for ip: String) -> DeviceAdaptiveState? {
+		stats?.deviceAdaptive?.devices.first { $0.device == ip }
+	}
 
     func deviceOverride(for ip: String) -> String {
         for rule in status?.routing ?? [] where rule.type == "src-ip" && rule.value == ip {
@@ -215,7 +220,7 @@ final class AppModel: ObservableObject {
     func setDeviceOverride(_ ip: String, action: String) {
         var rules = status?.routing ?? []
         rules.removeAll { $0.type == "src-ip" && $0.value == ip }
-        if action == "proxy" || action == "direct" {
+        if action == "proxy" || action == "direct" || action == "reject" {
             rules.insert(RoutingRule(type: "src-ip", value: ip, action: action, group: "设备开关"), at: 0)
         }
         Task {

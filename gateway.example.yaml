@@ -22,6 +22,14 @@ egress:
     username: ""
     password: ""
 
+# ========== 分流规则 ==========
+# src-ip 是设备级前置策略，不受后续域名规则顺序影响。
+routing:
+  rules: []
+  # - type: src-ip
+  #   value: 192.168.1.50
+  #   action: direct         # direct | proxy | reject
+
 # ========== DNS 服务 ==========
 dns:
   enabled: true
@@ -40,6 +48,7 @@ quic_block: true
 # ========== Runtime（通常不用改）==========
 runtime:
   redir_port: 17892        # 透明 TCP 转发监听端口
+  udp_redir_port: 17893    # UDP fake-IP 转发端口（游戏语音/视频通话）
   api_port: 19090          # 本机回环状态 API（配置热加载）
   log_level: info
   fake_ip_range: "198.18.0.0/16"

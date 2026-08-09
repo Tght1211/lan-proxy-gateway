@@ -23,10 +23,23 @@ func renderPFAnchor(c Config) string {
 		fmt.Fprintf(&b, "rdr pass on %s proto udp from any to ! %s port %d -> 127.0.0.1 port %d\n", c.Iface, c.GatewayIP, c.DNSPort, c.DNSPort)
 		fmt.Fprintf(&b, "rdr pass on %s proto tcp from any to ! %s port %d -> 127.0.0.1 port %d\n", c.Iface, c.GatewayIP, c.DNSPort, c.DNSPort)
 	}
+	if c.UDPFakeIPRedir && c.FakeIPRange != "" && c.UDPRedirPort > 0 {
+		// Redirect UDP packets destined for the fake-IP range into the UDP relay,
+		// so game voice / video calls reach their real destination.
+		// Must come AFTER DNS hijack (port 53 already handled above) and BEFORE
+		// the generic tcp rdr — first matching rdr wins.
+		// No port 443 exclusion needed: fake-IP addresses never host real QUIC
+		// servers; the QUIC block targets real-destination UDP/443 which never
+		// lands in the fake-IP range.
+		fmt.Fprintf(&b, "rdr pass on %s proto udp from any to %s -> 127.0.0.1 port %d\n", c.Iface, c.FakeIPRange, c.UDPRedirPort)
+	}
 	if c.TCPRedirect {
 		fmt.Fprintf(&b, "rdr pass on %s proto tcp from any to ! %s -> 127.0.0.1 port %d\n", c.Iface, c.GatewayIP, c.RedirPort)
 	}
 	fmt.Fprintf(&b, "nat on %s from any to any -> (%s)\n", c.Iface, c.Iface)
+	for _, source := range c.BlockedSources {
+		fmt.Fprintf(&b, "block return quick on %s from %s to any\n", c.Iface, source)
+	}
 	if c.QUICBlock {
 		fmt.Fprintf(&b, "block return quick on %s proto udp from any to any port 443\n", c.Iface)
 	}

@@ -113,6 +113,9 @@ func (a *App) Run(ctx context.Context) error {
 	if a.Cfg.DNS.Enabled {
 		checks = append(checks, procutil.PortCheck{Label: "dns", Port: a.Cfg.DNS.Port, Bind: "0.0.0.0"})
 	}
+	if a.Cfg.Egress.Mode == config.EgressProxy && a.Cfg.DNS.FakeIP {
+		checks = append(checks, procutil.PortCheck{Label: "udp-relay", Port: a.Cfg.Runtime.UDPRedirPort, Bind: "0.0.0.0"})
+	}
 	if err := procutil.CheckPorts(checks); err != nil {
 		return err
 	}
@@ -156,6 +159,8 @@ func (a *App) Run(ctx context.Context) error {
 
 // startServices launches relay, DNS and the loopback API for the current config.
 func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST relay.OrigDSTResolver) (*daemonRuntime, error) {
+	a.migrateLearnedGroups()
+
 	rt := &daemonRuntime{logger: logger}
 	rt.tracker = relay.NewTracker()
 	rt.tracker.StartSampling(ctx, 5*time.Second)
@@ -196,6 +201,24 @@ func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST re
 			}
 		}()
 	}
+	// Start UDP relay for fake-IP range (game voice, video calls).
+	if a.Cfg.Egress.Mode == config.EgressProxy && a.Cfg.DNS.FakeIP && rt.dns != nil {
+		fakeRange := rt.dns.FakeIPRange()
+		rt.udpRelay = relay.NewUDPRelay(relay.UDPRelayOptions{
+			ListenAddr:   relay.FormatUDPListenAddr(a.Cfg.Runtime.UDPRedirPort),
+			FakeIPRange:  &fakeRange,
+			LookupFakeIP: rt.dns.LookupFakeIP,
+			Resolve:      relay.NewUpstreamResolver(a.Cfg.DNS.Upstreams),
+			Tracker:      rt.tracker,
+			Logger:       logger,
+		})
+		rt.syncUDPRelayRouting(a.Cfg)
+		go func() {
+			if err := rt.udpRelay.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
+				logger.Error("UDP relay 异常退出", "err", err)
+			}
+		}()
+	}
 	go func() {
 		if err := rt.relay.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
 			logger.Error("relay 异常退出", "err", err)
@@ -213,17 +236,21 @@ func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST re
 
 // daemonRuntime bundles the long-running services for shutdown/reload.
 type daemonRuntime struct {
-	logger  *slog.Logger
-	tracker *relay.Tracker
-	relay   *relay.Server
-	dns     *dns.Server
-	api     *apiServer
-	learner *fallbackLearner
+	logger   *slog.Logger
+	tracker  *relay.Tracker
+	relay    *relay.Server
+	udpRelay *relay.UDPRelay
+	dns      *dns.Server
+	api      *apiServer
+	learner  *fallbackLearner
 }
 
 func (rt *daemonRuntime) shutdown() {
 	if rt.relay != nil {
 		_ = rt.relay.Close()
+	}
+	if rt.udpRelay != nil {
+		_ = rt.udpRelay.Close()
 	}
 	if rt.dns != nil {
 		rt.dns.Shutdown()
@@ -246,6 +273,7 @@ func (rt *daemonRuntime) applyConfig(a *App, cfg *config.Config) {
 		rt.dns.SetFakeIPEnabled(cfg.Egress.Mode == config.EgressProxy && cfg.DNS.FakeIP)
 	}
 	rt.bindFakeIP()
+	rt.bindUDPRelayFakeIP()
 	if cfg.Gateway.Enabled {
 		if err := a.Gateway.Enable(firewallConfig(cfg)); err != nil {
 			rt.logger.Warn("防火墙规则热应用失败", "err", err)
@@ -255,6 +283,25 @@ func (rt *daemonRuntime) applyConfig(a *App, cfg *config.Config) {
 }
 
 func (rt *daemonRuntime) applyRouting(cfg *config.Config) {
+	direct, proxy, rules := buildRoutingArgs(cfg)
+	rt.relay.SetRouting(cfg.Egress.Mode, direct, proxy, rules)
+	if rt.udpRelay != nil {
+		rt.udpRelay.SetRouting(relay.BuildRoutingPolicy(cfg.Egress.Mode, direct, proxy, rules))
+	}
+	rt.setEgressProbe(cfg, proxy)
+}
+
+// syncUDPRelayRouting pushes the current routing policy to the UDP relay.
+// Called once at startup after udpRelay is created; hot-reload goes through applyRouting.
+func (rt *daemonRuntime) syncUDPRelayRouting(cfg *config.Config) {
+	if rt.udpRelay == nil {
+		return
+	}
+	direct, proxy, rules := buildRoutingArgs(cfg)
+	rt.udpRelay.SetRouting(relay.BuildRoutingPolicy(cfg.Egress.Mode, direct, proxy, rules))
+}
+
+func buildRoutingArgs(cfg *config.Config) (relay.Dialer, relay.Dialer, []relay.RouteRule) {
 	direct, _ := buildDialer(config.EgressConfig{Mode: config.EgressDirect})
 	var proxy relay.Dialer
 	if cfg.Egress.Mode == config.EgressProxy {
@@ -264,8 +311,7 @@ func (rt *daemonRuntime) applyRouting(cfg *config.Config) {
 	for _, rule := range cfg.Routing.Rules {
 		rules = append(rules, relay.RouteRule{Type: rule.Type, Value: rule.Value, Action: rule.Action})
 	}
-	rt.relay.SetRouting(cfg.Egress.Mode, direct, proxy, rules)
-	rt.setEgressProbe(cfg, proxy)
+	return direct, proxy, rules
 }
 
 // setEgressProbe arms the global outage monitor with the upstream proxy
@@ -299,6 +345,15 @@ func (rt *daemonRuntime) bindFakeIP() {
 	prefix := rt.dns.FakeIPRange()
 	rt.relay.SetFakeIP(&prefix, rt.dns.LookupFakeIP)
 	rt.relay.SetRealIPLookup(rt.dns.LookupRealIP)
+}
+
+// bindUDPRelayFakeIP keeps the UDP relay's fake-ip lookup in sync with DNS.
+func (rt *daemonRuntime) bindUDPRelayFakeIP() {
+	if rt.dns == nil || rt.udpRelay == nil {
+		return
+	}
+	prefix := rt.dns.FakeIPRange()
+	rt.udpRelay.SetFakeIP(&prefix, rt.dns.LookupFakeIP)
 }
 
 // watchConfig polls the config file mtime and applies changes (belt; the

@@ -327,7 +327,7 @@ func TestPipeHalfClose(t *testing.T) {
 	defer client.Close()
 	defer upstream.Close()
 
-	tc := NewTracker().Open("1.1.1.1", "h", 80, false)
+	tc := NewTracker().Open("1.1.1.1", "h", 80, false, "tcp")
 	done := make(chan struct{})
 	go func() { pipe(a, b, tc); close(done) }()
 
@@ -377,7 +377,7 @@ func TestPipeDrainTimeoutStartsAfterFirstDirectionFinishes(t *testing.T) {
 	defer client.Close()
 	defer upstream.Close()
 
-	tc := NewTracker().Open("1.1.1.1", "h", 443, true)
+	tc := NewTracker().Open("1.1.1.1", "h", 443, true, "tcp")
 	done := make(chan struct{})
 	go func() {
 		pipeWithDrainTimeout(a, b, tc, 40*time.Millisecond)
@@ -408,7 +408,7 @@ func TestTrackerConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			c := tr.Open("10.0.0.1", "h", 443, true)
+			c := tr.Open("10.0.0.1", "h", 443, true, "tcp")
 			c.AddUp(int64(i))
 			c.AddDown(1)
 			c.Close()

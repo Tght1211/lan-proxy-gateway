@@ -17,15 +17,17 @@ import (
 // StatsResponse is served by GET /api/stats and consumed by the console and
 // native App. Bump SchemaVersion when an incompatible field changes.
 type StatsResponse struct {
-	SchemaVersion int            `json:"schema_version"`
-	Egress        string         `json:"egress"`
-	Proxy         string         `json:"proxy,omitempty"`
-	UptimeSec     int64          `json:"uptime_sec"`
-	Relay         relay.Snapshot `json:"relay"`
-	DNS           *dns.Stats     `json:"dns,omitempty"`
-	Health        HealthSnapshot `json:"health"`
-	Fallback      *FallbackStats `json:"fallback,omitempty"`
-	EgressHealth  *egressHealthJSON `json:"egress_health,omitempty"`
+	SchemaVersion  int                          `json:"schema_version"`
+	Egress         string                       `json:"egress"`
+	Proxy          string                       `json:"proxy,omitempty"`
+	UptimeSec      int64                        `json:"uptime_sec"`
+	Relay          relay.Snapshot               `json:"relay"`
+	UDPRelay       *relay.UDPRelayStats         `json:"udp_relay,omitempty"`
+	DNS            *dns.Stats                   `json:"dns,omitempty"`
+	Health         HealthSnapshot               `json:"health"`
+	Fallback       *FallbackStats               `json:"fallback,omitempty"`
+	EgressHealth   *egressHealthJSON            `json:"egress_health,omitempty"`
+	DeviceAdaptive relay.DeviceAdaptiveSnapshot `json:"device_adaptive"`
 }
 
 // egressHealthJSON exposes the global outage state and post-direct failures.
@@ -101,11 +103,16 @@ func (s *apiServer) Close() error {
 func (s *apiServer) handleStats(w http.ResponseWriter, r *http.Request) {
 	cfg := s.app.getCfg()
 	resp := StatsResponse{
-		SchemaVersion: 3,
-		Egress:        cfg.Egress.Mode,
-		UptimeSec:     int64(time.Since(s.started).Seconds()),
-		Relay:         s.rt.tracker.Snapshot(),
-		Health:        s.app.Health(),
+		SchemaVersion:  3,
+		Egress:         cfg.Egress.Mode,
+		UptimeSec:      int64(time.Since(s.started).Seconds()),
+		Relay:          s.rt.tracker.Snapshot(),
+		Health:         s.app.Health(),
+		DeviceAdaptive: s.rt.relay.DeviceAdaptiveHealth(),
+	}
+	if s.rt.udpRelay != nil {
+		st := s.rt.udpRelay.Stats()
+		resp.UDPRelay = &st
 	}
 	if cfg.Egress.Mode == "proxy" {
 		p := cfg.Egress.Proxy

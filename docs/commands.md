@@ -45,9 +45,10 @@ gateway system-proxy off
 ```bash
 gateway routing list [--json]
 gateway routing set --rules-json '[{"type":"domain-suffix","value":"example.com","action":"direct"}]'
+gateway routing set --rules-json '[{"type":"src-ip","value":"192.168.1.50","action":"reject"}]'
 ```
 
-规则按顺序首次命中，类型支持 `domain`、`domain-suffix`、`ip-cidr`，动作支持 `proxy`、`direct`、`reject`。macOS App 提供可视化编辑器，日常使用不必手写 JSON。
+类型支持 `src-ip`、`domain`、`domain-suffix`、`ip-cidr`，动作支持 `proxy`、`direct`、`reject`。`src-ip` 是设备级前置策略，无论显示顺序如何都优先于其他规则；同类规则仍按顺序首次命中。设备 `reject` 会同步到 pf/iptables，阻断该设备的转发流量。macOS App 的设备列表和规则编辑器都能管理这些规则。
 
 ## 开机自启
 

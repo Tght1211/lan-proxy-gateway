@@ -110,13 +110,14 @@ func TestRenderLinuxRules(t *testing.T) {
 
 func TestRenderPFAnchor(t *testing.T) {
 	cfg := Config{
-		Iface:       "en0",
-		GatewayIP:   "192.168.1.100",
-		RedirPort:   17892,
-		DNSPort:     53,
-		TCPRedirect: true,
-		DNSHijack:   true,
-		QUICBlock:   true,
+		Iface:          "en0",
+		GatewayIP:      "192.168.1.100",
+		RedirPort:      17892,
+		DNSPort:        53,
+		TCPRedirect:    true,
+		DNSHijack:      true,
+		QUICBlock:      true,
+		BlockedSources: []string{"192.168.1.50"},
 	}
 	got := renderPFAnchor(cfg)
 	wantLines := []string{
@@ -124,6 +125,7 @@ func TestRenderPFAnchor(t *testing.T) {
 		"rdr pass on en0 proto tcp from any to ! 192.168.1.100 port 53 -> 127.0.0.1 port 53",
 		"rdr pass on en0 proto tcp from any to ! 192.168.1.100 -> 127.0.0.1 port 17892",
 		"nat on en0 from any to any -> (en0)",
+		"block return quick on en0 from 192.168.1.50 to any",
 		"block return quick on en0 proto udp from any to any port 443",
 	}
 	for _, want := range wantLines {
@@ -143,6 +145,19 @@ func TestRenderPFAnchor(t *testing.T) {
 	}
 	if !strings.Contains(min, "nat on en0 from any to any -> (en0)") {
 		t.Fatalf("minimal config missing nat:\n%s", min)
+	}
+}
+
+func TestRenderLinuxBlockedSources(t *testing.T) {
+	cfg := testCfg
+	cfg.BlockedSources = []string{"192.168.1.50", "192.168.1.51"}
+	_, filter := renderLinuxRules(cfg)
+	want := []string{
+		"FORWARD -i eth0 -s 192.168.1.50 -m comment --comment lan-proxy-gateway -j REJECT",
+		"FORWARD -i eth0 -s 192.168.1.51 -m comment --comment lan-proxy-gateway -j REJECT",
+	}
+	if got := joinRules(filter); !reflect.DeepEqual(got, want) {
+		t.Fatalf("filter = %v, want %v", got, want)
 	}
 }
 
@@ -263,5 +278,59 @@ func TestDarwinApplyFailsWithoutWildcardAnchor(t *testing.T) {
 	_, err := m.Apply(Config{Iface: "en0"})
 	if err == nil || !strings.Contains(err.Error(), "com.apple") {
 		t.Fatalf("want wildcard-anchor error, got %v", err)
+	}
+}
+
+func TestRenderPFAnchorUDPFakeIP(t *testing.T) {
+	cfg := Config{
+		Iface:          "en0",
+		GatewayIP:      "192.168.1.100",
+		RedirPort:      17892,
+		UDPRedirPort:   17893,
+		FakeIPRange:    "198.18.0.0/16",
+		DNSPort:        53,
+		TCPRedirect:    true,
+		UDPFakeIPRedir: true,
+		DNSHijack:      true,
+		QUICBlock:      true,
+	}
+	got := renderPFAnchor(cfg)
+	// Fake-IP rdr covers all ports — fake IPs never host real QUIC servers,
+	// so no port 443 exclusion is needed even when QUICBlock is on.
+	wantLine := "rdr pass on en0 proto udp from any to 198.18.0.0/16 -> 127.0.0.1 port 17893"
+	if !strings.Contains(got, wantLine) {
+		t.Fatalf("anchor missing UDP fake-IP rdr rule %q in:\n%s", wantLine, got)
+	}
+	// UDP rdr must come after DNS hijack but before TCP rdr
+	dnsIdx := strings.Index(got, "port 53")
+	udpIdx := strings.Index(got, "198.18.0.0/16")
+	tcpIdx := strings.Index(got, "17892")
+	if udpIdx < dnsIdx {
+		t.Fatalf("UDP fake-IP rdr should come after DNS hijack:\n%s", got)
+	}
+	if udpIdx > tcpIdx {
+		t.Fatalf("UDP fake-IP rdr should come before TCP rdr:\n%s", got)
+	}
+}
+
+func TestRenderLinuxRulesUDPFakeIP(t *testing.T) {
+	cfg := testCfg
+	cfg.TCPRedirect = true
+	cfg.UDPFakeIPRedir = true
+	cfg.UDPRedirPort = 17893
+	cfg.FakeIPRange = "198.18.0.0/16"
+	cfg.QUICBlock = true // even with QUIC block, fake-IP rdr covers all ports
+	nat, _ := renderLinuxRules(cfg)
+	rules := joinRules(nat)
+	wantRule := "PREROUTING -i eth0 -p udp -d 198.18.0.0/16 -m comment --comment lan-proxy-gateway -j REDIRECT --to-ports 17893"
+	found := false
+	for _, r := range rules {
+		if r == wantRule {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("UDP fake-IP REDIRECT rule missing, got:\n%s", strings.Join(rules, "\n"))
 	}
 }

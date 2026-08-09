@@ -32,6 +32,18 @@ func renderLinuxRules(c Config) (nat [][]string, filter [][]string) {
 			))
 		}
 	}
+	if c.UDPFakeIPRedir && c.FakeIPRange != "" && c.UDPRedirPort > 0 {
+		// Redirect UDP destined for the fake-IP range into the UDP relay.
+		// No port 443 exclusion needed: fake-IP addresses never host real
+		// QUIC servers; the QUIC block targets real-destination UDP/443
+		// which never lands in the fake-IP range.
+		udpPort := strconv.Itoa(c.UDPRedirPort)
+		nat = append(nat, joinArgs(
+			[]string{"PREROUTING"}, iface,
+			[]string{"-p", "udp", "-d", c.FakeIPRange},
+			tag, []string{"-j", "REDIRECT", "--to-ports", udpPort},
+		))
+	}
 	if c.TCPRedirect {
 		nat = append(nat, joinArgs(
 			[]string{"PREROUTING"}, iface, []string{"-p", "tcp"},
@@ -42,6 +54,12 @@ func renderLinuxRules(c Config) (nat [][]string, filter [][]string) {
 		[]string{"POSTROUTING", "-o", c.Iface},
 		tag, []string{"-j", "MASQUERADE"},
 	))
+	for _, source := range c.BlockedSources {
+		filter = append(filter, joinArgs(
+			[]string{"FORWARD"}, iface, []string{"-s", source},
+			tag, []string{"-j", "REJECT"},
+		))
+	}
 
 	if c.QUICBlock {
 		filter = append(filter, joinArgs(

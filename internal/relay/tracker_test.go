@@ -8,7 +8,7 @@ import (
 
 func TestTrackerArchivesAndAggregates(t *testing.T) {
 	tr := NewTracker()
-	c := tr.Open("192.168.1.20", "r1---sn.googlevideo.com", 443, true)
+	c := tr.Open("192.168.1.20", "r1---sn.googlevideo.com", 443, true, "tcp")
 	c.AddUp(100)
 	c.AddDown(900)
 	c.Close()
@@ -34,7 +34,7 @@ func TestTrackerArchivesAndAggregates(t *testing.T) {
 
 func TestTrackerSnapshotIncludesActiveConnectionsInAggregates(t *testing.T) {
 	tr := NewTracker()
-	c := tr.Open("192.168.1.30", "www.youtube.com", 443, true)
+	c := tr.Open("192.168.1.30", "www.youtube.com", 443, true, "tcp")
 	c.AddUp(120)
 	c.AddDown(880)
 
@@ -64,7 +64,7 @@ func TestTrackerSamplesTraffic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr.StartSampling(ctx, 5*time.Millisecond)
-	c := tr.Open("192.168.1.20", "example.com", 443, false)
+	c := tr.Open("192.168.1.20", "example.com", 443, false, "tcp")
 	c.AddDown(512)
 	time.Sleep(12 * time.Millisecond)
 	c.Close()
@@ -95,8 +95,8 @@ func TestClassifyService(t *testing.T) {
 		"asset.example.co.uk":      "example.co.uk",
 	}
 	for host, want := range tests {
-		if got := classifyService(host); got != want {
-			t.Errorf("classifyService(%q) = %q, want %q", host, got, want)
+		if got := ClassifyService(host); got != want {
+			t.Errorf("ClassifyService(%q) = %q, want %q", host, got, want)
 		}
 	}
 }

@@ -29,6 +29,17 @@ type routingPolicy struct {
 	rules         []compiledRule
 }
 
+// BuildRoutingPolicy constructs a routingPolicy from the given parameters.
+// Exported so the daemon can share the same policy with both TCP and UDP relays.
+func BuildRoutingPolicy(defaultAction string, direct, proxy Dialer, rules []RouteRule) *routingPolicy {
+	return &routingPolicy{
+		defaultAction: defaultAction,
+		direct:        direct,
+		proxy:         proxy,
+		rules:         compileRules(rules),
+	}
+}
+
 func compileRules(rules []RouteRule) []compiledRule {
 	out := make([]compiledRule, 0, len(rules))
 	for _, rule := range rules {
@@ -54,16 +65,22 @@ func compileRules(rules []RouteRule) []compiledRule {
 func (p *routingPolicy) selectDialer(srcIP, host string, ip netip.Addr) (Dialer, bool, bool, bool) {
 	action := p.defaultAction
 	matchedRule := false
-	deviceOverride := false
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	// Device rules are a pre-routing policy layer, independent of their visual
+	// position in the flat editor. A device override must never be shadowed by
+	// an earlier domain/IP rule.
+	for _, c := range p.rules {
+		if c.rule.Type == "src-ip" && c.rule.Value == srcIP {
+			return p.selectAction(c.rule.Action, true)
+		}
+	}
 	for _, c := range p.rules {
 		rule := c.rule
+		if rule.Type == "src-ip" {
+			continue
+		}
 		matched := false
 		switch rule.Type {
-		case "src-ip":
-			// Device-level override: exact IP match. Highest priority; once
-			// matched it fixes the egress and skips all domain rules.
-			matched = rule.Value == srcIP
 		case "domain":
 			matched = host == strings.ToLower(strings.Trim(rule.Value, "."))
 		case "domain-suffix":
@@ -75,25 +92,13 @@ func (p *routingPolicy) selectDialer(srcIP, host string, ip netip.Addr) (Dialer,
 		if matched {
 			action = rule.Action
 			matchedRule = true
-			if rule.Type == "src-ip" {
-				deviceOverride = true
-			}
 			break
 		}
 	}
-	// src-ip override fixes the egress: no proxy→direct fallback, no health
-	// state interaction. reject is still honored.
-	if deviceOverride {
-		switch action {
-		case RouteReject:
-			return nil, false, true, true
-		case RouteProxy:
-			if p.proxy != nil {
-				return p.proxy, true, false, true
-			}
-		}
-		return p.direct, false, false, true
-	}
+	return p.selectAction(action, matchedRule)
+}
+
+func (p *routingPolicy) selectAction(action string, matchedRule bool) (Dialer, bool, bool, bool) {
 	switch action {
 	case RouteReject:
 		return nil, false, true, matchedRule
@@ -111,12 +116,13 @@ func (p *routingPolicy) selectDialer(srcIP, host string, ip netip.Addr) (Dialer,
 func (p *routingPolicy) matchType(srcIP, host string, ip netip.Addr) string {
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
 	for _, c := range p.rules {
+		if c.rule.Type == "src-ip" && c.rule.Value == srcIP {
+			return c.rule.Type
+		}
+	}
+	for _, c := range p.rules {
 		rule := c.rule
 		switch rule.Type {
-		case "src-ip":
-			if rule.Value == srcIP {
-				return rule.Type
-			}
 		case "domain":
 			if host == strings.ToLower(strings.Trim(rule.Value, ".")) {
 				return rule.Type

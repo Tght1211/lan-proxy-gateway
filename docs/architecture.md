@@ -20,8 +20,9 @@ LAN DNS 查询 -> 内置 DNS 转发器 -> 上游 DNS
 - 单接口 macOS 即使选择直连，也让 TCP 经过 relay，避免同接口 pf NAT 无法正确回包。
 - 代理模式阻断 UDP/443，让浏览器从 QUIC 回退到可代理的 TCP。
 - 代理模式默认启用 fake-IP，把原始域名交给上游代理解析和分流；默认不劫持设备主动发往其他 DNS 的查询。
-- 有序规则支持 `domain`、`domain-suffix`、`ip-cidr` 匹配，并选择 `proxy`、`direct` 或 `reject`。没有显式规则时使用当前出口。
+- `src-ip` 设备规则作为前置策略，优先于有序的 `domain`、`domain-suffix`、`ip-cidr` 规则；都可选择 `proxy`、`direct` 或 `reject`。设备拒绝会同时下发到 pf/iptables，覆盖非 TCP 转发。
 - 默认代理拨号失败而直连成功的域名可以进入回退学习，并在达到阈值后生成可删除的直连规则。
+- 同一设备在 2 分钟内遇到 5 个不同目标的代理失败时，会触发设备级熔断并临时直连 15 分钟。该状态只影响故障设备、保留拒绝规则，并在保护期结束后自动恢复代理尝试。
 
 `gateway start` 启动脱离终端的 `gateway run` 守护进程。守护进程负责防火墙、DNS、relay、配置热加载和本机回环状态 API。`gateway stop` 会拆除规则并恢复由本程序开启的 IP 转发/pf 状态。
 

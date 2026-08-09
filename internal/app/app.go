@@ -157,8 +157,9 @@ func (a *App) PromoteLearnedDirectRule(host string) (bool, error) {
 		}
 	}
 	next := *a.Cfg
+	group := learnedGroupName(host)
 	next.Routing.Rules = append(append([]config.RoutingRule(nil), a.Cfg.Routing.Rules...),
-		config.RoutingRule{Type: config.RuleDomainSuffix, Value: host, Action: config.EgressDirect, Group: "自动学习", Learned: true})
+		config.RoutingRule{Type: config.RuleDomainSuffix, Value: host, Action: config.EgressDirect, Group: group, Learned: true})
 	config.Normalize(&next)
 	if err := config.Validate(&next); err != nil {
 		return false, err
@@ -169,6 +170,46 @@ func (a *App) PromoteLearnedDirectRule(host string) (bool, error) {
 	}
 	a.pokeReload()
 	return true, nil
+}
+
+// learnedGroupName returns a sub-grouped name for auto-learned rules based
+// on the service classification. Known services get "自动学习 · YouTube" etc.;
+// unrecognised domains fall into the generic "自动学习" bucket.
+func learnedGroupName(host string) string {
+	svc := relay.ClassifyService(host)
+	// Known services return a clean label (e.g. "YouTube") without dots.
+	// Unknown domains return an eTLD+1 string (e.g. "example.com") or the
+	// raw host — both contain a dot. Group those into the generic bucket.
+	if strings.Contains(svc, ".") || svc == "未知目标" || svc == "未解析域名" {
+		return "自动学习"
+	}
+	return "自动学习 · " + svc
+}
+
+// migrateLearnedGroups reclassifies existing learned rules that sit in the
+// legacy flat "自动学习" group into service-specific sub-groups. Idempotent.
+func (a *App) migrateLearnedGroups() {
+	a.cfgMu.Lock()
+	defer a.cfgMu.Unlock()
+	changed := false
+	next := *a.Cfg
+	next.Routing.Rules = append([]config.RoutingRule(nil), a.Cfg.Routing.Rules...)
+	for i := range next.Routing.Rules {
+		r := &next.Routing.Rules[i]
+		if !r.Learned || r.Group != "自动学习" {
+			continue
+		}
+		g := learnedGroupName(r.Value)
+		if g != "自动学习" {
+			r.Group = g
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
+	a.Cfg = &next
+	_ = a.Save()
 }
 
 // RemoveLearnedDirectRule drops the learned direct rule for host when the
@@ -263,6 +304,12 @@ func buildDialer(e config.EgressConfig) (relay.Dialer, error) {
 // firewallConfig derives the desired firewall rule set from the config.
 func firewallConfig(cfg *config.Config) firewall.Config {
 	proxy := cfg.Egress.Mode == config.EgressProxy
+	var blockedSources []string
+	for _, rule := range cfg.Routing.Rules {
+		if rule.Type == config.RuleSrcIP && rule.Action == config.RouteReject {
+			blockedSources = append(blockedSources, rule.Value)
+		}
+	}
 	return firewall.Config{
 		RedirPort: cfg.Runtime.RedirPort,
 		DNSPort:   cfg.DNS.Port,
@@ -270,8 +317,15 @@ func firewallConfig(cfg *config.Config) firewall.Config {
 		// does not translate packets that enter and leave on the same interface,
 		// so kernel-forwarded direct connections never receive replies.
 		TCPRedirect: true,
-		DNSHijack:   cfg.DNS.Enabled && cfg.DNS.Hijack,
-		QUICBlock:   proxy && cfg.QUICBlock,
+		// UDP fake-IP redirect: in proxy mode, DNS returns fake IPs which break
+		// UDP connectivity (game voice, etc). The UDP relay resolves them back
+		// to real destinations and forwards directly.
+		UDPFakeIPRedir: proxy && cfg.DNS.FakeIP,
+		UDPRedirPort:   cfg.Runtime.UDPRedirPort,
+		FakeIPRange:    cfg.Runtime.FakeIPRange,
+		DNSHijack:      cfg.DNS.Enabled && cfg.DNS.Hijack,
+		QUICBlock:      proxy && cfg.QUICBlock,
+		BlockedSources: blockedSources,
 	}
 }
 
@@ -314,9 +368,10 @@ type DNSStatus struct {
 }
 
 type PortsStatus struct {
-	Redir int `json:"redir"`
-	API   int `json:"api"`
-	DNS   int `json:"dns"`
+	Redir    int `json:"redir"`
+	UDPRedir int `json:"udp_redir"`
+	API      int `json:"api"`
+	DNS      int `json:"dns"`
 }
 
 // Status returns the current runtime status (no blocking network calls).
@@ -336,9 +391,10 @@ func (a *App) Status() Status {
 		QUICBlock: a.Cfg.QUICBlock && a.Cfg.Egress.Mode == config.EgressProxy,
 		Gateway:   gs,
 		Ports: PortsStatus{
-			Redir: a.Cfg.Runtime.RedirPort,
-			API:   a.Cfg.Runtime.APIPort,
-			DNS:   a.Cfg.DNS.Port,
+			Redir:    a.Cfg.Runtime.RedirPort,
+			UDPRedir: a.Cfg.Runtime.UDPRedirPort,
+			API:      a.Cfg.Runtime.APIPort,
+			DNS:      a.Cfg.DNS.Port,
 		},
 		ConfigFile: a.Paths.ConfigFile,
 		LogFile:    a.Paths.LogFile,

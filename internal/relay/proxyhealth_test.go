@@ -14,7 +14,7 @@ func TestProxyHealthEntersDirectTest(t *testing.T) {
 	if p.directDecision("x.com", now.Add(2*time.Second)) {
 		t.Fatal("must not direct before threshold")
 	}
-	p.recordFailure("x.com", now.Add(2 * time.Second))
+	p.recordFailure("x.com", now.Add(2*time.Second))
 	if !p.directDecision("x.com", now.Add(3*time.Second)) {
 		t.Fatal("third failure inside window must enter direct test")
 	}
@@ -105,8 +105,8 @@ func TestSrcIPOverrideBeatsDomainRule(t *testing.T) {
 		direct:        direct,
 		proxy:         proxy,
 		rules: compileRules([]RouteRule{
-			{Type: "src-ip", Value: "192.168.1.50", Action: RouteDirect},
 			{Type: "domain-suffix", Value: "example.com", Action: RouteProxy},
+			{Type: "src-ip", Value: "192.168.1.50", Action: RouteDirect},
 		}),
 	}
 	got, viaProxy, _, matched := p.selectDialer("192.168.1.50", "www.example.com", netip.Addr{})
@@ -116,5 +116,20 @@ func TestSrcIPOverrideBeatsDomainRule(t *testing.T) {
 	got2, viaProxy2, _, _ := p.selectDialer("192.168.1.99", "www.example.com", netip.Addr{})
 	if got2 != proxy || !viaProxy2 {
 		t.Fatal("non-matching src-ip must fall through to domain rule → proxy")
+	}
+}
+
+func TestSrcIPRejectBeatsEarlierDomainRule(t *testing.T) {
+	p := &routingPolicy{
+		defaultAction: RouteProxy,
+		direct:        &namedDialer{},
+		proxy:         &namedDialer{},
+		rules: compileRules([]RouteRule{
+			{Type: "domain-suffix", Value: "example.com", Action: RouteProxy},
+			{Type: "src-ip", Value: "192.168.1.50", Action: RouteReject},
+		}),
+	}
+	if _, _, rejected, matched := p.selectDialer("192.168.1.50", "www.example.com", netip.Addr{}); !rejected || !matched {
+		t.Fatal("src-ip reject must be evaluated before every domain rule")
 	}
 }

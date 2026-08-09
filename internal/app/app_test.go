@@ -110,6 +110,14 @@ func TestFirewallConfigModes(t *testing.T) {
 	if !fw.DNSHijack {
 		t.Fatalf("explicit DNS hijack must be honored: %+v", fw)
 	}
+	cfg.Routing.Rules = []config.RoutingRule{
+		{Type: config.RuleSrcIP, Value: "192.168.1.50", Action: config.RouteReject},
+		{Type: config.RuleSrcIP, Value: "192.168.1.51", Action: config.EgressDirect},
+	}
+	fw = firewallConfig(cfg)
+	if len(fw.BlockedSources) != 1 || fw.BlockedSources[0] != "192.168.1.50" {
+		t.Fatalf("only rejected devices must reach firewall block list: %+v", fw.BlockedSources)
+	}
 }
 
 func TestDNSOptionsFakeIPOnlyInProxyMode(t *testing.T) {

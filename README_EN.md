@@ -23,7 +23,7 @@ Turn an always-on Mac mini or small Linux host into a LAN gateway. Switch, PS5, 
 
 - **LAN gateway:** route client IPv4 TCP traffic directly or through one HTTP/SOCKS5 upstream.
 - **Original-domain forwarding:** fake-IP preserves domains for Clash/sing-box routing without requiring TUN mode.
-- **Lightweight routing:** ordered domain, domain-suffix, and IP-CIDR rules can select proxy, direct, or reject behavior, with automatic learning from successful direct fallbacks.
+- **Lightweight routing:** device policy precedes domain, domain-suffix, and IP-CIDR rules; choose proxy, direct, or reject, with per-domain learning and temporary per-device direct protection during failure bursts.
 - **Native macOS app:** inspect traffic topology, clients, services, connection outcomes, and network quality; manage rules, proxy settings, and the gateway core.
 - **Native networking:** `pf` on macOS and `iptables` on Linux, with precise cleanup of rules and system state on shutdown.
 
