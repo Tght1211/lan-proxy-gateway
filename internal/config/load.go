@@ -216,6 +216,10 @@ func Normalize(cfg *Config) {
 		cfg.QUICBlock = true
 	}
 	cfg.IPv6Policy = strings.ToLower(strings.TrimSpace(cfg.IPv6Policy))
+	cfg.ProxyFailure.Action = strings.ToLower(strings.TrimSpace(cfg.ProxyFailure.Action))
+	if cfg.ProxyFailure.Action == "" {
+		cfg.ProxyFailure.Action = ProxyFailDirect
+	}
 	for i := range cfg.Routing.Rules {
 		cfg.Routing.Rules[i].Type = strings.ToLower(strings.TrimSpace(cfg.Routing.Rules[i].Type))
 		cfg.Routing.Rules[i].Value = strings.ToLower(strings.Trim(strings.TrimSpace(cfg.Routing.Rules[i].Value), "."))
@@ -230,6 +234,11 @@ func Validate(cfg *Config) error {
 	case IPv6PolicyNone, IPv6PolicyBlock:
 	default:
 		return fmt.Errorf("ipv6_policy 必须是 空/block，当前: %q", cfg.IPv6Policy)
+	}
+	switch cfg.ProxyFailure.Action {
+	case ProxyFailDirect, ProxyFailReject, ProxyFailKeepProxy:
+	default:
+		return fmt.Errorf("proxy_failure.action 必须是 direct/reject/keep-proxy，当前: %q", cfg.ProxyFailure.Action)
 	}
 	switch cfg.Egress.Mode {
 	case EgressDirect, EgressProxy:

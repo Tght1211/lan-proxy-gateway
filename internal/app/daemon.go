@@ -190,6 +190,7 @@ func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST re
 		OnFallbackSuccess: rt.learner.Record,
 		Logger:            logger,
 	})
+	rt.relay.SetProxyFailAction(a.Cfg.ProxyFailure.Action)
 	rt.applyRouting(a.Cfg)
 	rt.startEgressMonitor(ctx, a, logger)
 	if a.Cfg.DNS.Enabled {
@@ -267,6 +268,7 @@ func (rt *daemonRuntime) applyConfig(a *App, cfg *config.Config) {
 	if dialer, err := buildDialer(cfg.Egress); err == nil {
 		rt.relay.SetDialer(dialer, cfg.Egress.Mode == config.EgressProxy)
 	}
+	rt.relay.SetProxyFailAction(cfg.ProxyFailure.Action)
 	rt.applyRouting(cfg)
 	if rt.dns != nil {
 		rt.dns.SetUpstreams(cfg.DNS.Upstreams)

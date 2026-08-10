@@ -44,10 +44,11 @@ type Server struct {
 	tracker *Tracker
 	logger  *slog.Logger
 
-	listenAddr atomic.Value // string
-	dialer     atomic.Pointer[dialerHolder]
-	viaProxy   atomic.Bool
-	routing    atomic.Pointer[routingPolicy]
+	listenAddr     atomic.Value // string
+	dialer         atomic.Pointer[dialerHolder]
+	viaProxy       atomic.Bool
+	proxyFailAction atomic.Value // string: "direct" | "reject" | "keep-proxy"
+	routing        atomic.Pointer[routingPolicy]
 
 	fakeRange  atomic.Pointer[netip.Prefix]
 	fakeLookup atomic.Value // func(netip.Addr) (string, bool)
@@ -116,6 +117,12 @@ func (s *Server) SetRealIPLookup(lookup func(netip.Addr) (string, bool)) {
 	if lookup != nil {
 		s.realLookup.Store(lookup)
 	}
+}
+
+// SetProxyFailAction sets the behavior when the upstream proxy fails.
+// One of "direct" (fallback, default), "reject" (fail-closed), "keep-proxy" (no fallback).
+func (s *Server) SetProxyFailAction(action string) {
+	s.proxyFailAction.Store(action)
 }
 
 // SetDialer swaps the egress dialer live (direct ↔ proxy switch).
@@ -298,9 +305,17 @@ func (s *Server) handle(client *net.TCPConn) {
 		dialer, viaProxy, rejected, matchedRule = policy.selectDialer(srcIP, routeHost, dstIP)
 		// src-ip device override fixes the egress; skip all fallback/health.
 		deviceOverride = matchedRule && srcIP != "" && policy.matchType(srcIP, routeHost, dstIP) == "src-ip"
-		// 默认出口是代理且未命中显式规则时，代理拨号失败允许直连兜底一次。
+		// 默认出口是代理且未命中显式规则时，根据 proxy_failure 策略决定回退行为。
+		failAction, _ := s.proxyFailAction.Load().(string)
 		if viaProxy && !matchedRule && !deviceOverride && policy.direct != nil {
-			fallbackDialer = policy.direct
+			switch failAction {
+			case "reject":
+				// fail-closed: 代理失败则拒绝连接，不回退直连
+			case "keep-proxy":
+				// keep-proxy: 只走代理，不回退
+			default: // "direct" 或空值
+				fallbackDialer = policy.direct
+			}
 		}
 	} else if holder := s.dialer.Load(); holder != nil {
 		dialer = holder.dialer
@@ -317,7 +332,7 @@ func (s *Server) handle(client *net.TCPConn) {
 
 	// 代理端口全局异常：默认走代理且未命中显式规则时强制直连。
 	eligible := fallbackDialer != nil
-	adaptiveEligible := policy != nil && !deviceOverride && viaProxy && policy.direct != nil
+	adaptiveEligible := eligible && policy != nil && !deviceOverride && viaProxy && policy.direct != nil
 	if adaptiveEligible && s.deviceHealth.directDecision(srcIP, time.Now()) {
 		dialer = policy.direct
 		fallbackDialer = nil

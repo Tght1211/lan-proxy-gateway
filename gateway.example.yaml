@@ -49,6 +49,13 @@ quic_block: true
 # block = 阻断所有转发的 IPv6 流量，防止绕过。留空 = 不干预。
 # ipv6_policy: block
 
+# 代理故障策略：上游代理不可用时的行为。
+# direct = 回退直连（默认，保持联网）
+# reject = 拒绝连接（fail-closed，防止泄漏）
+# keep-proxy = 保持代理路径等待恢复（不回退）
+# proxy_failure:
+#   action: direct
+
 # ========== Runtime（通常不用改）==========
 runtime:
   redir_port: 17892        # 透明 TCP 转发监听端口

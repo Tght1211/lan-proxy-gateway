@@ -355,7 +355,8 @@ type Status struct {
 	Routing    []config.RoutingRule `json:"routing"`
 	DNS        DNSStatus            `json:"dns"`
 	QUICBlock  bool                 `json:"quic_block"`
-	IPv6Policy string               `json:"ipv6_policy,omitempty"`
+	IPv6Policy       string               `json:"ipv6_policy,omitempty"`
+	ProxyFailAction  string               `json:"proxy_fail_action,omitempty"`
 	Gateway    gateway.Status       `json:"gateway"`
 	Ports      PortsStatus          `json:"ports"`
 	ConfigFile string               `json:"config_file"`
@@ -391,7 +392,8 @@ func (a *App) Status() Status {
 			FakeIP:  a.Cfg.DNS.FakeIP && a.Cfg.Egress.Mode == config.EgressProxy,
 		},
 		QUICBlock:  a.Cfg.QUICBlock && a.Cfg.Egress.Mode == config.EgressProxy,
-		IPv6Policy: a.Cfg.IPv6Policy,
+		IPv6Policy:      a.Cfg.IPv6Policy,
+		ProxyFailAction: a.Cfg.ProxyFailure.Action,
 		Gateway:   gs,
 		Ports: PortsStatus{
 			Redir:    a.Cfg.Runtime.RedirPort,
