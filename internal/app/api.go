@@ -75,6 +75,7 @@ func newAPIServer(a *App, rt *daemonRuntime) *apiServer {
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("POST /api/reload", s.handleReload)
+	mux.HandleFunc("GET /api/devices", s.handleDevices)
 	s.http = &http.Server{
 		Addr:              net.JoinHostPort("127.0.0.1", fmt.Sprint(a.Cfg.Runtime.APIPort)),
 		Handler:           mux,
@@ -185,6 +186,15 @@ func buildEgressHealthJSON(snap relay.EgressSnapshot, recent []relay.ConnInfo) *
 
 func (s *apiServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.app.Health())
+}
+
+func (s *apiServer) handleDevices(w http.ResponseWriter, r *http.Request) {
+	info, err := s.app.Gateway.DeviceOnboardingInfo()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("device scan: %v", err), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, info)
 }
 
 func (s *apiServer) handleReload(w http.ResponseWriter, r *http.Request) {
