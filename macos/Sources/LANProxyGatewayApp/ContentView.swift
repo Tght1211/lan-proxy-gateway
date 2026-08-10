@@ -427,7 +427,7 @@ private struct TopologyPanel: View {
                 HStack {
                     Text("流量拓扑").sectionLabel()
                     Spacer()
-                    Text("设备 → 网关 → 规则 → 出口").font(.caption).foregroundStyle(Theme.muted)
+                    Text("设备 → 网关 → ①设备策略 → ②域名规则 → 出口").font(.caption).foregroundStyle(Theme.muted)
                     Button { showRoutingEditor = true } label: {
                         Label("管理规则", systemImage: "slider.horizontal.3").font(.caption)
                     }
@@ -1819,9 +1819,12 @@ private struct RouteDiagram: View {
     let onEditRules: () -> Void
     let onEditProxy: () -> Void
     @State private var devicesExpanded = false
+    @State private var showDevicePolicy = false
 
     var body: some View {
         let rules = model.status?.routing ?? []
+        let deviceRules = rules.filter { $0.type == "src-ip" }
+        let domainRules = rules.filter { $0.type != "src-ip" }
         let egressProxy = model.status?.egress == "proxy"
         let allDevices = model.stats?.relay.devices ?? []
         let devices = devicesExpanded ? Array(allDevices.prefix(8)) : Array(allDevices.prefix(3))
@@ -1832,12 +1835,14 @@ private struct RouteDiagram: View {
         let flowDirect = activeConns.contains { !$0.viaProxy }
         let recentRejectCutoff = Date().addingTimeInterval(-120)
         let flowReject = (model.stats?.relay.recent ?? []).contains { $0.rejected && $0.startedAt > recentRejectCutoff }
+        let hasDeviceOverrides = !deviceRules.isEmpty
+        let protectedCount = model.stats?.deviceAdaptive?.devices.filter { $0.mode == "direct" }.count ?? 0
 
         VStack(spacing: 0) {
             TopoStage(portID: "router", icon: "wifi.router", tint: Theme.lime,
                       title: "主路由 · 互联网", detail: model.status?.gateway.router.nonEmpty ?? "光猫/路由器")
                 .help("代理和直连的流量最终都经主路由访问互联网；设备只需把网关和 DNS 指向旁路由即可被接管")
-            Spacer(minLength: 22)
+            Spacer(minLength: 18)
             HStack(alignment: .top, spacing: 14) {
                 TopoOutcome(icon: "cloud.fill", title: "上游代理", detail: upstream,
                             count: ruleCount(rules, "proxy"), color: Theme.cyan,
@@ -1866,21 +1871,36 @@ private struct RouteDiagram: View {
                             onEditRules: onEditRules, action: {})
                     .topoPort("out.reject", .bottom)
             }
-            Spacer(minLength: 24)
+            Spacer(minLength: 18)
             Button(action: onEditRules) {
                 TopoStage(
                     portID: "rules", icon: "arrow.triangle.branch", tint: Theme.yellow,
-                    title: "规则判断",
-                    detail: rules.isEmpty ? "点击配置分流规则" : "\(rules.count) 条 · 首条命中",
+                    title: "② 域名规则",
+                    detail: domainRules.isEmpty ? "点击配置分流规则" : "\(domainRules.count) 条 · 首条命中",
                     clickable: true
                 )
             }
             .buttonStyle(.plain)
-            .help("点击管理分流规则")
-            Spacer(minLength: 24)
+            .help("按域名、域名后缀、IP-CIDR 判断走代理、直连还是拒绝")
+            Spacer(minLength: 18)
+            Button { showDevicePolicy = true } label: {
+                TopoStage(
+                    portID: "devpolicy", icon: "person.crop.circle.badge.checkmark", tint: Theme.coral,
+                    title: "① 设备策略",
+                    detail: devicePolicySummary(deviceRules: deviceRules, protectedCount: protectedCount),
+                    clickable: true
+                )
+            }
+            .buttonStyle(.plain)
+            .help("设备级前置策略：优先于域名规则，可为每台设备指定代理/直连/拒绝")
+            .popover(isPresented: $showDevicePolicy, arrowEdge: .trailing) {
+                DevicePolicyPopover()
+                    .environmentObject(model)
+            }
+            Spacer(minLength: 18)
             TopoStage(portID: "gw", icon: "server.rack", tint: Theme.cyan,
                       title: "旁路由", detail: model.status?.gateway.localIP.nonEmpty ?? "--")
-            Spacer(minLength: 24)
+            Spacer(minLength: 18)
             HStack(spacing: 12) {
                 if devices.isEmpty {
                     TopoDeviceChip(icon: "desktopcomputer", title: "等待设备接入", subtitle: "配置静态 IP 后自动出现", active: false)
@@ -1928,7 +1948,8 @@ private struct RouteDiagram: View {
                     flowProxy: flowProxy,
                     flowDirect: flowDirect,
                     flowReject: flowReject,
-                    egressProxy: egressProxy
+                    egressProxy: egressProxy,
+                    hasDeviceOverrides: hasDeviceOverrides
                 )
             }
         }
@@ -1936,6 +1957,164 @@ private struct RouteDiagram: View {
 
     private func ruleCount(_ rules: [RoutingRule], _ action: String) -> Int {
         rules.filter { $0.action == action }.count
+    }
+
+    private func devicePolicySummary(deviceRules: [RoutingRule], protectedCount: Int) -> String {
+        if deviceRules.isEmpty && protectedCount == 0 { return "全部默认 · 流向域名规则" }
+        var parts: [String] = []
+        let proxyCount = deviceRules.filter { $0.action == "proxy" }.count
+        let directCount = deviceRules.filter { $0.action == "direct" }.count
+        let rejectCount = deviceRules.filter { $0.action == "reject" }.count
+        if proxyCount > 0 { parts.append("\(proxyCount) 代理") }
+        if directCount > 0 { parts.append("\(directCount) 直连") }
+        if rejectCount > 0 { parts.append("\(rejectCount) 拒绝") }
+        if protectedCount > 0 { parts.append("\(protectedCount) 保护") }
+        return parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - Device Policy Popover (Topo ① click target)
+
+private struct DevicePolicyPopover: View {
+    @EnvironmentObject private var model: AppModel
+
+    private var allDevices: [UsageAggregate] { model.stats?.relay.devices ?? [] }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.coral.opacity(0.14))
+                    Image(systemName: "person.crop.circle.badge.checkmark")
+                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.coral)
+                }
+                .frame(width: 30, height: 30)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("① 设备策略").font(.system(size: 13, weight: .semibold))
+                    Text("设备级前置阀门，优先于域名规则")
+                        .font(.system(size: 10)).foregroundStyle(Theme.muted)
+                }
+                Spacer()
+            }
+            .padding(14)
+
+            // Flow explanation
+            HStack(spacing: 0) {
+                FlowStep(icon: "desktopcomputer", text: "设备流量", color: Theme.lime)
+                FlowArrow()
+                FlowStep(icon: "person.crop.circle.badge.checkmark", text: "设备策略", color: Theme.coral)
+                FlowArrow()
+                FlowStep(icon: "arrow.triangle.branch", text: "域名规则", color: Theme.yellow)
+            }
+            .padding(.horizontal, 14).padding(.bottom, 12)
+
+            Divider().overlay(Theme.border)
+
+            // Device list
+            VStack(alignment: .leading, spacing: 10) {
+                if allDevices.isEmpty {
+                    Label("暂无设备接入", systemImage: "antenna.radiowaves.left.and.right.slash")
+                        .font(.caption).foregroundStyle(Theme.muted)
+                } else {
+                    Text("当前设备 · \(allDevices.count)").eyebrow()
+                    ForEach(allDevices.prefix(10)) { device in
+                        DevicePolicyRow(ip: device.name)
+                    }
+                    if allDevices.count > 10 {
+                        Text("还有 \(allDevices.count - 10) 台设备…")
+                            .font(.caption2).foregroundStyle(Theme.muted)
+                    }
+                }
+            }
+            .padding(14)
+        }
+        .frame(width: 340)
+    }
+}
+
+private struct DevicePolicyRow: View {
+    @EnvironmentObject private var model: AppModel
+    let ip: String
+
+    private var override: String { model.deviceOverride(for: ip) }
+    private var adaptive: DeviceAdaptiveState? { model.adaptiveDeviceState(for: ip) }
+    private var label: String? { model.effectiveDeviceLabel(for: ip).nonEmpty }
+    private var isProtected: Bool { override.isEmpty && adaptive?.mode == "direct" }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: deviceIcon(label: label))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(statusColor)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label ?? ip)
+                    .font(.system(size: 11, weight: .semibold, design: (label != nil) ? .default : .monospaced))
+                    .lineLimit(1)
+                if label != nil {
+                    Text(ip).font(.system(size: 9, design: .monospaced)).foregroundStyle(Theme.muted).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 4)
+            if isProtected {
+                HStack(spacing: 3) {
+                    Image(systemName: "shield.fill").font(.system(size: 8))
+                    Text("保护直连").font(.system(size: 10, weight: .medium))
+                }
+                .foregroundStyle(Theme.yellow)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Theme.yellow.opacity(0.12)).clipShape(Capsule())
+            } else {
+                Menu {
+                    Button { model.setDeviceOverride(ip, action: "") } label: {
+                        Label("默认（跟随规则）", systemImage: override.isEmpty ? "checkmark" : "")
+                    }
+                    Button { model.setDeviceOverride(ip, action: "proxy") } label: {
+                        Label("强制代理", systemImage: override == "proxy" ? "checkmark" : "")
+                    }
+                    Button { model.setDeviceOverride(ip, action: "direct") } label: {
+                        Label("强制直连", systemImage: override == "direct" ? "checkmark" : "")
+                    }
+                    Divider()
+                    Button { model.setDeviceOverride(ip, action: "reject") } label: {
+                        Label("拒绝联网", systemImage: override == "reject" ? "checkmark" : "")
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Circle().fill(statusColor).frame(width: 6, height: 6)
+                        Text(statusText).font(.system(size: 10, weight: .medium))
+                        Image(systemName: "chevron.up.chevron.down").font(.system(size: 7))
+                    }
+                    .foregroundStyle(statusColor == Theme.muted ? .primary : statusColor)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(statusColor.opacity(0.10)).clipShape(Capsule())
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+            }
+        }
+    }
+
+    private var statusColor: Color {
+        if isProtected { return Theme.yellow }
+        switch override {
+        case "proxy": return Theme.cyan
+        case "direct": return Theme.lime
+        case "reject": return Theme.coral
+        default: return Theme.muted
+        }
+    }
+
+    private var statusText: String {
+        if isProtected { return "保护直连" }
+        switch override {
+        case "proxy": return "代理"
+        case "direct": return "直连"
+        case "reject": return "拒绝"
+        default: return "默认"
+        }
     }
 }
 
@@ -2196,30 +2375,38 @@ private struct TopoLinkLayer: View {
     let flowDirect: Bool
     let flowReject: Bool
     let egressProxy: Bool
+    var hasDeviceOverrides = false
     @State private var isScrolling = false
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 24.0, paused: !active || isScrolling)) { timeline in
             Canvas { ctx, _ in
                 let t = timeline.date.timeIntervalSinceReferenceDate
+                let anyFlow = flowProxy || flowDirect
+                // Device → Gateway
                 for (index, port) in devicePorts.enumerated() {
                     let deviceActive = activeDevicePorts.contains(port)
                     link(ctx, from: port, to: "gw.b", color: Theme.lime, phase: t,
                          offset: Double(index) * 0.37, strong: deviceActive, flow: deviceActive)
                 }
-                let anyFlow = flowProxy || flowDirect
-                link(ctx, from: "gw.t", to: "rules.b", color: Theme.cyan, phase: t, offset: 0.15,
+                // Gateway → ① Device Policy
+                link(ctx, from: "gw.t", to: "devpolicy.b", color: Theme.cyan, phase: t, offset: 0.10,
                      strong: anyFlow, flow: anyFlow)
-                link(ctx, from: "out.proxy.t", to: "router.b", color: Theme.cyan, phase: t, offset: 0.25,
-                     strong: egressProxy, flow: flowProxy)
-                link(ctx, from: "out.direct.t", to: "router.b", color: Theme.lime, phase: t, offset: 0.55,
-                     strong: !egressProxy, flow: flowDirect)
+                // ① Device Policy → ② Domain Rules
+                link(ctx, from: "devpolicy.t", to: "rules.b", color: hasDeviceOverrides ? Theme.coral : Theme.cyan, phase: t, offset: 0.20,
+                     strong: anyFlow, flow: anyFlow)
+                // ② Domain Rules → Outcomes
                 link(ctx, from: "rules.t", to: "out.proxy", color: Theme.cyan, phase: t, offset: 0.4,
                      strong: egressProxy, flow: flowProxy)
                 link(ctx, from: "rules.t", to: "out.direct", color: Theme.lime, phase: t, offset: 0.7,
                      strong: !egressProxy, flow: flowDirect)
                 link(ctx, from: "rules.t", to: "out.reject", color: Theme.coral, phase: t, offset: 0.9,
                      strong: false, flow: flowReject)
+                // Outcomes → Router
+                link(ctx, from: "out.proxy.t", to: "router.b", color: Theme.cyan, phase: t, offset: 0.25,
+                     strong: egressProxy, flow: flowProxy)
+                link(ctx, from: "out.direct.t", to: "router.b", color: Theme.lime, phase: t, offset: 0.55,
+                     strong: !egressProxy, flow: flowDirect)
             }
             .drawingGroup()
         }
