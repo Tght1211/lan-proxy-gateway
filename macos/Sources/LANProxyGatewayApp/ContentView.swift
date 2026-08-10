@@ -1,6 +1,121 @@
 import AppKit
 import Charts
 import SwiftUI
+import UniformTypeIdentifiers
+
+// MARK: - Serializable theme for import/export
+
+struct ThemeJSON: Codable {
+    var id: String
+    var name: String
+    var isDark: Bool
+    var canvas: [Double]        // [r, g, b]
+    var sidebar: [Double]
+    var panel: [Double]
+    var panelRaised: [Double]
+    var border: [Double]
+    var cyan: [Double]
+    var coral: [Double]
+    var lime: [Double]
+    var yellow: [Double]
+    var muted: [Double]
+    var radius: Double
+    var radiusSmall: Double
+    var borderWidth: Double
+    var shadowOpacity: Double
+    var shadowRadius: Double
+    var fontDesign: String      // "default" | "rounded" | "serif" | "monospaced"
+    var canvasGradient: [[Double]]  // [[r,g,b], [r,g,b]] or []
+
+    func toPalette() -> ThemePalette {
+        ThemePalette(
+            id: id, name: name, isDark: isDark,
+            canvas: c(canvas), sidebar: c(sidebar), panel: c(panel), panelRaised: c(panelRaised),
+            border: c(border), cyan: c(cyan), coral: c(coral), lime: c(lime), yellow: c(yellow),
+            muted: c(muted),
+            radius: CGFloat(radius), radiusSmall: CGFloat(radiusSmall),
+            borderWidth: CGFloat(borderWidth), shadowOpacity: shadowOpacity, shadowRadius: CGFloat(shadowRadius),
+            fontDesign: fd(fontDesign),
+            canvasGradient: canvasGradient.map { c($0) },
+            isBuiltIn: false
+        )
+    }
+
+    private func c(_ rgb: [Double]) -> Color {
+        Color(red: rgb.count > 0 ? rgb[0] : 0, green: rgb.count > 1 ? rgb[1] : 0, blue: rgb.count > 2 ? rgb[2] : 0)
+    }
+    private func fd(_ s: String) -> Font.Design {
+        switch s {
+        case "rounded": return .rounded
+        case "serif": return .serif
+        case "monospaced": return .monospaced
+        default: return .default
+        }
+    }
+
+    static func from(_ p: ThemePalette) -> ThemeJSON {
+        ThemeJSON(
+            id: p.id, name: p.name, isDark: p.isDark,
+            canvas: rgb(p.canvas), sidebar: rgb(p.sidebar), panel: rgb(p.panel), panelRaised: rgb(p.panelRaised),
+            border: rgb(p.border), cyan: rgb(p.cyan), coral: rgb(p.coral), lime: rgb(p.lime), yellow: rgb(p.yellow),
+            muted: rgb(p.muted),
+            radius: Double(p.radius), radiusSmall: Double(p.radiusSmall),
+            borderWidth: Double(p.borderWidth), shadowOpacity: p.shadowOpacity, shadowRadius: Double(p.shadowRadius),
+            fontDesign: fdStr(p.fontDesign),
+            canvasGradient: p.canvasGradient.map { rgb($0) }
+        )
+    }
+
+    private static func rgb(_ color: Color) -> [Double] {
+        let c = NSColor(color).usingColorSpace(.sRGB) ?? NSColor(color)
+        return [Double(c.redComponent), Double(c.greenComponent), Double(c.blueComponent)]
+            .map { (($0 * 1000).rounded()) / 1000 }
+    }
+    private static func fdStr(_ d: Font.Design) -> String {
+        switch d {
+        case .rounded: return "rounded"
+        case .serif: return "serif"
+        case .monospaced: return "monospaced"
+        default: return "default"
+        }
+    }
+}
+
+// MARK: - Custom theme storage
+
+private enum CustomThemeStore {
+    static let dir: URL = {
+        let d = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/lan-proxy-gateway/themes", isDirectory: true)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }()
+
+    static func loadAll() -> [ThemePalette] {
+        guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            .filter({ $0.pathExtension == "json" }) else { return [] }
+        return files.compactMap { url in
+            guard let data = try? Data(contentsOf: url),
+                  let json = try? JSONDecoder().decode(ThemeJSON.self, from: data) else { return nil }
+            return json.toPalette()
+        }
+    }
+
+    static func save(_ theme: ThemeJSON) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(theme)
+        let url = dir.appendingPathComponent("\(theme.id).json")
+        try data.write(to: url, options: .atomic)
+    }
+
+    static func delete(id: String) {
+        let url = dir.appendingPathComponent("\(id).json")
+        try? FileManager.default.removeItem(at: url)
+    }
+}
+
+// MARK: - ThemePalette
 
 struct ThemePalette: Identifiable {
     let id: String
@@ -16,7 +131,6 @@ struct ThemePalette: Identifiable {
     let lime: Color
     let yellow: Color
     let muted: Color
-    // Texture: each skin has its own materiality, not just colors.
     let radius: CGFloat
     let radiusSmall: CGFloat
     let borderWidth: CGFloat
@@ -24,6 +138,7 @@ struct ThemePalette: Identifiable {
     let shadowRadius: CGFloat
     let fontDesign: Font.Design
     let canvasGradient: [Color]
+    var isBuiltIn: Bool = true
 
     static let light = ThemePalette(
         id: "light",
@@ -123,7 +238,11 @@ struct ThemePalette: Identifiable {
         canvasGradient: []
     )
 
-    static let all: [ThemePalette] = [.light, .graphite, .ocean, .cream]
+    static let builtIn: [ThemePalette] = [.light, .graphite, .ocean, .cream]
+
+    static var all: [ThemePalette] {
+        builtIn + CustomThemeStore.loadAll()
+    }
 
     static func named(_ id: String) -> ThemePalette {
         all.first { $0.id == id } ?? .cream
@@ -3177,25 +3296,7 @@ private struct SettingsView: View {
 
     private var content: some View {
         Group {
-            Panel {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("外观主题").font(.system(size: 13, weight: .semibold))
-                            Text("即时生效，自动记住选择").font(.caption2).foregroundStyle(Theme.muted)
-                        }
-                        Spacer()
-                    }
-                    HStack(spacing: 12) {
-                        ForEach(ThemePalette.all) { palette in
-                            ThemeCard(palette: palette, selected: model.themeID == palette.id) {
-                                model.themeID = palette.id
-                            }
-                        }
-                        Spacer(minLength: 0)
-                    }
-                }
-            }
+            ThemeSelectorPanel()
             Panel {
                 SettingsRow(title: "版本与更新", detail: model.updateStatus ?? "当前版本 v\(model.appVersion)") {
                     if model.updateAvailable {
@@ -3447,6 +3548,141 @@ private struct SettingsRow<Actions: View>: View {
     var body: some View { HStack { VStack(alignment: .leading, spacing: 4) { Text(title).fontWeight(.semibold); Text(detail).font(.caption).foregroundStyle(Theme.muted).lineLimit(1) }; Spacer(); HStack { actions } }.padding(.vertical, 10) }
 }
 
+// MARK: - Theme Selector with Import/Export
+
+private struct ThemeSelectorPanel: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var customThemes: [ThemePalette] = CustomThemeStore.loadAll()
+    @State private var importError: String?
+    @State private var showImportError = false
+    @State private var showDeleteConfirm = false
+    @State private var pendingDeleteID: String?
+
+    private var allThemes: [ThemePalette] { ThemePalette.builtIn + customThemes }
+
+    var body: some View {
+        Panel {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("外观主题").font(.system(size: 13, weight: .semibold))
+                        Text("即时生效，自动记住选择").font(.caption2).foregroundStyle(Theme.muted)
+                    }
+                    Spacer()
+                    HStack(spacing: 6) {
+                        Button { importTheme() } label: {
+                            Label("导入", systemImage: "square.and.arrow.down")
+                        }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .help("从 JSON 文件导入主题")
+
+                        Button { exportCurrent() } label: {
+                            Label("导出", systemImage: "square.and.arrow.up")
+                        }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .help("将当前主题导出为 JSON 文件")
+                    }
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(allThemes) { palette in
+                            ThemeCard(palette: palette, selected: model.themeID == palette.id) {
+                                model.themeID = palette.id
+                            }
+                            .contextMenu {
+                                if !palette.isBuiltIn {
+                                    Button { exportTheme(palette) } label: { Label("导出此主题", systemImage: "square.and.arrow.up") }
+                                    Divider()
+                                    Button(role: .destructive) {
+                                        pendingDeleteID = palette.id
+                                        showDeleteConfirm = true
+                                    } label: { Label("删除此主题", systemImage: "trash") }
+                                } else {
+                                    Button { exportTheme(palette) } label: { Label("导出此主题", systemImage: "square.and.arrow.up") }
+                                }
+                            }
+                        }
+                    }
+                }
+                if !customThemes.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "info.circle").font(.caption2)
+                        Text("右键自定义主题可导出或删除")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(Theme.muted)
+                }
+            }
+        }
+        .alert("导入失败", isPresented: $showImportError) {
+            Button("好的") {}
+        } message: { Text(importError ?? "未知错误") }
+        .alert("确认删除", isPresented: $showDeleteConfirm) {
+            Button("删除", role: .destructive) { performDelete() }
+            Button("取消", role: .cancel) {}
+        } message: { Text("删除后将无法恢复，确定删除此自定义主题？") }
+    }
+
+    private func importTheme() {
+        let panel = NSOpenPanel()
+        panel.title = "导入主题"
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK else { return }
+
+        var importedCount = 0
+        for url in panel.urls {
+            do {
+                let data = try Data(contentsOf: url)
+                var json = try JSONDecoder().decode(ThemeJSON.self, from: data)
+                if ThemePalette.builtIn.contains(where: { $0.id == json.id }) {
+                    json.id = json.id + "-custom-\(Int(Date().timeIntervalSince1970))"
+                }
+                try CustomThemeStore.save(json)
+                importedCount += 1
+            } catch {
+                importError = "\(url.lastPathComponent): \(error.localizedDescription)"
+                showImportError = true
+                return
+            }
+        }
+        customThemes = CustomThemeStore.loadAll()
+        if importedCount == 1, let last = customThemes.last {
+            model.themeID = last.id
+        }
+    }
+
+    private func exportCurrent() {
+        let palette = ThemePalette.named(model.themeID)
+        exportTheme(palette)
+    }
+
+    private func exportTheme(_ palette: ThemePalette) {
+        let json = ThemeJSON.from(palette)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(json) else { return }
+
+        let panel = NSSavePanel()
+        panel.title = "导出主题"
+        panel.nameFieldStringValue = "\(palette.id).json"
+        panel.allowedContentTypes = [.json]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private func performDelete() {
+        guard let id = pendingDeleteID else { return }
+        CustomThemeStore.delete(id: id)
+        customThemes = CustomThemeStore.loadAll()
+        if model.themeID == id {
+            model.themeID = "cream"
+        }
+        pendingDeleteID = nil
+    }
+}
+
 // Miniature app mock-up rendered in a palette's own colors, used as the
 // theme switcher preview so users see the skin before applying it.
 private struct ThemeCard: View {
@@ -3512,6 +3748,16 @@ private struct ThemeCard: View {
                             .foregroundStyle(Theme.cyan)
                             .background(Circle().fill(palette.panel))
                             .offset(x: 5, y: -5)
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if !palette.isBuiltIn {
+                        Image(systemName: "paintbrush.pointed")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.white)
+                            .padding(3)
+                            .background(Circle().fill(Theme.coral.opacity(0.85)))
+                            .offset(x: -4, y: -4)
                     }
                 }
                 Text(palette.name)

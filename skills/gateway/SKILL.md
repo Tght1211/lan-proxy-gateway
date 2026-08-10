@@ -7,16 +7,22 @@
 
 ```
 skills/
-├── SKILL.md              ← 本文件：入口 + 命令速查
-├── api-reference.md      ← /api/stats 完整响应结构与字段说明
-├── scripts/              ← 开箱即用的监控与诊断脚本
-│   ├── overview.sh       ← 网络概览
-│   ├── learn-watch.sh    ← 自动学习观察
-│   ├── failed-conns.sh   ← 连接失败诊断
-│   ├── device-traffic.sh ← 设备流量排行
-│   └── device-protect.sh ← 设备断路器状态
-├── troubleshooting.md    ← 故障诊断速查表
-└── config-reference.md   ← 配置文件完整字段参考
+├── gateway/
+│   ├── SKILL.md              ← 本文件：入口 + 命令速查
+│   ├── api-reference.md      ← /api/stats 完整响应结构与字段说明
+│   ├── scripts/              ← 开箱即用的监控与诊断脚本
+│   │   ├── overview.sh       ← 网络概览
+│   │   ├── learn-watch.sh    ← 自动学习观察
+│   │   ├── failed-conns.sh   ← 连接失败诊断
+│   │   ├── device-traffic.sh ← 设备流量排行
+│   │   └── device-protect.sh ← 设备断路器状态
+│   ├── troubleshooting.md    ← 故障诊断速查表
+│   └── config-reference.md   ← 配置文件完整字段参考
+└── theme-dev/
+    ├── SKILL.md              ← 皮肤开发指南（JSON Schema + 设计建议）
+    └── templates/            ← 起步模板
+        ├── starter-dark.json
+        └── starter-light.json
 ```
 
 按需阅读对应文件，不需要一次性加载全部。

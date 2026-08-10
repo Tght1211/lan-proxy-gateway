@@ -1,0 +1,25 @@
+{
+    "id": "my-dark-theme",
+    "name": "我的深色主题",
+    "isDark": true,
+    "canvas":      [0.082, 0.090, 0.106],
+    "sidebar":     [0.104, 0.114, 0.133],
+    "panel":       [0.125, 0.137, 0.157],
+    "panelRaised": [0.160, 0.175, 0.200],
+    "border":      [0.255, 0.280, 0.318],
+    "cyan":        [0.300, 0.760, 0.660],
+    "coral":       [0.940, 0.450, 0.400],
+    "lime":        [0.550, 0.790, 0.400],
+    "yellow":      [0.940, 0.700, 0.320],
+    "muted":       [0.600, 0.640, 0.700],
+    "radius": 3,
+    "radiusSmall": 2,
+    "borderWidth": 1.0,
+    "shadowOpacity": 0.5,
+    "shadowRadius": 12,
+    "fontDesign": "default",
+    "canvasGradient": [
+        [0.098, 0.106, 0.128],
+        [0.066, 0.072, 0.086]
+    ]
+}
