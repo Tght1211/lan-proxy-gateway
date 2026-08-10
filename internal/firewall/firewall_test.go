@@ -334,3 +334,37 @@ func TestRenderLinuxRulesUDPFakeIP(t *testing.T) {
 		t.Fatalf("UDP fake-IP REDIRECT rule missing, got:\n%s", strings.Join(rules, "\n"))
 	}
 }
+
+func TestRenderPFAnchorIPv6Block(t *testing.T) {
+	cfg := Config{Iface: "en0", GatewayIP: "192.168.1.100", IPv6Block: true}
+	got := renderPFAnchor(cfg)
+	want := "block return quick on en0 inet6 from any to any"
+	if !strings.Contains(got, want) {
+		t.Fatalf("anchor missing IPv6 block rule %q in:\n%s", want, got)
+	}
+	// Without IPv6Block the rule must not appear
+	cfg.IPv6Block = false
+	got2 := renderPFAnchor(cfg)
+	if strings.Contains(got2, "inet6") {
+		t.Fatalf("IPv6 block rule should not appear when disabled:\n%s", got2)
+	}
+}
+
+func TestRenderLinuxIPv6Rules(t *testing.T) {
+	cfg := testCfg
+	cfg.IPv6Block = true
+	rules := renderLinuxIPv6Rules(cfg)
+	if len(rules) != 1 {
+		t.Fatalf("want 1 IPv6 rule, got %d", len(rules))
+	}
+	got := strings.Join(rules[0], " ")
+	want := "FORWARD -i eth0 -m comment --comment lan-proxy-gateway -j REJECT"
+	if got != want {
+		t.Fatalf("IPv6 rule = %q, want %q", got, want)
+	}
+	// Disabled
+	cfg.IPv6Block = false
+	if rules := renderLinuxIPv6Rules(cfg); len(rules) != 0 {
+		t.Fatalf("want 0 IPv6 rules when disabled, got %d", len(rules))
+	}
+}

@@ -26,6 +26,7 @@ type Config struct {
 	DNSHijack      bool     // REDIRECT any LAN UDP/TCP :53 into our DNS
 	QUICBlock      bool     // REJECT LAN UDP/443 so clients fall back to TCP
 	BlockedSources []string // src-ip reject rules; block all forwarded traffic
+	IPv6Block      bool     // block all forwarded IPv6 traffic
 }
 
 // Report tells the caller what Apply changed about global state, for

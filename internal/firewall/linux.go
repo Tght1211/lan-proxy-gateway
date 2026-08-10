@@ -24,6 +24,20 @@ func newPlatformManager() Manager {
 			}
 			return string(out), nil
 		},
+		run6: func(args ...string) error {
+			out, err := exec.Command("ip6tables", args...).CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("ip6tables %s: %v: %s", strings.Join(args, " "), err, out)
+			}
+			return nil
+		},
+		save6: func(table string) (string, error) {
+			out, err := exec.Command("ip6tables-save", "-t", table).CombinedOutput()
+			if err != nil {
+				return "", fmt.Errorf("ip6tables-save -t %s: %v: %s", table, err, out)
+			}
+			return string(out), nil
+		},
 	}
 }
 

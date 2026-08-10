@@ -43,5 +43,8 @@ func renderPFAnchor(c Config) string {
 	if c.QUICBlock {
 		fmt.Fprintf(&b, "block return quick on %s proto udp from any to any port 443\n", c.Iface)
 	}
+	if c.IPv6Block {
+		fmt.Fprintf(&b, "block return quick on %s inet6 from any to any\n", c.Iface)
+	}
 	return b.String()
 }

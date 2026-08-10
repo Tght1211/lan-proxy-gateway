@@ -71,6 +71,18 @@ func renderLinuxRules(c Config) (nat [][]string, filter [][]string) {
 	return nat, filter
 }
 
+// renderLinuxIPv6Rules returns ip6tables FORWARD rules to block all forwarded IPv6 traffic.
+func renderLinuxIPv6Rules(c Config) [][]string {
+	if !c.IPv6Block {
+		return nil
+	}
+	tag := []string{"-m", "comment", "--comment", CommentTag}
+	iface := []string{"-i", c.Iface}
+	return [][]string{
+		joinArgs([]string{"FORWARD"}, iface, tag, []string{"-j", "REJECT"}),
+	}
+}
+
 func joinArgs(parts ...[]string) []string {
 	var out []string
 	for _, p := range parts {

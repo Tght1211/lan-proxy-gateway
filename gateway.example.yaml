@@ -45,6 +45,10 @@ dns:
 # QUIC(UDP/443) 拦截：代理模式下拒绝 QUIC 迫使浏览器回退 TCP（否则 QUIC 直连绕过代理）
 quic_block: true
 
+# IPv6 策略：设备可能通过 RA/SLAAC/DoH 获得 IPv6 地址绕过代理。
+# block = 阻断所有转发的 IPv6 流量，防止绕过。留空 = 不干预。
+# ipv6_policy: block
+
 # ========== Runtime（通常不用改）==========
 runtime:
   redir_port: 17892        # 透明 TCP 转发监听端口

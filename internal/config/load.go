@@ -215,6 +215,7 @@ func Normalize(cfg *Config) {
 		cfg.DNS.FakeIP = true
 		cfg.QUICBlock = true
 	}
+	cfg.IPv6Policy = strings.ToLower(strings.TrimSpace(cfg.IPv6Policy))
 	for i := range cfg.Routing.Rules {
 		cfg.Routing.Rules[i].Type = strings.ToLower(strings.TrimSpace(cfg.Routing.Rules[i].Type))
 		cfg.Routing.Rules[i].Value = strings.ToLower(strings.Trim(strings.TrimSpace(cfg.Routing.Rules[i].Value), "."))
@@ -225,6 +226,11 @@ func Normalize(cfg *Config) {
 
 // Validate checks the config is internally consistent.
 func Validate(cfg *Config) error {
+	switch cfg.IPv6Policy {
+	case IPv6PolicyNone, IPv6PolicyBlock:
+	default:
+		return fmt.Errorf("ipv6_policy 必须是 空/block，当前: %q", cfg.IPv6Policy)
+	}
 	switch cfg.Egress.Mode {
 	case EgressDirect, EgressProxy:
 	default:

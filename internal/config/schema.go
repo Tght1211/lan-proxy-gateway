@@ -25,15 +25,22 @@ const (
 	ProxyTypeSOCKS5 = "socks5"
 )
 
+// IPv6 policy constants.
+const (
+	IPv6PolicyNone  = ""       // leave IPv6 alone (default)
+	IPv6PolicyBlock = "block"  // block all forwarded IPv6 traffic
+)
+
 // Config is the root of gateway.yaml.
 type Config struct {
-	Version   int           `yaml:"version"`
-	Gateway   GatewayConfig `yaml:"gateway"`
-	Egress    EgressConfig  `yaml:"egress"`
-	Routing   RoutingConfig `yaml:"routing,omitempty"`
-	DNS       DNSConfig     `yaml:"dns"`
-	QUICBlock bool          `yaml:"quic_block"`
-	Runtime   RuntimeConfig `yaml:"runtime"`
+	Version    int           `yaml:"version"`
+	Gateway    GatewayConfig `yaml:"gateway"`
+	Egress     EgressConfig  `yaml:"egress"`
+	Routing    RoutingConfig `yaml:"routing,omitempty"`
+	DNS        DNSConfig     `yaml:"dns"`
+	QUICBlock  bool          `yaml:"quic_block"`
+	IPv6Policy string        `yaml:"ipv6_policy,omitempty"` // "" (none) | "block"
+	Runtime    RuntimeConfig `yaml:"runtime"`
 }
 
 // RoutingConfig overrides the default egress for matching domains.
