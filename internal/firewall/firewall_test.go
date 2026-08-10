@@ -368,3 +368,74 @@ func TestRenderLinuxIPv6Rules(t *testing.T) {
 		t.Fatalf("want 0 IPv6 rules when disabled, got %d", len(rules))
 	}
 }
+
+func TestRenderPFAnchorLANCIDRs(t *testing.T) {
+	cfg := Config{
+		Iface: "en0", GatewayIP: "192.168.1.100",
+		TCPRedirect: true, RedirPort: 17892,
+		LANCIDRs: []string{"192.168.1.0/24"},
+	}
+	got := renderPFAnchor(cfg)
+	if !strings.Contains(got, "from 192.168.1.0/24 to") {
+		t.Fatalf("anchor should restrict source to CIDR:\n%s", got)
+	}
+	if strings.Contains(got, "from any to") {
+		t.Fatalf("anchor should NOT use 'from any' when LANCIDRs set:\n%s", got)
+	}
+}
+
+func TestRenderPFAnchorExcludeCIDRs(t *testing.T) {
+	cfg := Config{
+		Iface: "en0", GatewayIP: "192.168.1.100",
+		TCPRedirect:  true, RedirPort: 17892,
+		ExcludeCIDRs: []string{"172.17.0.0/16"},
+	}
+	got := renderPFAnchor(cfg)
+	if !strings.Contains(got, "pass in quick on en0 from 172.17.0.0/16") {
+		t.Fatalf("anchor should exclude Docker CIDR:\n%s", got)
+	}
+}
+
+func TestRenderPFAnchorMultipleLANCIDRs(t *testing.T) {
+	cfg := Config{
+		Iface: "en0", GatewayIP: "192.168.1.100",
+		TCPRedirect: true, RedirPort: 17892,
+		LANCIDRs: []string{"192.168.1.0/24", "10.0.0.0/8"},
+	}
+	got := renderPFAnchor(cfg)
+	if !strings.Contains(got, "{ 192.168.1.0/24 10.0.0.0/8 }") {
+		t.Fatalf("anchor should use pf table syntax for multiple CIDRs:\n%s", got)
+	}
+}
+
+func TestRenderLinuxRulesLANCIDRs(t *testing.T) {
+	cfg := testCfg
+	cfg.TCPRedirect = true
+	cfg.LANCIDRs = []string{"192.168.1.0/24"}
+	nat, _ := renderLinuxRules(cfg)
+	found := false
+	for _, rule := range nat {
+		joined := strings.Join(rule, " ")
+		if strings.Contains(joined, "-s 192.168.1.0/24") && strings.Contains(joined, "REDIRECT") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("iptables should include -s CIDR in redirect rules")
+	}
+}
+
+func TestRenderLinuxRulesExcludeCIDRs(t *testing.T) {
+	cfg := testCfg
+	cfg.TCPRedirect = true
+	cfg.ExcludeCIDRs = []string{"172.17.0.0/16"}
+	nat, _ := renderLinuxRules(cfg)
+	if len(nat) == 0 {
+		t.Fatal("expected nat rules")
+	}
+	first := strings.Join(nat[0], " ")
+	if !strings.Contains(first, "-s 172.17.0.0/16") || !strings.Contains(first, "RETURN") {
+		t.Fatalf("first iptables rule should RETURN excluded CIDR, got: %s", first)
+	}
+}

@@ -75,7 +75,10 @@ type ProxyFailureConfig struct {
 
 // GatewayConfig controls LAN device onboarding.
 type GatewayConfig struct {
-	Enabled bool `yaml:"enabled"`
+	Enabled      bool     `yaml:"enabled"`
+	LANInterface string   `yaml:"lan_interface,omitempty"` // override auto-detected interface
+	LANCIDRs     []string `yaml:"lan_cidrs,omitempty"`     // only handle these source CIDRs
+	ExcludeCIDRs []string `yaml:"exclude_cidrs,omitempty"` // skip these source CIDRs (Docker, VPN, etc.)
 }
 
 // EgressConfig decides where relayed traffic exits.

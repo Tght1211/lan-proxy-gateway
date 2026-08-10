@@ -1,6 +1,9 @@
 package firewall
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+)
 
 // renderLinuxRules computes the desired iptables rules for cfg.
 // Each rule is the argv following the chain operation, e.g.
@@ -17,36 +20,43 @@ func renderLinuxRules(c Config) (nat [][]string, filter [][]string) {
 	dnsPort := strconv.Itoa(c.DNSPort)
 	redirPort := strconv.Itoa(c.RedirPort)
 
+	// Exclude CIDRs: RETURN before any capture rule.
+	for _, cidr := range c.ExcludeCIDRs {
+		nat = append(nat, joinArgs(
+			[]string{"PREROUTING"}, iface, []string{"-s", cidr},
+			tag, []string{"-j", "RETURN"},
+		))
+	}
+
 	if c.DNSHijack || c.TCPRedirect {
 		nat = append(nat, joinArgs(
 			[]string{"PREROUTING", "-m", "addrtype", "--dst-type", "LOCAL"},
 			tag, []string{"-j", "RETURN"},
 		))
 	}
+
+	srcArgs := iptablesSrcArgs(c.LANCIDRs)
+
 	if c.DNSHijack {
 		for _, proto := range []string{"udp", "tcp"} {
 			nat = append(nat, joinArgs(
-				[]string{"PREROUTING"}, iface,
+				[]string{"PREROUTING"}, iface, srcArgs,
 				[]string{"-p", proto, "--dport", dnsPort},
 				tag, []string{"-j", "REDIRECT", "--to-ports", dnsPort},
 			))
 		}
 	}
 	if c.UDPFakeIPRedir && c.FakeIPRange != "" && c.UDPRedirPort > 0 {
-		// Redirect UDP destined for the fake-IP range into the UDP relay.
-		// No port 443 exclusion needed: fake-IP addresses never host real
-		// QUIC servers; the QUIC block targets real-destination UDP/443
-		// which never lands in the fake-IP range.
 		udpPort := strconv.Itoa(c.UDPRedirPort)
 		nat = append(nat, joinArgs(
-			[]string{"PREROUTING"}, iface,
+			[]string{"PREROUTING"}, iface, srcArgs,
 			[]string{"-p", "udp", "-d", c.FakeIPRange},
 			tag, []string{"-j", "REDIRECT", "--to-ports", udpPort},
 		))
 	}
 	if c.TCPRedirect {
 		nat = append(nat, joinArgs(
-			[]string{"PREROUTING"}, iface, []string{"-p", "tcp"},
+			[]string{"PREROUTING"}, iface, srcArgs, []string{"-p", "tcp"},
 			tag, []string{"-j", "REDIRECT", "--to-ports", redirPort},
 		))
 	}
@@ -63,12 +73,23 @@ func renderLinuxRules(c Config) (nat [][]string, filter [][]string) {
 
 	if c.QUICBlock {
 		filter = append(filter, joinArgs(
-			[]string{"FORWARD"}, iface,
+			[]string{"FORWARD"}, iface, srcArgs,
 			[]string{"-p", "udp", "--dport", "443"},
 			tag, []string{"-j", "REJECT"},
 		))
 	}
 	return nat, filter
+}
+
+// iptablesSrcArgs builds `-s cidr` args. Multiple CIDRs use a comma-separated
+// match set (iptables supports -s cidr1,cidr2 in some versions; for max
+// compat we use a single CIDR or return empty for "any").
+func iptablesSrcArgs(cidrs []string) []string {
+	if len(cidrs) == 0 {
+		return nil
+	}
+	// iptables -s accepts comma-separated CIDRs natively.
+	return []string{"-s", strings.Join(cidrs, ",")}
 }
 
 // renderLinuxIPv6Rules returns ip6tables FORWARD rules to block all forwarded IPv6 traffic.

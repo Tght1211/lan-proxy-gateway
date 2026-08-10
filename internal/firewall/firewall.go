@@ -27,6 +27,8 @@ type Config struct {
 	QUICBlock      bool     // REJECT LAN UDP/443 so clients fall back to TCP
 	BlockedSources []string // src-ip reject rules; block all forwarded traffic
 	IPv6Block      bool     // block all forwarded IPv6 traffic
+	LANCIDRs       []string // only capture traffic from these source CIDRs (empty = all)
+	ExcludeCIDRs   []string // skip traffic from these source CIDRs (Docker, VPN, etc.)
 }
 
 // Report tells the caller what Apply changed about global state, for

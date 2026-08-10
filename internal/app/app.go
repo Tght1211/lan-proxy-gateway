@@ -310,7 +310,7 @@ func firewallConfig(cfg *config.Config) firewall.Config {
 			blockedSources = append(blockedSources, rule.Value)
 		}
 	}
-	return firewall.Config{
+	fwCfg := firewall.Config{
 		RedirPort: cfg.Runtime.RedirPort,
 		DNSPort:   cfg.DNS.Port,
 		// Relay TCP in both modes. On a single-interface macOS gateway, pf NAT
@@ -327,7 +327,13 @@ func firewallConfig(cfg *config.Config) firewall.Config {
 		QUICBlock:      proxy && cfg.QUICBlock,
 		BlockedSources: blockedSources,
 		IPv6Block:      cfg.IPv6Policy == config.IPv6PolicyBlock,
+		LANCIDRs:       cfg.Gateway.LANCIDRs,
+		ExcludeCIDRs:   cfg.Gateway.ExcludeCIDRs,
 	}
+	if cfg.Gateway.LANInterface != "" {
+		fwCfg.Iface = cfg.Gateway.LANInterface
+	}
+	return fwCfg
 }
 
 // dnsOptions derives the DNS server options from the config.
