@@ -834,6 +834,27 @@ private struct GatewaySummary: View {
                 ExitIdentityFact(identity: model.stats?.health.egressIdentity)
                 SummaryFact("运行时间", uptime(model.stats?.uptimeSec ?? 0))
             }
+            if let comps = model.stats?.components, comps.contains(where: { $0.crashes > 0 }) {
+                Divider().overlay(Theme.border)
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(Theme.yellow)
+                    Text("子服务自愈").font(.caption2.weight(.semibold)).foregroundStyle(Theme.yellow)
+                    ForEach(comps.filter { $0.crashes > 0 }) { c in
+                        HStack(spacing: 3) {
+                            Circle().fill(c.running ? Theme.lime : Theme.coral).frame(width: 6, height: 6)
+                            Text("\(c.name)")
+                                .font(.caption2.weight(.medium).monospaced())
+                            Text("重启\(c.crashes)次")
+                                .font(.caption2).foregroundStyle(Theme.muted)
+                        }
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Theme.yellow.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                    Spacer()
+                }
+            }
         }
     }
 }

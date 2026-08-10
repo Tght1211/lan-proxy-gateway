@@ -16,6 +16,13 @@ import (
 
 // StatsResponse is served by GET /api/stats and consumed by the console and
 // native App. Bump SchemaVersion when an incompatible field changes.
+// ComponentHealth reports the running status of a core sub-service.
+type ComponentHealth struct {
+	Name    string `json:"name"`
+	Running bool   `json:"running"`
+	Crashes int    `json:"crashes"`
+}
+
 type StatsResponse struct {
 	SchemaVersion  int                          `json:"schema_version"`
 	Egress         string                       `json:"egress"`
@@ -28,6 +35,7 @@ type StatsResponse struct {
 	Fallback       *FallbackStats               `json:"fallback,omitempty"`
 	EgressHealth   *egressHealthJSON            `json:"egress_health,omitempty"`
 	DeviceAdaptive relay.DeviceAdaptiveSnapshot `json:"device_adaptive"`
+	Components     []ComponentHealth            `json:"components,omitempty"`
 }
 
 // egressHealthJSON exposes the global outage state and post-direct failures.
@@ -138,6 +146,7 @@ func (s *apiServer) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 	eh := s.rt.relay.EgressHealth()
 	resp.EgressHealth = buildEgressHealthJSON(eh, resp.Relay.Recent)
+	resp.Components = s.rt.componentHealth()
 	writeJSON(w, resp)
 }
 

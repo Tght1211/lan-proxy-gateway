@@ -94,6 +94,14 @@ struct UDPRelayStats: Decodable {
     let listen: String
 }
 
+struct ComponentHealth: Decodable, Identifiable {
+    let name: String
+    let running: Bool
+    let crashes: Int
+
+    var id: String { name }
+}
+
 struct RuntimeStats: Decodable {
     let schemaVersion: Int?
     let egress: String
@@ -106,9 +114,10 @@ struct RuntimeStats: Decodable {
     let fallback: FallbackStats?
     let egressHealth: EgressHealthStats?
 	let deviceAdaptive: DeviceAdaptiveStats?
+    let components: [ComponentHealth]?
 
     enum CodingKeys: String, CodingKey {
-        case egress, proxy, relay, dns, health, fallback
+        case egress, proxy, relay, dns, health, fallback, components
         case schemaVersion = "schema_version"
         case uptimeSec = "uptime_sec"
         case udpRelay = "udp_relay"

@@ -152,16 +152,39 @@ func (a *App) Run(ctx context.Context) error {
 
 	a.StartSupervisor(ctx)
 
-	<-ctx.Done()
-	logger.Info("收到退出信号，开始清理")
-	return a.Gateway.Disable()
+	// Monitor sub-service crashes; allow limited restarts before giving up.
+	const maxRestarts = 3
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("收到退出信号，开始清理")
+			return a.Gateway.Disable()
+		case ev := <-rt.eventCh:
+			rt.crashCounts[ev.name]++
+			count := rt.crashCounts[ev.name]
+			logger.Error("子服务异常退出", "service", ev.name, "err", ev.err,
+				"restart_count", count, "max", maxRestarts)
+			if count > maxRestarts {
+				logger.Error("子服务多次重启失败，撤销防火墙规则并退出",
+					"service", ev.name, "restarts", count)
+				_ = a.Gateway.Disable()
+				return fmt.Errorf("子服务 %s 崩溃超过 %d 次: %w", ev.name, maxRestarts, ev.err)
+			}
+			time.Sleep(time.Duration(count) * time.Second)
+			rt.restartService(ctx, a, ev.name)
+		}
+	}
 }
 
 // startServices launches relay, DNS and the loopback API for the current config.
 func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST relay.OrigDSTResolver) (*daemonRuntime, error) {
 	a.migrateLearnedGroups()
 
-	rt := &daemonRuntime{logger: logger}
+	rt := &daemonRuntime{
+		logger:      logger,
+		eventCh:     make(chan serviceEvent, 4),
+		crashCounts: make(map[string]int),
+	}
 	rt.tracker = relay.NewTracker()
 	rt.tracker.StartSampling(ctx, 5*time.Second)
 
@@ -198,7 +221,7 @@ func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST re
 		rt.bindFakeIP()
 		go func() {
 			if err := rt.dns.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
-				logger.Error("DNS 服务异常退出", "err", err)
+				rt.eventCh <- serviceEvent{name: "dns", err: err}
 			}
 		}()
 	}
@@ -216,23 +239,29 @@ func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST re
 		rt.syncUDPRelayRouting(a.Cfg)
 		go func() {
 			if err := rt.udpRelay.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
-				logger.Error("UDP relay 异常退出", "err", err)
+				rt.eventCh <- serviceEvent{name: "udp-relay", err: err}
 			}
 		}()
 	}
 	go func() {
 		if err := rt.relay.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
-			logger.Error("relay 异常退出", "err", err)
+			rt.eventCh <- serviceEvent{name: "relay", err: err}
 		}
 	}()
 	rt.api = newAPIServer(a, rt)
 	go func() {
 		if err := rt.api.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
-			logger.Error("状态 API 异常退出", "err", err)
+			rt.eventCh <- serviceEvent{name: "api", err: err}
 		}
 	}()
 	go rt.watchConfig(ctx, a)
 	return rt, nil
+}
+
+// serviceEvent signals the main loop when a sub-service goroutine exits.
+type serviceEvent struct {
+	name string
+	err  error
 }
 
 // daemonRuntime bundles the long-running services for shutdown/reload.
@@ -244,6 +273,111 @@ type daemonRuntime struct {
 	dns      *dns.Server
 	api      *apiServer
 	learner  *fallbackLearner
+	eventCh      chan serviceEvent // sub-service crash notifications
+	crashCounts  map[string]int   // cumulative crash count per service (guarded by main loop)
+}
+
+// componentHealth returns the health of each core sub-service.
+func (rt *daemonRuntime) componentHealth() []ComponentHealth {
+	var out []ComponentHealth
+	out = append(out, ComponentHealth{
+		Name: "relay", Running: rt.relay != nil, Crashes: rt.crashCounts["relay"],
+	})
+	if rt.dns != nil {
+		out = append(out, ComponentHealth{
+			Name: "dns", Running: true, Crashes: rt.crashCounts["dns"],
+		})
+	}
+	if rt.udpRelay != nil {
+		out = append(out, ComponentHealth{
+			Name: "udp-relay", Running: true, Crashes: rt.crashCounts["udp-relay"],
+		})
+	}
+	out = append(out, ComponentHealth{
+		Name: "api", Running: rt.api != nil, Crashes: rt.crashCounts["api"],
+	})
+	return out
+}
+
+func (rt *daemonRuntime) restartService(ctx context.Context, a *App, name string) {
+	rt.logger.Info("正在重启子服务", "service", name)
+	switch name {
+	case "dns":
+		if rt.dns != nil {
+			rt.dns.Shutdown()
+			rt.dns = dns.New(dnsOptions(a.Cfg, a.Paths.FakeIPCacheFile, rt.logger))
+			rt.bindFakeIP()
+			go func() {
+				if err := rt.dns.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
+					rt.eventCh <- serviceEvent{name: "dns", err: err}
+				}
+			}()
+			rt.logger.Info("DNS 服务已重启")
+		}
+	case "relay":
+		if rt.relay != nil {
+			origDST, err := relay.NewPlatformOrigDST()
+			if err != nil {
+				rt.logger.Error("重启 relay 失败: 无法初始化 OrigDST", "err", err)
+				return
+			}
+			_ = rt.relay.Close()
+			dialer, err := buildDialer(a.Cfg.Egress)
+			if err != nil {
+				rt.logger.Error("重启 relay 失败: 无法构建 dialer", "err", err)
+				return
+			}
+			rt.relay = relay.New(relay.Options{
+				ListenAddr:        net.JoinHostPort("", strconv.Itoa(a.Cfg.Runtime.RedirPort)),
+				OrigDST:           origDST,
+				Tracker:           rt.tracker,
+				Dialer:            dialer,
+				ViaProxy:          a.Cfg.Egress.Mode == config.EgressProxy,
+				OnFallbackSuccess: rt.learner.Record,
+				Logger:            rt.logger,
+			})
+			rt.relay.SetProxyFailAction(a.Cfg.ProxyFailure.Action)
+			rt.applyRouting(a.Cfg)
+			rt.bindFakeIP()
+			go func() {
+				if err := rt.relay.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
+					rt.eventCh <- serviceEvent{name: "relay", err: err}
+				}
+			}()
+			rt.logger.Info("relay 服务已重启")
+		}
+	case "udp-relay":
+		if rt.udpRelay != nil && rt.dns != nil {
+			_ = rt.udpRelay.Close()
+			fakeRange := rt.dns.FakeIPRange()
+			rt.udpRelay = relay.NewUDPRelay(relay.UDPRelayOptions{
+				ListenAddr:   relay.FormatUDPListenAddr(a.Cfg.Runtime.UDPRedirPort),
+				FakeIPRange:  &fakeRange,
+				LookupFakeIP: rt.dns.LookupFakeIP,
+				Resolve:      relay.NewUpstreamResolver(a.Cfg.DNS.Upstreams),
+				Tracker:      rt.tracker,
+				Logger:       rt.logger,
+			})
+			rt.syncUDPRelayRouting(a.Cfg)
+			go func() {
+				if err := rt.udpRelay.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
+					rt.eventCh <- serviceEvent{name: "udp-relay", err: err}
+				}
+			}()
+			rt.logger.Info("UDP relay 服务已重启")
+		}
+	case "api":
+		if rt.api != nil {
+			_ = rt.api.Close()
+			rt.api = newAPIServer(a, rt)
+			go func() {
+				if err := rt.api.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
+					rt.eventCh <- serviceEvent{name: "api", err: err}
+				}
+			}()
+			rt.logger.Info("状态 API 已重启")
+		}
+	}
 }
 
 func (rt *daemonRuntime) shutdown() {
