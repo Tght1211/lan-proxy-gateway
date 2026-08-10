@@ -34,6 +34,8 @@ type Stats struct {
 	FakeAnswered int64 `json:"fake_answered"`
 	Forwarded    int64 `json:"forwarded"`
 	Failures     int64 `json:"failures"`
+	CacheHits    int64 `json:"cache_hits"`
+	CacheSize    int   `json:"cache_size"`
 	PoolSize     int   `json:"pool_size"`
 }
 
@@ -59,6 +61,7 @@ type Server struct {
 
 	pool      *fakeIPPool
 	forwarder *forwarder
+	cache     *dnsCache
 	fakeOn    atomic.Bool
 	cachePath string
 	cacheMu   sync.Mutex
@@ -69,6 +72,7 @@ type Server struct {
 	fakeAnswered atomic.Int64
 	forwarded    atomic.Int64
 	failures     atomic.Int64
+	cacheHits    atomic.Int64
 
 	mu      sync.Mutex
 	udp     *dns.Server
@@ -104,6 +108,7 @@ func New(opts Options) *Server {
 		logger:    logger,
 		pool:      newFakeIPPool(prefix, idle, maxEntries),
 		forwarder: newForwarder(opts.Upstreams),
+		cache:     newDNSCache(4096),
 		cachePath: opts.CachePath,
 		realNames: make(map[netip.Addr]realIPEntry),
 	}
@@ -137,6 +142,8 @@ func (s *Server) Stats() Stats {
 		FakeAnswered: s.fakeAnswered.Load(),
 		Forwarded:    s.forwarded.Load(),
 		Failures:     s.failures.Load(),
+		CacheHits:    s.cacheHits.Load(),
+		CacheSize:    s.cache.Len(),
 		PoolSize:     s.pool.Len(),
 	}
 }
@@ -254,6 +261,18 @@ func (s *Server) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 }
 
 func (s *Server) forward(w dns.ResponseWriter, r *dns.Msg) {
+	now := time.Now()
+	q := r.Question[0]
+
+	// Check cache first.
+	if cached, ok := s.cache.Get(q, now); ok {
+		cached.Id = r.Id
+		cached.Compress = true
+		s.cacheHits.Add(1)
+		_ = w.WriteMsg(cached)
+		return
+	}
+
 	s.forwarded.Add(1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -267,7 +286,8 @@ func (s *Server) forward(w dns.ResponseWriter, r *dns.Msg) {
 	}
 	resp.Id = r.Id
 	resp.Compress = true
-	s.rememberRealAnswers(resp, time.Now())
+	s.rememberRealAnswers(resp, now)
+	s.cache.Put(q, resp, now)
 	if err := w.WriteMsg(resp); err != nil {
 		var netErr net.Error
 		if !errors.As(err, &netErr) {
