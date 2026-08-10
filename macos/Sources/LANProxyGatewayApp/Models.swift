@@ -479,3 +479,36 @@ enum AppSection: String, CaseIterable, Identifiable {
         }
     }
 }
+
+// MARK: - NAT Diagnosis
+
+struct NATDiagResult: Decodable {
+    let natType: String
+    let externalIP: String
+    let externalPort: Int
+    let doubleNAT: Bool
+    let doubleNATDetail: String?
+    let upnp: UPnPStatusResult
+    let warnings: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case natType = "nat_type"
+        case externalIP = "external_ip"
+        case externalPort = "external_port"
+        case doubleNAT = "double_nat"
+        case doubleNATDetail = "double_nat_detail"
+        case upnp, warnings
+    }
+}
+
+struct UPnPStatusResult: Decodable {
+    let available: Bool
+    let deviceName: String?
+    let serviceType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case available
+        case deviceName = "device_name"
+        case serviceType = "service_type"
+    }
+}

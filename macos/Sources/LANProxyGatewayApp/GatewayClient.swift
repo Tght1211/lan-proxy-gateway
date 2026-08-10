@@ -140,6 +140,17 @@ struct GatewayClient {
         return try await runPrivilegedShell(command).text
     }
 
+    func natDiag(apiPort: Int) async throws -> NATDiagResult {
+        let url = URL(string: "http://127.0.0.1:\(apiPort)/api/nat-diag")!
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw GatewayClientError.commandFailed("NAT 诊断接口暂时不可用。")
+        }
+        return try JSONDecoder().decode(NATDiagResult.self, from: data)
+    }
+
     func readLog(path: String) async -> String {
         await Task.detached {
             guard let handle = FileHandle(forReadingAtPath: path) else {

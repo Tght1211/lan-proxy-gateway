@@ -18,6 +18,8 @@ final class AppModel: ObservableObject {
     @Published var notice: String?
     @Published var errorMessage: String?
     @Published var coreUpgradeRecommended = false
+    @Published var natDiag: NATDiagResult?
+    @Published var isNATDiagRunning = false
     @Published var themeID: String = UserDefaults.standard.string(forKey: "appThemeID") ?? "cream" {
         didSet { UserDefaults.standard.set(themeID, forKey: "appThemeID") }
     }
@@ -179,6 +181,19 @@ final class AppModel: ObservableObject {
             let latest = (try? await client.serviceStatus()) ?? "未安装"
             serviceStatus = latest
             isServiceInstalled = latest != "未安装" && latest != "inactive"
+        }
+    }
+
+    func runNATDiag() {
+        guard let port = status?.ports.api else { return }
+        isNATDiagRunning = true
+        Task {
+            do {
+                natDiag = try await client.natDiag(apiPort: port)
+            } catch {
+                errorMessage = "NAT 诊断失败: \(error.localizedDescription)"
+            }
+            isNATDiagRunning = false
         }
     }
 
