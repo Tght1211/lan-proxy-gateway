@@ -32,6 +32,14 @@ func renderLinuxRules(c Config) (nat [][]string, filter [][]string) {
 			))
 		}
 	}
+	if c.UDPFakeIPRedir && c.FakeIPRange != "" && c.UDPRedirPort > 0 {
+		udpPort := strconv.Itoa(c.UDPRedirPort)
+		nat = append(nat, joinArgs(
+			[]string{"PREROUTING"}, iface,
+			[]string{"-p", "udp", "-d", c.FakeIPRange},
+			tag, []string{"-j", "REDIRECT", "--to-ports", udpPort},
+		))
+	}
 	if c.TCPRedirect {
 		nat = append(nat, joinArgs(
 			[]string{"PREROUTING"}, iface, []string{"-p", "tcp"},

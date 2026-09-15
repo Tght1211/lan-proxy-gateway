@@ -40,6 +40,7 @@ quic_block: true
 # ========== Runtime（通常不用改）==========
 runtime:
   redir_port: 17892        # 透明 TCP 转发监听端口
+  udp_redir_port: 17893    # UDP fake-IP 转发端口（游戏语音/视频通话）
   api_port: 19090          # 本机回环状态 API（配置热加载）
   log_level: info
   fake_ip_range: "198.18.0.0/16"

@@ -195,6 +195,9 @@ func Normalize(cfg *Config) {
 	if cfg.Runtime.RedirPort == 0 {
 		cfg.Runtime.RedirPort = 17892
 	}
+	if cfg.Runtime.UDPRedirPort == 0 {
+		cfg.Runtime.UDPRedirPort = 17893
+	}
 	if cfg.Runtime.APIPort == 0 {
 		cfg.Runtime.APIPort = 19090
 	}

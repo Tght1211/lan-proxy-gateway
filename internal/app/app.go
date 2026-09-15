@@ -270,8 +270,14 @@ func firewallConfig(cfg *config.Config) firewall.Config {
 		// does not translate packets that enter and leave on the same interface,
 		// so kernel-forwarded direct connections never receive replies.
 		TCPRedirect: true,
-		DNSHijack:   cfg.DNS.Enabled && cfg.DNS.Hijack,
-		QUICBlock:   proxy && cfg.QUICBlock,
+		// UDP fake-IP redirect: in proxy mode, DNS returns fake IPs which break
+		// UDP connectivity (game voice, etc). The UDP relay resolves them back
+		// to real destinations and forwards directly.
+		UDPFakeIPRedir: proxy && cfg.DNS.FakeIP,
+		UDPRedirPort:   cfg.Runtime.UDPRedirPort,
+		FakeIPRange:    cfg.Runtime.FakeIPRange,
+		DNSHijack:      cfg.DNS.Enabled && cfg.DNS.Hijack,
+		QUICBlock:      proxy && cfg.QUICBlock,
 	}
 }
 
@@ -314,9 +320,10 @@ type DNSStatus struct {
 }
 
 type PortsStatus struct {
-	Redir int `json:"redir"`
-	API   int `json:"api"`
-	DNS   int `json:"dns"`
+	Redir    int `json:"redir"`
+	UDPRedir int `json:"udp_redir"`
+	API      int `json:"api"`
+	DNS      int `json:"dns"`
 }
 
 // Status returns the current runtime status (no blocking network calls).
@@ -336,9 +343,10 @@ func (a *App) Status() Status {
 		QUICBlock: a.Cfg.QUICBlock && a.Cfg.Egress.Mode == config.EgressProxy,
 		Gateway:   gs,
 		Ports: PortsStatus{
-			Redir: a.Cfg.Runtime.RedirPort,
-			API:   a.Cfg.Runtime.APIPort,
-			DNS:   a.Cfg.DNS.Port,
+			Redir:    a.Cfg.Runtime.RedirPort,
+			UDPRedir: a.Cfg.Runtime.UDPRedirPort,
+			API:      a.Cfg.Runtime.APIPort,
+			DNS:      a.Cfg.DNS.Port,
 		},
 		ConfigFile: a.Paths.ConfigFile,
 		LogFile:    a.Paths.LogFile,
