@@ -243,6 +243,21 @@ func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST re
 			}
 		}()
 	}
+	if a.Cfg.Egress.Mode == config.EgressProxy && a.Cfg.DNS.FakeIP && rt.dns != nil {
+		fakeRange := rt.dns.FakeIPRange()
+		rt.udpRelay = relay.NewUDPRelay(relay.UDPRelayOptions{
+			ListenAddr:   relay.FormatUDPListenAddr(a.Cfg.Runtime.UDPRedirPort),
+			FakeIPRange:  &fakeRange,
+			LookupFakeIP: rt.dns.LookupFakeIP,
+			Resolve:      relay.NewUpstreamResolver(a.Cfg.DNS.Upstreams),
+			Logger:       logger,
+		})
+		go func() {
+			if err := rt.udpRelay.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
+				logger.Error("UDP relay 异常退出", "err", err)
+			}
+		}()
+	}
 	go func() {
 		if err := rt.relay.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
 			rt.eventCh <- serviceEvent{name: "relay", err: err}
