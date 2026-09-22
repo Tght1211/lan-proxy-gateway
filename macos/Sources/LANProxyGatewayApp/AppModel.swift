@@ -24,23 +24,22 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(themeID, forKey: "appThemeID") }
     }
 
-    private let client = GatewayClient()
+    let client = GatewayClient()
     private var timer: Timer?
     private var isRefreshing = false
     private var isLiveScrolling = false
     private var didLoadProxyConfig = false
     private var noticeTask: Task<Void, Never>?
     private let deviceLabelsKey = "deviceLabels"
-
     init() {
         if let stored = UserDefaults.standard.dictionary(forKey: deviceLabelsKey) as? [String: String] {
             deviceLabels = stored
         }
         NotificationCenter.default.addObserver(forName: NSScrollView.willStartLiveScrollNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.isLiveScrolling = true
+            Task { @MainActor [weak self] in self?.isLiveScrolling = true }
         }
         NotificationCenter.default.addObserver(forName: NSScrollView.didEndLiveScrollNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.isLiveScrolling = false
+            Task { @MainActor [weak self] in self?.isLiveScrolling = false }
         }
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -48,7 +47,9 @@ final class AppModel: ObservableObject {
                 await self.refresh(silent: true)
             }
         }
-        Task { await refresh(silent: true) }
+        Task {
+            await refresh(silent: true)
+        }
     }
 
     deinit {
@@ -154,6 +155,10 @@ final class AppModel: ObservableObject {
         perform("已切换为直连出口") { try await self.client.setDirect() }
     }
 
+    func learningAction(_ action: String, host: String) async {
+        _ = await performAsync("规则建议已更新") { try await self.client.learningAction(action, host: host) }
+    }
+
     @discardableResult
     func applyRoutingRules(_ rules: [RoutingRule]) async -> Bool {
         await performAsync("分流规则已更新") { try await self.client.setRoutingRules(rules) }
@@ -212,13 +217,6 @@ final class AppModel: ObservableObject {
 
     func isAutoLabeled(_ ip: String) -> Bool {
         (deviceLabels[ip] ?? "").isEmpty && autoDeviceLabels[ip] != nil
-    }
-
-    var egressAlert: EgressHealthStats? { stats?.egressHealth }
-    var hasEgressAlert: Bool {
-        guard let eh = egressAlert else { return false }
-		return eh.proxyDown || !eh.alerts.isEmpty || !eh.directFailures.isEmpty ||
-			(stats?.deviceAdaptive?.devices.contains { $0.mode == "direct" } == true)
     }
 
 	func adaptiveDeviceState(for ip: String) -> DeviceAdaptiveState? {
@@ -380,7 +378,7 @@ final class AppModel: ObservableObject {
         proxyPort = port
     }
 
-    private func showNotice(_ text: String) {
+    func showNotice(_ text: String) {
         noticeTask?.cancel()
         notice = text
         noticeTask = Task {

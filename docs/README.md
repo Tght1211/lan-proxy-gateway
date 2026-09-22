@@ -8,15 +8,16 @@
 2. 根据设备选择教程：[手机 / 平板](phone-setup.md)、[Nintendo Switch](switch-setup.md)、[PS5](ps5-setup.md)、[Apple TV](appletv-setup.md) 或 [智能电视](tv-setup.md)。
 3. 遇到问题先看 [常见问题](faq.md)，再用 `gateway status` 和运行日志定位。
 
-也可以把 [AI 配置提示词](ai-setup.md) 交给能够操作本机终端的 Codex、Claude Code 等工具，完成电脑端的检查、安装和启动。安装后的日常运维、监控和诊断见 [AI 操作手册](../skills/gateway/SKILL.md)。
+也可以把 [AI 配置提示词](ai-setup.md) 交给能够操作本机终端的 Codex、Claude Code 等工具，完成电脑端的检查、安装和启动。安装后的日常运维、监控和诊断见 [外部 Agent Skill](agent-skill.md)。
 
 ## 使用指南
 
 | 文档 | 内容 |
 |---|---|
 | [macOS App](app.md) | 页面功能、数据与隐私、安装和本机构建 |
+| [外部 Agent Skill](agent-skill.md) | Skill 导出、安装、CLI 控制与运行快照 |
 | [命令说明](commands.md) | 生命周期、系统代理、开机自启和更新命令 |
-| [AI 操作手册](../skills/gateway/SKILL.md) | 面向 AI agent 的全功能操作参考，也可作为人类速查手册 |
+| [外部 Agent Skill](agent-skill.md) | 面向 AI agent 的全功能操作参考，也可作为人类速查手册 |
 | [配置文件](advanced.md) | `gateway.yaml`、fake-IP 缓存和常见上游 |
 | [典型场景](scenarios.md) | 同机代理、直连网关、远程上游和排错清单 |
 | [实机结果](real-device-results.md) | 手机与 Switch 的实际测速和访问效果 |

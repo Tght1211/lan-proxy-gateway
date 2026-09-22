@@ -25,6 +25,7 @@
 - **原始域名转发**：代理模式使用 fake-IP 保存域名，让 Clash/sing-box 继续按域名分流；无需开启 TUN。
 - **轻量分流**：设备策略优先于域名、域名后缀和 IP-CIDR，可选择代理、直连或拒绝；代理失败支持域名学习和设备级临时直连保护。
 - **原生 macOS App**：查看流量拓扑、设备与服务、连接结果和网络质量，也可管理规则、代理与核心状态。
+- **外部 Agent Skill**：在设置中导出可安装的 Skill，让用户自己的 Agent 通过 CLI 查询状态、诊断连接和调整规则，无需内置模型或 API Key。
 - **系统级集成**：macOS 使用 `pf`，Linux 使用 `iptables`；停止服务时会清理规则并恢复由程序修改的系统状态。
 
 它适合有一台长期在线电脑、且已经拥有代理软件或 HTTP/SOCKS5 端点的用户。不适合 Windows、普通路由器/OpenWrt、IPv6 透明代理或需要代理游戏/语音 UDP 的场景。代理模式会拒绝 QUIC（UDP/443）以促使客户端回退 TCP，其他 UDP 仍直连。
@@ -56,6 +57,8 @@ sudo gateway install
 
 也可以先使用直连出口，单纯把电脑作为局域网网关。
 
+网关 DNS 默认在内部端口 `1053` 监听，端口被占用时会自动选择备用端口并保存配置。局域网设备仍使用标准 DNS 端口 `53`，由网关防火墙转发，无需修改 Clash 的 DNS 设置。已有配置中的空闲端口会继续保留。
+
 ### 3. 接入设备
 
 运行 `gateway status`，按输出在手机、电视或游戏机中填写：
@@ -79,7 +82,7 @@ sudo gateway install
 | 内容 | 链接 |
 |---|---|
 | 设备接入 | [总览](docs/device-setup.md) · [手机](docs/phone-setup.md) · [Switch](docs/switch-setup.md) · [PS5](docs/ps5-setup.md) · [Apple TV](docs/appletv-setup.md) · [电视](docs/tv-setup.md) |
-| 使用与配置 | [macOS App](docs/app.md) · [命令说明](docs/commands.md) · [配置文件](docs/advanced.md) · [典型场景](docs/scenarios.md) |
+| 使用与配置 | [macOS App](docs/app.md) · [外部 Agent Skill](docs/agent-skill.md) · [命令说明](docs/commands.md) · [配置文件](docs/advanced.md) · [典型场景](docs/scenarios.md) |
 | 了解项目 | [工作原理](docs/architecture.md) · [实机结果](docs/real-device-results.md) · [常见问题](docs/faq.md) |
 | 升级与自动化 | [从 v3 升级](docs/migration-v4.md) · [交给 AI 配置](docs/ai-setup.md) · [Changelog](CHANGELOG.md) |
 
@@ -90,7 +93,7 @@ sudo gateway install
 ```bash
 make build       # CLI
 make test        # Go 测试
-make build-app   # macOS App
+make build-app   # Codex SDK bridge + macOS App
 ```
 
 App 打包与项目结构见 [App 文档](docs/app.md) 和 [架构说明](docs/architecture.md)。

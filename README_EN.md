@@ -56,6 +56,8 @@ Port     7897
 
 Direct egress is also supported when you only need a LAN gateway.
 
+The gateway DNS listener defaults to internal port `1053`. If occupied, the gateway selects and saves a fallback port. LAN devices continue using standard DNS port `53`, forwarded by the gateway firewall; no Clash DNS changes are needed. Available ports in existing configurations are preserved.
+
 ### 3. Connect a device
 
 Run `gateway status`, then enter the reported values on the phone, TV, or console:

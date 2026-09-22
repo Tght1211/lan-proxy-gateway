@@ -10,7 +10,14 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "LANProxyGatewayApp",
-            path: "Sources/LANProxyGatewayApp"
+            path: "Sources/LANProxyGatewayApp",
+            resources: [
+                .copy("Resources/AppIcon.icns"),
+                .copy("Resources/default_routing.json"),
+            ],
+            linkerSettings: [
+                .linkedFramework("Security")
+            ]
         )
     ]
 )

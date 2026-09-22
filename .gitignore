@@ -22,6 +22,8 @@ script.js
 ._*
 /macos/.build/
 /macos/.swiftpm/
+/ai/codex-bridge/node_modules/
+/ai/runtime/macos/
 
 # IDE
 .vscode/
@@ -43,3 +45,6 @@ upgrade-local.sh
 # Claude Code / AI 工作目录与接力文档
 .claude/
 handoff_unfinished_tasks.txt
+
+# 内网穿透客户端运行文件
+/xiaomiqiu-client.id

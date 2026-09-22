@@ -100,12 +100,24 @@ struct GatewayClient {
         try await output(arguments: ["system-proxy", "off"], privileged: true)
     }
 
+    func learningAction(_ action: String, host: String) async throws -> String {
+        try await output(arguments: ["learning", action, host], privileged: false)
+    }
+
     func setRoutingRules(_ rules: [RoutingRule]) async throws -> String {
         let data = try JSONEncoder().encode(rules)
         guard let json = String(data: data, encoding: .utf8) else {
             throw GatewayClientError.invalidOutput("无法编码分流规则")
         }
         return try await output(arguments: ["routing", "set", "--rules-json", json], privileged: false)
+    }
+
+    func setLANHTTPProxy(enabled: Bool, port: Int, auth: String, username: String, password: String?) async throws -> String {
+        guard let engineURL else { throw GatewayClientError.engineNotFound }
+        var config: [String: Any] = ["enabled": enabled, "port": port, "auth": auth, "username": username]
+        if let password { config["password"] = password }
+        let input = try JSONSerialization.data(withJSONObject: config)
+        return try await runProcess(executable: engineURL, arguments: ["http-proxy", "set"], input: input).text
     }
 
     func installService() async throws -> String {
@@ -124,6 +136,23 @@ struct GatewayClient {
 
     func uninstallService() async throws -> String {
         try await output(arguments: ["service", "uninstall"], privileged: true)
+    }
+
+    func readLog(path: String) async -> String {
+        await Task.detached {
+            guard let handle = FileHandle(forReadingAtPath: path) else { return "" }
+            defer { try? handle.close() }
+            do {
+                let end = try handle.seekToEnd()
+                try handle.seek(toOffset: end > 262_144 ? end - 262_144 : 0)
+                let data = try handle.readToEnd() ?? Data()
+                return String(decoding: data, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).suffix(500).joined(separator: "\n")
+            } catch { return "读取日志失败：\(error.localizedDescription)" }
+        }.value
+    }
+
+    func exportAgentSkill(to destination: URL) async throws -> String {
+        try await output(arguments: ["skill", "export", "--output", destination.path, "--force"], privileged: false)
     }
 
     func serviceStatus() async throws -> String {
@@ -157,23 +186,6 @@ struct GatewayClient {
         return try JSONDecoder().decode(NATDiagResult.self, from: data)
     }
 
-    func readLog(path: String) async -> String {
-        await Task.detached {
-            guard let handle = FileHandle(forReadingAtPath: path) else {
-                return "暂无日志。启动核心服务后，日志会显示在这里。"
-            }
-            defer { try? handle.close() }
-            let data = (try? handle.readToEnd()) ?? Data()
-            let tail = data.suffix(160_000)
-            let text = String(decoding: tail, as: UTF8.self)
-            var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-            if data.count > tail.count, !lines.isEmpty {
-                lines.removeFirst()
-            }
-            return lines.suffix(120).joined(separator: "\n")
-        }.value
-    }
-
     private func output(arguments: [String], privileged: Bool) async throws -> String {
         try await run(arguments: arguments, privileged: privileged).text
     }
@@ -199,9 +211,11 @@ struct GatewayClient {
         )
     }
 
-    private func runProcess(executable: URL, arguments: [String]) async throws -> CommandResult {
+    func runProcess(executable: URL, arguments: [String], input: Data? = nil) async throws -> CommandResult {
         try await Task.detached {
             let process = Process()
+            let stdin = Pipe()
+            if input != nil { process.standardInput = stdin }
             let stdout = Pipe()
             let stderr = Pipe()
             process.executableURL = executable
@@ -212,6 +226,10 @@ struct GatewayClient {
                 try process.run()
             } catch {
                 throw GatewayClientError.commandFailed(error.localizedDescription)
+            }
+            if let input {
+                try stdin.fileHandleForWriting.write(contentsOf: input)
+                try stdin.fileHandleForWriting.close()
             }
             async let out = stdout.fileHandleForReading.readToEnd() ?? Data()
             async let err = stderr.fileHandleForReading.readToEnd() ?? Data()
