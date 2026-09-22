@@ -16,6 +16,10 @@ import (
 // Everything is idempotent: relay dialer swap, dns toggles, firewall re-sync.
 // Runs from API/watch goroutines, so service pointers go through services().
 func (rt *daemonRuntime) applyConfig(a *App, cfg *config.Config) error {
+	if err := rt.syncHTTPProxy(cfg); err != nil {
+		rt.logger.Error("HTTP 代理配置应用失败，保留原配置", "err", err)
+		return err
+	}
 	a.setCfg(cfg)
 	relaySrv, _, dnsSrv := rt.services()
 	if dialer, err := buildDialer(cfg.Egress); err == nil {

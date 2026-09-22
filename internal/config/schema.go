@@ -36,6 +36,7 @@ const (
 
 // Config is the root of gateway.yaml.
 type Config struct {
+	HTTPProxy    HTTPProxyConfig    `yaml:"http_proxy"`
 	Version      int                `yaml:"version"`
 	Gateway      GatewayConfig      `yaml:"gateway"`
 	Egress       EgressConfig       `yaml:"egress"`
@@ -101,6 +102,16 @@ type ProxyConfig struct {
 	Password string `yaml:"password,omitempty"`
 }
 
+// HTTPProxyConfig exposes an explicit HTTP/HTTPS proxy to LAN clients.
+// This authentication is separate from the upstream proxy credentials.
+type HTTPProxyConfig struct {
+	Enabled  bool   `yaml:"enabled" json:"enabled"`
+	Port     int    `yaml:"port" json:"port"`
+	Auth     string `yaml:"auth" json:"auth"` // none | basic
+	Username string `yaml:"username,omitempty" json:"username"`
+	Password string `yaml:"password,omitempty" json:"password"`
+}
+
 // DNSConfig controls the LAN DNS service.
 type DNSConfig struct {
 	Enabled      bool     `yaml:"enabled"`
@@ -123,8 +134,9 @@ type RuntimeConfig struct {
 // Default returns the recommended v4 configuration.
 func Default() *Config {
 	return &Config{
-		Version: Version,
-		Routing: RoutingConfig{Rules: DefaultRoutingRules()},
+		Version:   Version,
+		Routing:   RoutingConfig{Rules: DefaultRoutingRules()},
+		HTTPProxy: HTTPProxyConfig{Port: 17894, Auth: "none"},
 		Gateway: GatewayConfig{
 			Enabled: true,
 		},

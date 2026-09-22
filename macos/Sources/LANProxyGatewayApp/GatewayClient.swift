@@ -50,9 +50,12 @@ struct GatewayClient {
         }
     }
 
-    func stats(apiPort: Int) async throws -> RuntimeStats {
+    func stats(apiPort: Int, configFile: String) async throws -> RuntimeStats {
         let url = URL(string: "http://127.0.0.1:\(apiPort)/api/stats")!
         var request = URLRequest(url: url)
+        let tokenURL = URL(fileURLWithPath: configFile).deletingLastPathComponent().appendingPathComponent("api-token")
+        let token = try String(contentsOf: tokenURL, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 2
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -140,9 +143,12 @@ struct GatewayClient {
         return try await runPrivilegedShell(command).text
     }
 
-    func natDiag(apiPort: Int) async throws -> NATDiagResult {
+    func natDiag(apiPort: Int, configFile: String) async throws -> NATDiagResult {
         let url = URL(string: "http://127.0.0.1:\(apiPort)/api/nat-diag")!
         var request = URLRequest(url: url)
+        let tokenURL = URL(fileURLWithPath: configFile).deletingLastPathComponent().appendingPathComponent("api-token")
+        let token = try String(contentsOf: tokenURL, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 10
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {

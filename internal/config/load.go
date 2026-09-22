@@ -176,6 +176,16 @@ func Save(cfg *Config, path string) error {
 
 // Normalize fills in missing defaults so downstream code can rely on invariants.
 func Normalize(cfg *Config) {
+	if cfg.HTTPProxy.Port == 0 {
+		cfg.HTTPProxy.Port = 17894
+	}
+	if cfg.HTTPProxy.Auth == "" {
+		cfg.HTTPProxy.Auth = "none"
+	}
+	if cfg.HTTPProxy.Auth == "none" {
+		cfg.HTTPProxy.Username = ""
+		cfg.HTTPProxy.Password = ""
+	}
 	if cfg.Version == 0 {
 		cfg.Version = Version
 	}
@@ -235,6 +245,20 @@ func Normalize(cfg *Config) {
 
 // Validate checks the config is internally consistent.
 func Validate(cfg *Config) error {
+	p := cfg.HTTPProxy
+	if p.Port < 1 || p.Port > 65535 {
+		return errors.New("http_proxy.port 必须在 1–65535 之间")
+	}
+	if p.Auth != "none" && p.Auth != "basic" {
+		return errors.New("http_proxy.auth 必须是 none/basic")
+	}
+	if p.Auth == "basic" && (p.Username == "" || p.Password == "" || strings.ContainsAny(p.Username, ":\r\n") || strings.ContainsAny(p.Password, "\r\n")) {
+		return errors.New("HTTP 代理认证需要用户名和密码，用户名不能包含冒号或换行")
+	}
+	if p.Enabled && (p.Port == cfg.Runtime.RedirPort || p.Port == cfg.Runtime.APIPort || (cfg.DNS.Enabled && p.Port == cfg.DNS.Port)) {
+		return errors.New("HTTP 代理端口不能与 DNS、透明转发或状态 API 端口相同")
+	}
+
 	switch cfg.IPv6Policy {
 	case IPv6PolicyNone, IPv6PolicyBlock:
 	default:

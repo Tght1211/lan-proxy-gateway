@@ -34,7 +34,7 @@ func (a *App) prepareDNSPort(logger *slog.Logger) error {
 	}
 	previous := a.Cfg.DNS.Port
 	for port := config.DefaultDNSPort; port < config.DefaultDNSPort+100; port++ {
-		if port == a.Cfg.Runtime.APIPort || port == a.Cfg.Runtime.RedirPort || port == a.Cfg.Runtime.UDPRedirPort || !dnsPortAvailable(port) {
+		if port == a.Cfg.Runtime.APIPort || port == a.Cfg.Runtime.RedirPort || port == a.Cfg.Runtime.UDPRedirPort || port == a.Cfg.HTTPProxy.Port || !dnsPortAvailable(port) {
 			continue
 		}
 		a.Cfg.DNS.Port = port

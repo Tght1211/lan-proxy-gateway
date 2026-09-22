@@ -55,11 +55,7 @@ func TestHTTPConnectBufferedHalfClose(t *testing.T) {
 	if _, err = io.ReadFull(c, ready); err != nil {
 		t.Fatal(err)
 	}
-	wrapped := c.(interface {
-		io.Reader
-		io.Writer
-		CloseWrite() error
-	})
+	wrapped := &explicitConn{Conn: c, tracked: NewTracker().Open("client", "host", 443, true, "tcp", "http-proxy")}
 	fmt.Fprint(wrapped, "request")
 	if err = wrapped.CloseWrite(); err != nil {
 		t.Fatal(err)

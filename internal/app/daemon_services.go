@@ -11,13 +11,20 @@ import (
 
 	"github.com/tght/lan-proxy-gateway/internal/config"
 	"github.com/tght/lan-proxy-gateway/internal/dns"
+	"github.com/tght/lan-proxy-gateway/internal/httpproxy"
 	"github.com/tght/lan-proxy-gateway/internal/relay"
 )
 
 // startServices launches relay, DNS and the loopback API for the current config.
 func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST relay.OrigDSTResolver) (*daemonRuntime, error) {
 	a.migrateLearnedGroups()
+	token, err := createAPIToken(a.Paths.ConfigFile)
+	if err != nil {
+		return nil, err
+	}
+
 	rt := &daemonRuntime{
+		apiToken:    token,
 		logger:      logger,
 		eventCh:     make(chan serviceEvent, 4),
 		crashCounts: make(map[string]int),
@@ -106,6 +113,10 @@ func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST re
 			rt.eventCh <- serviceEvent{name: "api", err: err}
 		}
 	}()
+	if err := rt.syncHTTPProxy(a.Cfg); err != nil {
+		rt.shutdown()
+		return nil, err
+	}
 	go rt.watchConfig(ctx, a)
 	return rt, nil
 }
@@ -118,19 +129,23 @@ type serviceEvent struct {
 
 // daemonRuntime bundles the long-running services for shutdown/reload.
 type daemonRuntime struct {
-	logger  *slog.Logger
-	tracker *relay.Tracker
-	learner *fallbackLearner
-	eventCh chan serviceEvent // sub-service crash notifications
+	apiToken string
+	logger   *slog.Logger
+	tracker  *relay.Tracker
+	learner  *fallbackLearner
+	eventCh  chan serviceEvent // sub-service crash notifications
 
 	// mu guards the pointers swapped by restartService and the crash counter
 	// map, both read from API handler goroutines while the main loop writes.
-	mu          sync.RWMutex
-	relay       *relay.Server
-	udpRelay    *relay.UDPRelay
-	dns         *dns.Server
-	api         *apiServer
-	crashCounts map[string]int
+	httpMu        sync.Mutex
+	httpProxy     *httpproxy.Server
+	httpProxyPort int
+	mu            sync.RWMutex
+	relay         *relay.Server
+	udpRelay      *relay.UDPRelay
+	dns           *dns.Server
+	api           *apiServer
+	crashCounts   map[string]int
 }
 
 // services returns a consistent snapshot of the swappable service pointers.
@@ -150,9 +165,14 @@ func (rt *daemonRuntime) bumpCrash(name string) int {
 
 // componentHealth returns the health of each core sub-service.
 func (rt *daemonRuntime) componentHealth() []ComponentHealth {
+	rt.httpMu.Lock()
+	defer rt.httpMu.Unlock()
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
 	var out []ComponentHealth
+	if rt.httpProxy != nil {
+		out = append(out, ComponentHealth{Name: "http-proxy", Running: rt.httpProxy.Running()})
+	}
 	out = append(out, ComponentHealth{
 		Name: "relay", Running: rt.relay != nil, Crashes: rt.crashCounts["relay"],
 	})
@@ -175,6 +195,16 @@ func (rt *daemonRuntime) componentHealth() []ComponentHealth {
 func (rt *daemonRuntime) restartService(ctx context.Context, a *App, name string) {
 	rt.logger.Info("正在重启子服务", "service", name)
 	switch name {
+	case "http-proxy":
+		rt.httpMu.Lock()
+		if rt.httpProxy != nil {
+			_ = rt.httpProxy.Close()
+			rt.httpProxy = nil
+		}
+		rt.httpMu.Unlock()
+		if err := rt.syncHTTPProxy(a.getCfg()); err != nil {
+			rt.logger.Error("重启 HTTP 代理失败", "err", err)
+		}
 	case "dns":
 		if rt.dns != nil {
 			rt.dns.Shutdown()
@@ -272,6 +302,11 @@ func (rt *daemonRuntime) restartService(ctx context.Context, a *App, name string
 }
 
 func (rt *daemonRuntime) shutdown() {
+	rt.httpMu.Lock()
+	if rt.httpProxy != nil {
+		_ = rt.httpProxy.Close()
+	}
+	rt.httpMu.Unlock()
 	if rt.relay != nil {
 		_ = rt.relay.Close()
 	}

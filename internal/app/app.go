@@ -274,7 +274,7 @@ func (a *App) pokeReload() {
 	if !a.Running() {
 		return
 	}
-	_ = apiClient(a.Cfg.Runtime.APIPort).Reload(context.Background())
+	_ = apiClient(a.Cfg.Runtime.APIPort, a.Paths.ConfigFile).Reload(context.Background())
 }
 
 // ---------- shared helpers ----------
@@ -354,6 +354,7 @@ func dnsOptions(cfg *config.Config, cachePath string, logger *slog.Logger) dns.O
 
 // Status is a read-only snapshot for UI rendering and `gateway status --json`.
 type Status struct {
+	HTTPProxy       HTTPProxyStatus      `json:"http_proxy"`
 	Configured      bool                 `json:"configured"`
 	Running         bool                 `json:"running"`
 	Egress          string               `json:"egress"`
@@ -367,6 +368,19 @@ type Status struct {
 	Ports           PortsStatus          `json:"ports"`
 	ConfigFile      string               `json:"config_file"`
 	LogFile         string               `json:"log_file"`
+}
+
+type HTTPProxyStatus struct {
+	Enabled     bool   `json:"enabled"`
+	Port        int    `json:"port"`
+	Auth        string `json:"auth"`
+	Username    string `json:"username"`
+	PasswordSet bool   `json:"password_set"`
+}
+
+func (a *App) HTTPProxyStatus() HTTPProxyStatus {
+	p := a.getCfg().HTTPProxy
+	return HTTPProxyStatus{Enabled: p.Enabled, Port: p.Port, Auth: p.Auth, Username: p.Username, PasswordSet: p.Password != ""}
 }
 
 type DNSStatus struct {
@@ -387,6 +401,7 @@ type PortsStatus struct {
 func (a *App) Status() Status {
 	gs, _ := a.Gateway.Status()
 	st := Status{
+		HTTPProxy:  a.HTTPProxyStatus(),
 		Configured: a.Configured(),
 		Running:    a.Running(),
 		Egress:     a.Cfg.Egress.Mode,

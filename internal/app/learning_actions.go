@@ -94,7 +94,7 @@ func (c *APIClient) Learning(ctx context.Context, action, host string) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.hc.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return err
 	}

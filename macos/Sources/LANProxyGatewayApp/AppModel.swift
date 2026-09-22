@@ -72,7 +72,7 @@ final class AppModel: ObservableObject {
             loadProxyConfigIfNeeded(from: latest)
             if latest.running {
                 do {
-                    let runtime = try await client.stats(apiPort: latest.ports.api)
+                    let runtime = try await client.stats(apiPort: latest.ports.api, configFile: latest.configFile)
                     stats = runtime
                     coreUpgradeRecommended = runtime.schemaVersion != 3
                 } catch {
@@ -185,11 +185,11 @@ final class AppModel: ObservableObject {
     }
 
     func runNATDiag() {
-        guard let port = status?.ports.api else { return }
+        guard let port = status?.ports.api, let configFile = status?.configFile else { return }
         isNATDiagRunning = true
         Task {
             do {
-                natDiag = try await client.natDiag(apiPort: port)
+                natDiag = try await client.natDiag(apiPort: port, configFile: configFile)
             } catch {
                 errorMessage = "NAT 诊断失败: \(error.localizedDescription)"
             }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -26,6 +27,7 @@ type ComponentHealth struct {
 
 type StatsResponse struct {
 	UsageHistory   []relay.DailyUsage           `json:"usage_history"`
+	HTTPProxy      HTTPProxyStatus              `json:"http_proxy"`
 	SchemaVersion  int                          `json:"schema_version"`
 	Egress         string                       `json:"egress"`
 	Proxy          string                       `json:"proxy,omitempty"`
@@ -102,7 +104,7 @@ func newAPIServer(a *App, rt *daemonRuntime) *apiServer {
 	mux.HandleFunc("GET /api/nat-diag", s.handleNATDiag)
 	s.http = &http.Server{
 		Addr:              net.JoinHostPort("127.0.0.1", fmt.Sprint(a.Cfg.Runtime.APIPort)),
-		Handler:           mux,
+		Handler:           authenticateAPI(rt.apiToken, mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return s
@@ -138,6 +140,7 @@ func (s *apiServer) handleStats(w http.ResponseWriter, r *http.Request) {
 	relaySrv, udpRelay, dnsSrv := s.rt.services()
 	resp := StatsResponse{
 		UsageHistory:   s.rt.tracker.UsageHistory(),
+		HTTPProxy:      s.app.HTTPProxyStatus(),
 		SchemaVersion:  3,
 		Egress:         cfg.Egress.Mode,
 		UptimeSec:      int64(time.Since(s.started).Seconds()),
@@ -346,19 +349,28 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 // apiClient talks to the daemon's loopback API from other processes.
 type APIClient struct {
-	base string
-	hc   *http.Client
+	base      string
+	tokenPath string
+	hc        *http.Client
 }
 
-func apiClient(apiPort int) *APIClient {
+func apiClient(apiPort int, configFile ...string) *APIClient {
+	paths, _ := config.ResolvePaths()
+	file := paths.ConfigFile
+	if len(configFile) > 0 {
+		file = configFile[0]
+	}
 	return &APIClient{
-		base: fmt.Sprintf("http://127.0.0.1:%d", apiPort),
-		hc:   &http.Client{Timeout: 3 * time.Second},
+		tokenPath: filepath.Join(filepath.Dir(file), "api-token"),
+		base:      fmt.Sprintf("http://127.0.0.1:%d", apiPort),
+		hc:        &http.Client{Timeout: 3 * time.Second},
 	}
 }
 
 // NewAPIClient is the exported constructor for console/cmd use.
-func NewAPIClient(apiPort int) *APIClient { return apiClient(apiPort) }
+func NewAPIClient(apiPort int, configFile ...string) *APIClient {
+	return apiClient(apiPort, configFile...)
+}
 
 func (c *APIClient) Stats(ctx context.Context) (*StatsResponse, error) {
 	var out StatsResponse
@@ -382,7 +394,7 @@ func (c *APIClient) Reload(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	resp, err := c.hc.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return err
 	}
@@ -399,7 +411,7 @@ func (c *APIClient) get(ctx context.Context, path string, out any) error {
 	if err != nil {
 		return err
 	}
-	resp, err := c.hc.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return err
 	}
@@ -409,6 +421,7 @@ func (c *APIClient) get(ctx context.Context, path string, out any) error {
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }
+
 func (s *apiServer) handleLearning(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Origin") != "" || r.Header.Get("Content-Type") != "application/json" {
 		http.Error(w, "JSON requests only", http.StatusForbidden)
