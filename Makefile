@@ -4,7 +4,7 @@ BINARY = gateway
 INSTALL_PATH = /usr/local/bin/$(BINARY)
 DIST_DIR = dist
 
-.PHONY: build install uninstall build-all build-app dmg clean test test-core
+.PHONY: build install uninstall build-all skill build-app dmg clean test test-core
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
@@ -40,6 +40,10 @@ build-all: clean
 		cd $(DIST_DIR) && sha256sum gateway-* > SHA256SUMS; \
 	fi
 	@echo "Build complete. Assets in $(DIST_DIR)/"
+
+skill: build
+	@mkdir -p $(DIST_DIR)
+	./$(BINARY) skill export --output $(DIST_DIR)/lan-proxy-gateway-skill.zip --force
 
 build-app:
 	swift build --package-path macos --configuration release
