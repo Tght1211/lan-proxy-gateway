@@ -97,6 +97,8 @@ func Parse(data []byte) (*Config, error) {
 		return nil, fmt.Errorf("配置文件版本过旧(version=%d)，v4 需要重新初始化", probe.Version)
 	}
 	cfg := Default()
+	// Presets seed new configurations only; absent/empty rules in saved files stay empty.
+	cfg.Routing.Rules = nil
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse gateway.yaml: %w", err)
 	}
@@ -163,6 +165,9 @@ func Save(cfg *Config, path string) error {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
 		return err
 	}
 	ReclaimToSudoUser(filepath.Dir(path))

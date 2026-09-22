@@ -440,7 +440,7 @@ func TestServerEndToEnd(t *testing.T) {
 			if err != nil {
 				return
 			}
-			go io.Copy(c, c)
+			go func() { defer c.Close(); _, _ = io.Copy(c, c) }()
 		}
 	}()
 	_, echoPort, _ := net.SplitHostPort(echoLn.Addr().String())
@@ -499,7 +499,7 @@ func TestServerFakeIPLookup(t *testing.T) {
 			if err != nil {
 				return
 			}
-			go io.Copy(c, c)
+			go func() { defer c.Close(); _, _ = io.Copy(c, c) }()
 		}
 	}()
 
@@ -621,7 +621,7 @@ func startEcho(t *testing.T) net.Listener {
 			if err != nil {
 				return
 			}
-			go io.Copy(c, c)
+			go func() { defer c.Close(); _, _ = io.Copy(c, c) }()
 		}
 	}()
 	return ln
@@ -695,6 +695,16 @@ func TestServerFallbackToDirect(t *testing.T) {
 		t.Fatalf("fallback echo read: %v", err)
 	}
 
+	snap := srv.Tracker().Snapshot()
+	if len(snap.Active) != 1 {
+		t.Fatalf("active = %+v", snap.Active)
+	}
+	c := snap.Active[0]
+	if c.ViaProxy || !c.Fallback || c.DstHost != "example.com" {
+		t.Fatalf("fallback conn = %+v, want direct + fallback marked", c)
+	}
+	_ = conn.Close()
+
 	select {
 	case host := <-learned:
 		if host != "example.com" {
@@ -704,14 +714,6 @@ func TestServerFallbackToDirect(t *testing.T) {
 		t.Fatal("fallback success callback never fired")
 	}
 
-	snap := srv.Tracker().Snapshot()
-	if len(snap.Active) != 1 {
-		t.Fatalf("active = %+v", snap.Active)
-	}
-	c := snap.Active[0]
-	if c.ViaProxy || !c.Fallback || c.DstHost != "example.com" {
-		t.Fatalf("fallback conn = %+v, want direct + fallback marked", c)
-	}
 }
 
 func TestServerNoFallbackWithExplicitProxyRule(t *testing.T) {

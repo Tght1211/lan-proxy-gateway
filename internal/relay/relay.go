@@ -44,11 +44,11 @@ type Server struct {
 	tracker *Tracker
 	logger  *slog.Logger
 
-	listenAddr     atomic.Value // string
-	dialer         atomic.Pointer[dialerHolder]
-	viaProxy       atomic.Bool
+	listenAddr      atomic.Value // string
+	dialer          atomic.Pointer[dialerHolder]
+	viaProxy        atomic.Bool
 	proxyFailAction atomic.Value // string: "direct" | "reject" | "keep-proxy"
-	routing        atomic.Pointer[routingPolicy]
+	routing         atomic.Pointer[routingPolicy]
 
 	fakeRange  atomic.Pointer[netip.Prefix]
 	fakeLookup atomic.Value // func(netip.Addr) (string, bool)
@@ -378,7 +378,6 @@ func (s *Server) handle(client *net.TCPConn) {
 			} else {
 				fellBack = true
 				viaProxy = false
-				s.notifyFallbackSuccess(routeHost)
 				// Device adaptive: only count when proxy failed but direct
 				// succeeded — proof that egress is the problem for this device.
 				if adaptiveEligible {
@@ -420,7 +419,7 @@ func (s *Server) handle(client *net.TCPConn) {
 			} else if tc.Down() > 0 {
 				s.health.recordProxyOK(routeHost, time.Now())
 			}
-		case directTest:
+		case directTest || fellBack:
 			if tc.Down() > 0 {
 				s.health.recordDirectOK(routeHost, time.Now())
 				s.notifyFallbackSuccess(routeHost)

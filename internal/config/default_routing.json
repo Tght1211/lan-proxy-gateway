@@ -1,0 +1,534 @@
+[
+  {
+    "type": "ip-cidr",
+    "value": "127.0.0.0/8",
+    "action": "direct",
+    "group": "本机服务",
+    "learned": false
+  },
+  {
+    "type": "ip-cidr",
+    "value": "::1/128",
+    "action": "direct",
+    "group": "本机服务",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "localhost",
+    "action": "direct",
+    "group": "本机服务",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "alibaba-inc.com",
+    "action": "direct",
+    "group": "阿里系及相关服务",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "alibaba.net",
+    "action": "direct",
+    "group": "阿里系及相关服务",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "dingtalk.com",
+    "action": "direct",
+    "group": "阿里系及相关服务",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "alipay.com",
+    "action": "direct",
+    "group": "阿里系及相关服务",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "aliyun.com",
+    "action": "direct",
+    "group": "阿里系及相关服务",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "hulupet.cn",
+    "action": "direct",
+    "group": "阿里系及相关服务",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "anthropic.com",
+    "action": "proxy",
+    "group": "Claude / Anthropic",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "claude.ai",
+    "action": "proxy",
+    "group": "Claude / Anthropic",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "claude.com",
+    "action": "proxy",
+    "group": "Claude / Anthropic",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "claudeusercontent.com",
+    "action": "proxy",
+    "group": "Claude / Anthropic",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "usefathom.com",
+    "action": "proxy",
+    "group": "Claude / Anthropic",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "cursor.sh",
+    "action": "proxy",
+    "group": "Cursor",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "cursor.com",
+    "action": "proxy",
+    "group": "Cursor",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "cursor-cdn.com",
+    "action": "proxy",
+    "group": "Cursor",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "cursorapi.com",
+    "action": "proxy",
+    "group": "Cursor",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "cursor.so",
+    "action": "proxy",
+    "group": "Cursor",
+    "learned": false
+  },
+  {
+    "type": "domain",
+    "value": "api2.cursor.sh",
+    "action": "proxy",
+    "group": "Cursor",
+    "learned": false
+  },
+  {
+    "type": "domain",
+    "value": "api3.cursor.sh",
+    "action": "proxy",
+    "group": "Cursor",
+    "learned": false
+  },
+  {
+    "type": "domain",
+    "value": "repo.cursor.sh",
+    "action": "proxy",
+    "group": "Cursor",
+    "learned": false
+  },
+  {
+    "type": "domain",
+    "value": "download.cursor.sh",
+    "action": "proxy",
+    "group": "Cursor",
+    "learned": false
+  },
+  {
+    "type": "domain",
+    "value": "marketplace.cursor.sh",
+    "action": "proxy",
+    "group": "Cursor",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "openai.com",
+    "action": "proxy",
+    "group": "OpenAI / ChatGPT",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "chatgpt.com",
+    "action": "proxy",
+    "group": "OpenAI / ChatGPT",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "oaistatic.com",
+    "action": "proxy",
+    "group": "OpenAI / ChatGPT",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "oaiusercontent.com",
+    "action": "proxy",
+    "group": "OpenAI / ChatGPT",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "openaiapi.com",
+    "action": "proxy",
+    "group": "OpenAI / ChatGPT",
+    "learned": false
+  },
+  {
+    "type": "domain",
+    "value": "cdn.openai.com",
+    "action": "proxy",
+    "group": "OpenAI / ChatGPT",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "auth0.com",
+    "action": "proxy",
+    "group": "通用 AI 基础设施",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "intercom.io",
+    "action": "proxy",
+    "group": "通用 AI 基础设施",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "intercomcdn.com",
+    "action": "proxy",
+    "group": "通用 AI 基础设施",
+    "learned": false
+  },
+  {
+    "type": "domain",
+    "value": "gemini.google.com",
+    "action": "proxy",
+    "group": "Google AI / Gemini",
+    "learned": false
+  },
+  {
+    "type": "domain",
+    "value": "aistudio.google.com",
+    "action": "proxy",
+    "group": "Google AI / Gemini",
+    "learned": false
+  },
+  {
+    "type": "domain",
+    "value": "generativelanguage.googleapis.com",
+    "action": "proxy",
+    "group": "Google AI / Gemini",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "ai.google.dev",
+    "action": "proxy",
+    "group": "Google AI / Gemini",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "generativeai.google",
+    "action": "proxy",
+    "group": "Google AI / Gemini",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "deepmind.com",
+    "action": "proxy",
+    "group": "Google AI / Gemini",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "deepmind.google",
+    "action": "proxy",
+    "group": "Google AI / Gemini",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "perplexity.ai",
+    "action": "proxy",
+    "group": "其他 AI 产品",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "midjourney.com",
+    "action": "proxy",
+    "group": "其他 AI 产品",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "replicate.com",
+    "action": "proxy",
+    "group": "其他 AI 产品",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "huggingface.co",
+    "action": "proxy",
+    "group": "其他 AI 产品",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "cohere.ai",
+    "action": "proxy",
+    "group": "其他 AI 产品",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "groq.com",
+    "action": "proxy",
+    "group": "其他 AI 产品",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "ping0.cc",
+    "action": "proxy",
+    "group": "IP 检测",
+    "learned": false
+  },
+  {
+    "type": "domain",
+    "value": "checkip.amazonaws.com",
+    "action": "proxy",
+    "group": "IP 检测",
+    "learned": false
+  },
+  {
+    "type": "domain",
+    "value": "ip.sb",
+    "action": "proxy",
+    "group": "IP 检测",
+    "learned": false
+  },
+  {
+    "type": "domain",
+    "value": "ipinfo.io",
+    "action": "proxy",
+    "group": "IP 检测",
+    "learned": false
+  },
+  {
+    "type": "domain",
+    "value": "ipapi.co",
+    "action": "proxy",
+    "group": "IP 检测",
+    "learned": false
+  },
+  {
+    "type": "domain",
+    "value": "api.termius.com",
+    "action": "proxy",
+    "group": "Termius",
+    "learned": false
+  },
+  {
+    "type": "domain",
+    "value": "grpc.termius.com",
+    "action": "proxy",
+    "group": "Termius",
+    "learned": false
+  },
+  {
+    "type": "domain",
+    "value": "account.termius.com",
+    "action": "proxy",
+    "group": "Termius",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "termius.com",
+    "action": "proxy",
+    "group": "Termius",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "termi.us",
+    "action": "proxy",
+    "group": "Termius",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "youtube.com",
+    "action": "proxy",
+    "group": "YouTube",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "googlevideo.com",
+    "action": "proxy",
+    "group": "YouTube",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "ytimg.com",
+    "action": "proxy",
+    "group": "YouTube",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "youtu.be",
+    "action": "proxy",
+    "group": "YouTube",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "ggpht.com",
+    "action": "proxy",
+    "group": "YouTube",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "youtube-nocookie.com",
+    "action": "proxy",
+    "group": "YouTube",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "netflix.com",
+    "action": "proxy",
+    "group": "Netflix",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "netflix.net",
+    "action": "proxy",
+    "group": "Netflix",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "nflxvideo.net",
+    "action": "proxy",
+    "group": "Netflix",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "nflximg.net",
+    "action": "proxy",
+    "group": "Netflix",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "nflxext.com",
+    "action": "proxy",
+    "group": "Netflix",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "nflxso.net",
+    "action": "proxy",
+    "group": "Netflix",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "apd-pcdnwxstat.teg.tencent-cloud.net",
+    "action": "proxy",
+    "group": "AI 助手",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "imap.gmail.com",
+    "action": "proxy",
+    "group": "AI 助手",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "mtalk.google.com",
+    "action": "proxy",
+    "group": "AI 助手",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "update.googleapis.com",
+    "action": "proxy",
+    "group": "AI 助手",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "safebrowsing.googleapis.com",
+    "action": "proxy",
+    "group": "AI 助手",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "clientservices.googleapis.com",
+    "action": "proxy",
+    "group": "AI 助手",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "lp1.nso.nintendo.net",
+    "action": "proxy",
+    "group": "AI 助手",
+    "learned": false
+  },
+  {
+    "type": "domain-suffix",
+    "value": "fast.com",
+    "action": "proxy",
+    "group": "测试网速",
+    "learned": false
+  }
+]

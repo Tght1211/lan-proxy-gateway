@@ -161,8 +161,7 @@ func (a *App) Run(ctx context.Context) error {
 			logger.Info("收到退出信号，开始清理")
 			return a.Gateway.Disable()
 		case ev := <-rt.eventCh:
-			rt.crashCounts[ev.name]++
-			count := rt.crashCounts[ev.name]
+			count := rt.bumpCrash(ev.name)
 			logger.Error("子服务异常退出", "service", ev.name, "err", ev.err,
 				"restart_count", count, "max", maxRestarts)
 			if count > maxRestarts {

@@ -2,20 +2,21 @@ package app
 
 import (
 	"context"
-	"github.com/tght/lan-proxy-gateway/internal/config"
-	"github.com/tght/lan-proxy-gateway/internal/dns"
-	"github.com/tght/lan-proxy-gateway/internal/relay"
 	"log/slog"
 	"net"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
+
+	"github.com/tght/lan-proxy-gateway/internal/config"
+	"github.com/tght/lan-proxy-gateway/internal/dns"
+	"github.com/tght/lan-proxy-gateway/internal/relay"
 )
 
 // startServices launches relay, DNS and the loopback API for the current config.
 func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST relay.OrigDSTResolver) (*daemonRuntime, error) {
 	a.migrateLearnedGroups()
-
 	rt := &daemonRuntime{
 		logger:      logger,
 		eventCh:     make(chan serviceEvent, 4),
@@ -45,29 +46,24 @@ func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST re
 	}()
 
 	rt.learner = newFallbackLearner(filepath.Join(a.Paths.Root, "fallback-learn.json"), logger)
-	rt.learner.promote = func(host string) {
-		added, err := a.PromoteLearnedDirectRule(host)
-		if err != nil {
-			logger.Warn("自动学习规则写入失败", "host", host, "err", err)
-			return
-		}
-		if added {
-			logger.Info("回退直连多次成功，已自动学习直连规则", "host", host)
-		}
-	}
 
 	dialer, err := buildDialer(a.Cfg.Egress)
 	if err != nil {
 		return nil, err
 	}
 	rt.relay = relay.New(relay.Options{
-		ListenAddr:        net.JoinHostPort("", strconv.Itoa(a.Cfg.Runtime.RedirPort)),
-		OrigDST:           origDST,
-		Tracker:           rt.tracker,
-		Dialer:            dialer,
-		ViaProxy:          a.Cfg.Egress.Mode == config.EgressProxy,
-		OnFallbackSuccess: rt.learner.Record,
-		Logger:            logger,
+		ListenAddr: net.JoinHostPort("", strconv.Itoa(a.Cfg.Runtime.RedirPort)),
+		OrigDST:    origDST,
+		Tracker:    rt.tracker,
+		Dialer:     dialer,
+		ViaProxy:   a.Cfg.Egress.Mode == config.EgressProxy,
+		OnFallbackSuccess: func(host string) {
+			srv, _, _ := rt.services()
+			if srv != nil && !srv.EgressHealth().ProxyDown {
+				rt.learner.Record(host)
+			}
+		},
+		Logger: logger,
 	})
 	rt.relay.SetProxyFailAction(a.Cfg.ProxyFailure.Action)
 	rt.applyRouting(a.Cfg)
@@ -99,7 +95,6 @@ func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST re
 			}
 		}()
 	}
-
 	go func() {
 		if err := rt.relay.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
 			rt.eventCh <- serviceEvent{name: "relay", err: err}
@@ -123,19 +118,40 @@ type serviceEvent struct {
 
 // daemonRuntime bundles the long-running services for shutdown/reload.
 type daemonRuntime struct {
-	logger      *slog.Logger
-	tracker     *relay.Tracker
+	logger  *slog.Logger
+	tracker *relay.Tracker
+	learner *fallbackLearner
+	eventCh chan serviceEvent // sub-service crash notifications
+
+	// mu guards the pointers swapped by restartService and the crash counter
+	// map, both read from API handler goroutines while the main loop writes.
+	mu          sync.RWMutex
 	relay       *relay.Server
 	udpRelay    *relay.UDPRelay
 	dns         *dns.Server
 	api         *apiServer
-	learner     *fallbackLearner
-	eventCh     chan serviceEvent // sub-service crash notifications
-	crashCounts map[string]int    // cumulative crash count per service (guarded by main loop)
+	crashCounts map[string]int
+}
+
+// services returns a consistent snapshot of the swappable service pointers.
+func (rt *daemonRuntime) services() (*relay.Server, *relay.UDPRelay, *dns.Server) {
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	return rt.relay, rt.udpRelay, rt.dns
+}
+
+// bumpCrash increments and returns the crash count for a service.
+func (rt *daemonRuntime) bumpCrash(name string) int {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.crashCounts[name]++
+	return rt.crashCounts[name]
 }
 
 // componentHealth returns the health of each core sub-service.
 func (rt *daemonRuntime) componentHealth() []ComponentHealth {
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
 	var out []ComponentHealth
 	out = append(out, ComponentHealth{
 		Name: "relay", Running: rt.relay != nil, Crashes: rt.crashCounts["relay"],
@@ -162,10 +178,14 @@ func (rt *daemonRuntime) restartService(ctx context.Context, a *App, name string
 	case "dns":
 		if rt.dns != nil {
 			rt.dns.Shutdown()
-			rt.dns = dns.New(dnsOptions(a.Cfg, a.Paths.FakeIPCacheFile, rt.logger))
+			newDNS := dns.New(dnsOptions(a.Cfg, a.Paths.FakeIPCacheFile, rt.logger))
+			rt.mu.Lock()
+			rt.dns = newDNS
+			rt.mu.Unlock()
 			rt.bindFakeIP()
+			rt.bindUDPRelayFakeIP()
 			go func() {
-				if err := rt.dns.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
+				if err := newDNS.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
 					rt.eventCh <- serviceEvent{name: "dns", err: err}
 				}
 			}()
@@ -184,20 +204,28 @@ func (rt *daemonRuntime) restartService(ctx context.Context, a *App, name string
 				rt.logger.Error("重启 relay 失败: 无法构建 dialer", "err", err)
 				return
 			}
-			rt.relay = relay.New(relay.Options{
-				ListenAddr:        net.JoinHostPort("", strconv.Itoa(a.Cfg.Runtime.RedirPort)),
-				OrigDST:           origDST,
-				Tracker:           rt.tracker,
-				Dialer:            dialer,
-				ViaProxy:          a.Cfg.Egress.Mode == config.EgressProxy,
-				OnFallbackSuccess: rt.learner.Record,
-				Logger:            rt.logger,
+			newRelay := relay.New(relay.Options{
+				ListenAddr: net.JoinHostPort("", strconv.Itoa(a.Cfg.Runtime.RedirPort)),
+				OrigDST:    origDST,
+				Tracker:    rt.tracker,
+				Dialer:     dialer,
+				ViaProxy:   a.Cfg.Egress.Mode == config.EgressProxy,
+				OnFallbackSuccess: func(host string) {
+					srv, _, _ := rt.services()
+					if srv != nil && !srv.EgressHealth().ProxyDown {
+						rt.learner.Record(host)
+					}
+				},
+				Logger: rt.logger,
 			})
-			rt.relay.SetProxyFailAction(a.Cfg.ProxyFailure.Action)
+			newRelay.SetProxyFailAction(a.Cfg.ProxyFailure.Action)
+			rt.mu.Lock()
+			rt.relay = newRelay
+			rt.mu.Unlock()
 			rt.applyRouting(a.Cfg)
 			rt.bindFakeIP()
 			go func() {
-				if err := rt.relay.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
+				if err := newRelay.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
 					rt.eventCh <- serviceEvent{name: "relay", err: err}
 				}
 			}()
@@ -207,7 +235,7 @@ func (rt *daemonRuntime) restartService(ctx context.Context, a *App, name string
 		if rt.udpRelay != nil && rt.dns != nil {
 			_ = rt.udpRelay.Close()
 			fakeRange := rt.dns.FakeIPRange()
-			rt.udpRelay = relay.NewUDPRelay(relay.UDPRelayOptions{
+			newUDP := relay.NewUDPRelay(relay.UDPRelayOptions{
 				ListenAddr:   relay.FormatUDPListenAddr(a.Cfg.Runtime.UDPRedirPort),
 				FakeIPRange:  &fakeRange,
 				LookupFakeIP: rt.dns.LookupFakeIP,
@@ -215,9 +243,12 @@ func (rt *daemonRuntime) restartService(ctx context.Context, a *App, name string
 				Tracker:      rt.tracker,
 				Logger:       rt.logger,
 			})
+			rt.mu.Lock()
+			rt.udpRelay = newUDP
+			rt.mu.Unlock()
 			rt.syncUDPRelayRouting(a.Cfg)
 			go func() {
-				if err := rt.udpRelay.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
+				if err := newUDP.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
 					rt.eventCh <- serviceEvent{name: "udp-relay", err: err}
 				}
 			}()
@@ -226,9 +257,12 @@ func (rt *daemonRuntime) restartService(ctx context.Context, a *App, name string
 	case "api":
 		if rt.api != nil {
 			_ = rt.api.Close()
-			rt.api = newAPIServer(a, rt)
+			newAPI := newAPIServer(a, rt)
+			rt.mu.Lock()
+			rt.api = newAPI
+			rt.mu.Unlock()
 			go func() {
-				if err := rt.api.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
+				if err := newAPI.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
 					rt.eventCh <- serviceEvent{name: "api", err: err}
 				}
 			}()

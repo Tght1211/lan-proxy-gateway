@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -29,7 +30,7 @@ func TestDefaultValidAndRoundtrip(t *testing.T) {
 	if got.Egress.Mode != EgressDirect || got.DNS.Port != DefaultDNSPort || got.Runtime.RedirPort != 17892 {
 		t.Fatalf("roundtrip mismatch: %+v", got)
 	}
-	if len(got.Routing.Rules) != 0 {
+	if !reflect.DeepEqual(got.Routing.Rules, cfg.Routing.Rules) {
 		t.Fatalf("default routing rules = %+v", got.Routing.Rules)
 	}
 }

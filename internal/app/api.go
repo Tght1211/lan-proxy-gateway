@@ -76,6 +76,7 @@ type egressFailureStat struct {
 
 // FallbackStats reports the proxy→direct fallback auto-learning state.
 type FallbackStats struct {
+	Ignored     []string             `json:"ignored"`
 	Threshold   int                  `json:"threshold"`
 	WindowHours int                  `json:"window_hours"`
 	Candidates  []FallbackCandidate  `json:"candidates"`
@@ -94,6 +95,7 @@ func newAPIServer(a *App, rt *daemonRuntime) *apiServer {
 	s := &apiServer{app: a, rt: rt, started: time.Now()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/stats", s.handleStats)
+	mux.HandleFunc("POST /api/learning", s.handleLearning)
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("POST /api/reload", s.handleReload)
 	mux.HandleFunc("GET /api/devices", s.handleDevices)
@@ -133,6 +135,7 @@ func (s *apiServer) Close() error {
 
 func (s *apiServer) handleStats(w http.ResponseWriter, r *http.Request) {
 	cfg := s.app.getCfg()
+	relaySrv, udpRelay, dnsSrv := s.rt.services()
 	resp := StatsResponse{
 		UsageHistory:   s.rt.tracker.UsageHistory(),
 		SchemaVersion:  3,
@@ -140,18 +143,18 @@ func (s *apiServer) handleStats(w http.ResponseWriter, r *http.Request) {
 		UptimeSec:      int64(time.Since(s.started).Seconds()),
 		Relay:          s.rt.tracker.Snapshot(),
 		Health:         s.app.Health(),
-		DeviceAdaptive: s.rt.relay.DeviceAdaptiveHealth(),
+		DeviceAdaptive: relaySrv.DeviceAdaptiveHealth(),
 	}
-	if s.rt.udpRelay != nil {
-		st := s.rt.udpRelay.Stats()
+	if udpRelay != nil {
+		st := udpRelay.Stats()
 		resp.UDPRelay = &st
 	}
 	if cfg.Egress.Mode == "proxy" {
 		p := cfg.Egress.Proxy
 		resp.Proxy = fmt.Sprintf("%s %s:%d", p.Type, p.Host, p.Port)
 	}
-	if s.rt.dns != nil {
-		st := s.rt.dns.Stats()
+	if dnsSrv != nil {
+		st := dnsSrv.Stats()
 		resp.DNS = &st
 	}
 	if s.rt.learner != nil {
@@ -162,13 +165,14 @@ func (s *apiServer) handleStats(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		resp.Fallback = &FallbackStats{
+			Ignored:     s.rt.learner.Ignored(),
 			Threshold:   fallbackLearnThreshold,
 			WindowHours: int(fallbackLearnWindow / time.Hour),
 			Candidates:  s.rt.learner.Snapshot(),
 			Learned:     learned,
 		}
 	}
-	eh := s.rt.relay.EgressHealth()
+	eh := relaySrv.EgressHealth()
 	resp.EgressHealth = buildEgressHealthJSON(eh, resp.Relay.Recent, resp.Relay.Active)
 	resp.Components = s.rt.componentHealth()
 	writeJSON(w, resp)
@@ -324,7 +328,10 @@ func (s *apiServer) handleReload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("reload: %v", err), http.StatusBadRequest)
 		return
 	}
-	s.rt.applyConfig(s.app, cfg)
+	if err := s.rt.applyConfig(s.app, cfg); err != nil {
+		http.Error(w, fmt.Sprintf("reload: %v", err), http.StatusConflict)
+		return
+	}
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
@@ -401,4 +408,33 @@ func (c *APIClient) get(ctx context.Context, path string, out any) error {
 		return fmt.Errorf("GET %s: %s", path, resp.Status)
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+func (s *apiServer) handleLearning(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Origin") != "" || r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "JSON requests only", http.StatusForbidden)
+		return
+	}
+	var input struct {
+		Action string `json:"action"`
+		Host   string `json:"host"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if s.rt.learner == nil {
+		http.Error(w, "核心尚未就绪", http.StatusServiceUnavailable)
+		return
+	}
+	if err := s.app.applyLearningAction(s.rt.learner, input.Action, input.Host); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	if input.Action == "accept" || input.Action == "undo" {
+		if err := s.rt.applyConfig(s.app, s.app.getCfg()); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
 }

@@ -5,7 +5,7 @@ package config
 // are gone; egress is either direct or a single upstream proxy.
 const Version = 4
 
-// DefaultDNSPort avoids competing with system DNS servers.
+// DefaultDNSPort avoids competing with an existing system or proxy DNS server.
 const DefaultDNSPort = 1053
 
 // Egress modes.
@@ -124,6 +124,7 @@ type RuntimeConfig struct {
 func Default() *Config {
 	return &Config{
 		Version: Version,
+		Routing: RoutingConfig{Rules: DefaultRoutingRules()},
 		Gateway: GatewayConfig{
 			Enabled: true,
 		},

@@ -142,7 +142,7 @@ func (a *App) PromoteLearnedDirectRule(host string) (bool, error) {
 	a.cfgMu.Lock()
 	defer a.cfgMu.Unlock()
 	for _, r := range a.Cfg.Routing.Rules {
-		if r.Action != config.EgressDirect {
+		if r.Learned && r.Action != config.EgressDirect {
 			continue
 		}
 		switch r.Type {
@@ -159,16 +159,15 @@ func (a *App) PromoteLearnedDirectRule(host string) (bool, error) {
 	next := *a.Cfg
 	group := learnedGroupName(host)
 	next.Routing.Rules = append(append([]config.RoutingRule(nil), a.Cfg.Routing.Rules...),
-		config.RoutingRule{Type: config.RuleDomainSuffix, Value: host, Action: config.EgressDirect, Group: group, Learned: true})
+		config.RoutingRule{Type: config.RuleDomain, Value: host, Action: config.EgressDirect, Group: group, Learned: true})
 	config.Normalize(&next)
 	if err := config.Validate(&next); err != nil {
 		return false, err
 	}
-	a.Cfg = &next
-	if err := a.Save(); err != nil {
+	if err := config.Save(&next, a.Paths.ConfigFile); err != nil {
 		return false, err
 	}
-	a.pokeReload()
+	a.Cfg = &next
 	return true, nil
 }
 

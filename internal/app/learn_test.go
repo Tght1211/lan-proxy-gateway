@@ -8,74 +8,82 @@ import (
 	"github.com/tght/lan-proxy-gateway/internal/config"
 )
 
-func newTestLearner(t *testing.T, path string, now time.Time) (*fallbackLearner, *time.Time, *[]string) {
-	t.Helper()
-	promoted := &[]string{}
-	l := newFallbackLearner(path, slog.Default())
-	l.now = func() time.Time { return now }
-	l.promote = func(host string) { *promoted = append(*promoted, host) }
-	return l, &now, promoted
-}
-
-func TestFallbackLearnerThreshold(t *testing.T) {
-	l, _, promoted := newTestLearner(t, t.TempDir()+"/learn.json", time.Now())
-
-	l.Record("example.com")
-	l.Record("example.com")
-	if len(*promoted) != 0 {
-		t.Fatalf("promoted after 2 records: %v", *promoted)
-	}
-	l.Record("EXAMPLE.com.")
-	if *promoted == nil || len(*promoted) != 1 || (*promoted)[0] != "example.com" {
-		t.Fatalf("promoted = %v, want [example.com] (case/trailing-dot normalized)", *promoted)
-	}
-	// counts reset after promotion: one more success must not re-promote
-	l.Record("example.com")
-	if len(*promoted) != 1 {
-		t.Fatalf("promoted = %v after reset, want 1 entry", *promoted)
-	}
-}
-
-func TestFallbackLearnerWindowExpiry(t *testing.T) {
-	start := time.Now()
-	l, nowPtr, promoted := newTestLearner(t, t.TempDir()+"/learn.json", start)
-
-	l.Record("example.com")
-	*nowPtr = start.Add(10 * time.Hour)
-	l.Record("example.com")
-	// 25h later the first record is outside the 24h window
-	*nowPtr = start.Add(25 * time.Hour)
-	l.Record("example.com")
-	if len(*promoted) != 0 {
-		t.Fatalf("promoted with expired record counted: %v", *promoted)
-	}
-	l.Record("example.com")
-	if len(*promoted) != 1 {
-		t.Fatalf("promoted = %v, want promotion after 3 in-window successes", *promoted)
-	}
-}
-
-func TestFallbackLearnerPersistence(t *testing.T) {
+func TestFallbackSuggestionsPersistWithoutPromotion(t *testing.T) {
 	path := t.TempDir() + "/learn.json"
-	start := time.Now()
-	l1, _, promoted1 := newTestLearner(t, path, start)
-	l1.Record("example.com")
-	l1.Record("example.com")
-	if len(*promoted1) != 0 {
-		t.Fatalf("unexpected promote: %v", *promoted1)
+	l := newFallbackLearner(path, slog.Default())
+	now := time.Now()
+	l.now = func() time.Time { return now }
+	for i := 0; i < 5; i++ {
+		l.Record("EXAMPLE.com.")
 	}
+	if got := l.Snapshot(); len(got) != 1 || got[0].Count != 5 {
+		t.Fatalf("suggestions: %+v", got)
+	}
+	restored := newFallbackLearner(path, slog.Default())
+	if got := restored.Snapshot(); len(got) != 1 || got[0].Count != 5 {
+		t.Fatalf("restored: %+v", got)
+	}
+	now = now.Add(25 * time.Hour)
+	if len(l.Snapshot()) != 0 {
+		t.Fatal("expired suggestions retained")
+	}
+}
 
-	// daemon restart: a fresh learner on the same file keeps the counts
-	l2, _, promoted2 := newTestLearner(t, path, start.Add(time.Hour))
-	l2.Record("example.com")
-	if len(*promoted2) != 1 || (*promoted2)[0] != "example.com" {
-		t.Fatalf("promoted after reload = %v, want [example.com]", *promoted2)
+func TestLearningActionsPreserveUserRules(t *testing.T) {
+	dir := t.TempDir()
+	l := newFallbackLearner(dir+"/learn.json", slog.Default())
+	cfg := config.Default()
+	config.Normalize(cfg)
+	a := &App{Cfg: cfg, Paths: config.Paths{ConfigFile: dir + "/gateway.yaml"}}
+	for i := 0; i < 3; i++ {
+		l.Record("example.com")
+	}
+	before := len(cfg.Routing.Rules)
+	if err := a.applyLearningAction(l, "accept", "example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Cfg.Routing.Rules) != before+1 {
+		t.Fatal("accept lost user rules")
+	}
+	if rule := a.Cfg.Routing.Rules[before]; rule.Type != config.RuleDomain || !rule.Learned {
+		t.Fatalf("not exact learned rule: %+v", rule)
+	}
+	if err := a.applyLearningAction(l, "undo", "example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Cfg.Routing.Rules) != before {
+		t.Fatal("undo lost user rules")
+	}
+	for i := 0; i < 3; i++ {
+		l.Record("youtube.com")
+	}
+	if err := a.applyLearningAction(l, "accept", "youtube.com"); err == nil {
+		t.Fatal("overrode explicit proxy rule")
+	}
+	if err := a.applyLearningAction(l, "ignore", "youtube.com"); err != nil {
+		t.Fatal(err)
+	}
+	l.Record("youtube.com")
+	if len(l.Snapshot()) != 0 {
+		t.Fatal("ignored host observed")
+	}
+	restored := newFallbackLearner(dir+"/learn.json", slog.Default())
+	if len(restored.Ignored()) != 1 {
+		t.Fatal("ignore not persisted")
+	}
+	if err := a.applyLearningAction(l, "restore", "youtube.com"); err != nil {
+		t.Fatal(err)
+	}
+	l.Record("youtube.com")
+	if len(l.Snapshot()) != 1 {
+		t.Fatal("did not restore observation")
 	}
 }
 
 func TestPromoteLearnedDirectRule(t *testing.T) {
 	a := &App{Cfg: config.Default(), Paths: config.Paths{ConfigFile: t.TempDir() + "/gateway.yaml"}}
 
+	a.Cfg.Routing.Rules = nil
 	added, err := a.PromoteLearnedDirectRule("example.com")
 	if err != nil || !added {
 		t.Fatalf("first promote = %v, %v", added, err)
@@ -85,12 +93,12 @@ func TestPromoteLearnedDirectRule(t *testing.T) {
 		t.Fatalf("rules = %+v", rules)
 	}
 	r := rules[0]
-	if r.Type != config.RuleDomainSuffix || r.Value != "example.com" || r.Action != config.EgressDirect || !r.Learned {
+	if r.Type != config.RuleDomain || r.Value != "example.com" || r.Action != config.EgressDirect || !r.Learned {
 		t.Fatalf("learned rule = %+v", r)
 	}
 
-	// covered host → no duplicate
-	added, err = a.PromoteLearnedDirectRule("api.example.com")
+	// Same exact host → no duplicate
+	added, err = a.PromoteLearnedDirectRule("example.com")
 	if err != nil || added {
 		t.Fatalf("covered promote = %v, %v, want false,nil", added, err)
 	}
