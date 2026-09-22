@@ -13,13 +13,13 @@ import (
 
 // NATDiag holds the results of a NAT environment diagnosis.
 type NATDiag struct {
-	NATType     string `json:"nat_type"`      // "open" | "moderate" | "strict" | "unknown"
-	ExternalIP  string `json:"external_ip"`   // public IP seen by STUN server
-	ExternalPort int   `json:"external_port"` // mapped port
-	DoubleNAT   bool   `json:"double_nat"`    // true if behind two NATs
-	DoubleNATDetail string `json:"double_nat_detail,omitempty"`
-	UPnP        UPnPStatus `json:"upnp"`
-	Warnings    []string   `json:"warnings,omitempty"`
+	NATType         string     `json:"nat_type"`      // "open" | "moderate" | "strict" | "unknown"
+	ExternalIP      string     `json:"external_ip"`   // public IP seen by STUN server
+	ExternalPort    int        `json:"external_port"` // mapped port
+	DoubleNAT       bool       `json:"double_nat"`    // true if behind two NATs
+	DoubleNATDetail string     `json:"double_nat_detail,omitempty"`
+	UPnP            UPnPStatus `json:"upnp"`
+	Warnings        []string   `json:"warnings,omitempty"`
 }
 
 // UPnPStatus reports UPnP/NAT-PMP availability.
@@ -179,8 +179,8 @@ func doSTUNExchange(ctx context.Context, conn net.PacketConn, server string) (st
 	binary.BigEndian.PutUint32(txID[8:12], rand.Uint32())
 
 	req := make([]byte, 20)
-	binary.BigEndian.PutUint16(req[0:2], 0x0001) // Binding Request
-	binary.BigEndian.PutUint16(req[2:4], 0)       // Length
+	binary.BigEndian.PutUint16(req[0:2], 0x0001)     // Binding Request
+	binary.BigEndian.PutUint16(req[2:4], 0)          // Length
 	binary.BigEndian.PutUint32(req[4:8], 0x2112A442) // Magic Cookie
 	copy(req[8:20], txID)
 
@@ -238,10 +238,15 @@ func parseSTUNResponse(data []byte) (stunProbeResult, error) {
 			}
 		}
 
-		// Advance to next attribute (4-byte aligned)
+		// Advance to next attribute (4-byte aligned). The padded length must be
+		// re-bounds-checked: a truncated packet whose padding runs past the end
+		// would otherwise panic on the slice below.
 		padded := int(attrLen)
 		if padded%4 != 0 {
 			padded += 4 - padded%4
+		}
+		if 4+padded > len(attrs) {
+			break
 		}
 		attrs = attrs[4+padded:]
 	}

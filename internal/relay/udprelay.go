@@ -66,9 +66,11 @@ type sessionKey struct {
 type udpSession struct {
 	upstream   *net.UDPConn   // local socket talking to the real server
 	clientAddr netip.AddrPort // where to send responses back
-	lastActive time.Time
-	tracked    *TrackedConn // connection tracker handle (nil if no tracker)
+	lastActive atomic.Int64   // UnixNano; written by readLoop and readUpstream concurrently
+	tracked    *TrackedConn   // connection tracker handle (nil if no tracker)
 }
+
+func (s *udpSession) touch() { s.lastActive.Store(time.Now().UnixNano()) }
 
 func NewUDPRelay(opts UDPRelayOptions) *UDPRelay {
 	logger := opts.Logger
@@ -203,7 +205,7 @@ func (r *UDPRelay) handlePacket(data []byte, clientAddr, origDst netip.AddrPort)
 	r.mu.Lock()
 	sess, exists := r.sessions[key]
 	if exists {
-		sess.lastActive = time.Now()
+		sess.touch()
 		if sess.tracked != nil {
 			sess.tracked.AddUp(int64(len(data)))
 		}
@@ -261,9 +263,9 @@ func (r *UDPRelay) handlePacket(data []byte, clientAddr, origDst netip.AddrPort)
 	sess = &udpSession{
 		upstream:   upConn,
 		clientAddr: clientAddr,
-		lastActive: time.Now(),
 		tracked:    tc,
 	}
+	sess.touch()
 
 	r.mu.Lock()
 	if len(r.sessions) >= udpMaxSessions {
@@ -304,7 +306,7 @@ func (r *UDPRelay) readUpstream(key sessionKey, sess *udpSession) {
 		if err != nil {
 			return
 		}
-		sess.lastActive = time.Now()
+		sess.touch()
 		if sess.tracked != nil {
 			sess.tracked.AddDown(int64(n))
 		}
@@ -334,7 +336,7 @@ func (r *UDPRelay) cleanup() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for key, sess := range r.sessions {
-		if now.Sub(sess.lastActive) > udpSessionTTL {
+		if now.Sub(time.Unix(0, sess.lastActive.Load())) > udpSessionTTL {
 			sess.upstream.Close()
 			if sess.tracked != nil {
 				sess.tracked.Close()

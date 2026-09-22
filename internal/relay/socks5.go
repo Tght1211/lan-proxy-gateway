@@ -43,16 +43,20 @@ func (d *socks5Dialer) DialContext(ctx context.Context, network, addr string) (n
 	if timeout <= 0 {
 		timeout = 15 * time.Second
 	}
-	if err := d.handshake(conn, addr, timeout); err != nil {
+	finishHandshake := boundHandshake(ctx, conn, timeout)
+	defer finishHandshake()
+	if err := d.handshake(conn, addr); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if err := finishHandshake(); err != nil {
 		conn.Close()
 		return nil, err
 	}
 	return conn, nil
 }
 
-func (d *socks5Dialer) handshake(conn net.Conn, addr string, timeout time.Duration) error {
-	_ = conn.SetDeadline(time.Now().Add(timeout))
-	defer conn.SetDeadline(time.Time{})
+func (d *socks5Dialer) handshake(conn net.Conn, addr string) error {
 
 	// greeting: VER=5, NMETHODS, METHODS (no-auth, and user/pass when configured)
 	methods := []byte{0x00}

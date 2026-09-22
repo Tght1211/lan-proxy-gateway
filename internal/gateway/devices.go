@@ -19,9 +19,9 @@ type LANDevice struct {
 
 // SubnetInfo describes the gateway's LAN subnet.
 type SubnetInfo struct {
-	CIDR       string `json:"cidr"`        // e.g. "192.168.1.0/24"
-	PrefixLen  int    `json:"prefix_len"`  // e.g. 24
-	Netmask    string `json:"netmask"`     // e.g. "255.255.255.0"
+	CIDR       string `json:"cidr"`       // e.g. "192.168.1.0/24"
+	PrefixLen  int    `json:"prefix_len"` // e.g. 24
+	Netmask    string `json:"netmask"`    // e.g. "255.255.255.0"
 	GatewayIP  string `json:"gateway_ip"`
 	LocalIP    string `json:"local_ip"`
 	Broadcast  string `json:"broadcast,omitempty"`
@@ -31,9 +31,9 @@ type SubnetInfo struct {
 
 // DeviceOnboarding bundles all device-onboarding helper info for the API.
 type DeviceOnboarding struct {
-	Subnet       SubnetInfo   `json:"subnet"`
-	OnlineDevs   []LANDevice  `json:"online_devices"`
-	RecommendIPs []string     `json:"recommend_ips"` // safe unoccupied IPs
+	Subnet       SubnetInfo  `json:"subnet"`
+	OnlineDevs   []LANDevice `json:"online_devices"`
+	RecommendIPs []string    `json:"recommend_ips"` // safe unoccupied IPs
 }
 
 // DeviceOnboardingInfo gathers subnet info, scans for online devices, and
@@ -303,4 +303,3 @@ func highRangeOrder() []int {
 	}
 	return order
 }
-

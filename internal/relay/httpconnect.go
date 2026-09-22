@@ -42,7 +42,8 @@ func (d *httpConnectDialer) DialContext(ctx context.Context, network, addr strin
 	if timeout <= 0 {
 		timeout = 15 * time.Second
 	}
-	_ = conn.SetDeadline(time.Now().Add(timeout))
+	finishHandshake := boundHandshake(ctx, conn, timeout)
+	defer finishHandshake()
 
 	req := &http.Request{
 		Method: http.MethodConnect,
@@ -77,14 +78,19 @@ func (d *httpConnectDialer) DialContext(ctx context.Context, network, addr strin
 		return nil, fmt.Errorf("http: 读取 CONNECT 响应失败: %w", err)
 	}
 	if resp.StatusCode/100 != 2 {
-		resp.Body.Close()
+		// Close the socket first: draining a rejection body can otherwise block
+		// indefinitely when the upstream keeps its response open.
 		conn.Close()
+		resp.Body.Close()
 		return nil, fmt.Errorf("http: 代理拒绝 CONNECT: %s", resp.Status)
 	}
 	// A successful CONNECT response transitions this socket into the tunnel.
 	// Closing resp.Body may close that socket for proxies without an explicit
 	// zero-length body, so ownership stays with the connection returned below.
-	_ = conn.SetDeadline(time.Time{})
+	if err := finishHandshake(); err != nil {
+		conn.Close()
+		return nil, err
+	}
 	// The bufio reader may have already buffered bytes belonging to the
 	// tunneled stream — they must be drained before the raw conn.
 	if br.Buffered() > 0 {
@@ -101,4 +107,12 @@ type bufferedConn struct {
 
 func (c *bufferedConn) Read(p []byte) (int, error) {
 	return c.r.Read(p)
+}
+
+// Preserve TCP half-close through the buffered reader wrapper.
+func (c *bufferedConn) CloseWrite() error {
+	if half, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return half.CloseWrite()
+	}
+	return nil
 }

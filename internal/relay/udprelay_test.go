@@ -268,7 +268,7 @@ func TestUDPRelaySessionCleanup(t *testing.T) {
 	// Manually expire the session.
 	r.mu.Lock()
 	for _, s := range r.sessions {
-		s.lastActive = time.Now().Add(-3 * time.Minute)
+		s.lastActive.Store(time.Now().Add(-3 * time.Minute).UnixNano())
 	}
 	r.mu.Unlock()
 

@@ -42,15 +42,24 @@ func pipeWithDrainTimeout(a, b net.Conn, tc *TrackedConn, drainTimeout time.Dura
 }
 
 func copyOne(dst, src net.Conn, count func(int64)) {
-	// Keep the concrete net.Conn values visible to io.Copy. In particular this
-	// preserves TCP splice on Linux instead of forcing every packet through a
-	// userspace countingWriter. Totals become visible when the direction ends.
-	n, _ := io.Copy(dst, src)
-	count(n)
+	// Count each successful write so live streams appear in throughput and
+	// bytes are assigned to the day they were transferred, not the close date.
+	_, _ = io.Copy(trafficWriter{Conn: dst, count: count}, src)
 	// propagate EOF to the far side as a half-close when possible
-	if tc, ok := dst.(*net.TCPConn); ok {
+	if tc, ok := dst.(interface{ CloseWrite() error }); ok {
 		_ = tc.CloseWrite()
-	} else {
-		_ = dst.Close()
 	}
+}
+
+type trafficWriter struct {
+	net.Conn
+	count func(int64)
+}
+
+func (w trafficWriter) Write(p []byte) (int, error) {
+	n, err := w.Conn.Write(p)
+	if n > 0 {
+		w.count(int64(n))
+	}
+	return n, err
 }

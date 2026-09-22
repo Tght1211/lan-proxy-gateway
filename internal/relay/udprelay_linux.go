@@ -8,7 +8,6 @@ package relay
 
 import (
 	"fmt"
-	"net"
 	"net/netip"
 
 	"golang.org/x/sys/unix"

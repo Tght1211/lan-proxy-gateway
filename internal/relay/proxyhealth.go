@@ -7,13 +7,13 @@ import (
 
 // Per-host egress health state machine.
 //
-//   normal(代理) --fail×threshold--> directTest(30min, 直连优先/代理兜底)
-//   directTest --directOK--> directHold(固定直连, 每3min探测代理)
-//   directHold --probeOK--> normal (或 fastDirect)
-//   directHold --probeFail×3--> directHold+alert (固定直连+告警)
+//	normal(代理) --fail×threshold--> directTest(30min, 直连优先/代理兜底)
+//	directTest --directOK--> directHold(固定直连, 每3min探测代理)
+//	directHold --probeOK--> normal (或 fastDirect)
+//	directHold --probeFail×3--> directHold+alert (固定直连+告警)
 //
-//   fastDirect: 代理恢复后的一次性快速域名——之后代理失败 1 次立即回 directTest；
-//   探测失败 1 次也立即回 directTest。阈值降为 1，响应更快。
+//	fastDirect: 代理恢复后的一次性快速域名——之后代理失败 1 次立即回 directTest；
+//	探测失败 1 次也立即回 directTest。阈值降为 1，响应更快。
 const (
 	proxyFailThreshold  = 3
 	fastFailThreshold   = 1
@@ -35,13 +35,13 @@ const (
 )
 
 type hostHealth struct {
-	state      hostState
-	fails      int
-	firstAt    time.Time
-	testUntil  time.Time
-	probeFails int
-	alertedAt  time.Time
-	fast       bool
+	state       hostState
+	fails       int
+	firstAt     time.Time
+	testUntil   time.Time
+	probeFails  int
+	alertedAt   time.Time
+	fast        bool
 	lastProxyOK time.Time
 }
 
