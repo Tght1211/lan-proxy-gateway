@@ -23,6 +23,7 @@ const (
 
 // ConnInfo is a point-in-time view of one relayed connection.
 type ConnInfo struct {
+	Ingress   string     `json:"ingress"` // gateway | http-proxy
 	ID        uint64     `json:"id"`
 	SrcIP     string     `json:"src_ip"`
 	DstHost   string     `json:"dst_host"`
@@ -35,8 +36,8 @@ type ConnInfo struct {
 	EndedAt   *time.Time `json:"ended_at,omitempty"`
 	ViaProxy  bool       `json:"via_proxy"`
 	Rejected  bool       `json:"rejected,omitempty"`
-	Status    string     `json:"status,omitempty"`  // "" | "rejected" | "dial_failed"
-	Failure   string     `json:"failure,omitempty"` // human-readable dial failure reason
+	Status    string     `json:"status,omitempty"`   // "" | "rejected" | "dial_failed"
+	Failure   string     `json:"failure,omitempty"`  // human-readable dial failure reason
 	Fallback  bool       `json:"fallback,omitempty"` // proxy dial failed, direct retry succeeded
 }
 
@@ -64,6 +65,7 @@ type DeviceServiceAggregate struct {
 
 // Snapshot is the full tracker state for the dashboard/API.
 type Snapshot struct {
+	Ingress        []UsageAggregate         `json:"ingress"`
 	UpTotal        int64                    `json:"up_total"`
 	DownTotal      int64                    `json:"down_total"`
 	Active         []ConnInfo               `json:"active"`
@@ -74,9 +76,11 @@ type Snapshot struct {
 	DeviceServices []DeviceServiceAggregate `json:"device_services"`
 }
 
-// Tracker keeps live and bounded historical telemetry in memory. Nothing is
-// persisted or sent off-host; restarting the daemon starts a fresh session.
+// Tracker keeps live connection telemetry in memory. Optional daily device
+// counters persist separately; destination history is never written to disk.
 type Tracker struct {
+	history        *usageHistory
+	ingress        map[string]*UsageAggregate
 	mu             sync.Mutex
 	conns          map[uint64]*TrackedConn
 	recent         []ConnInfo
@@ -91,6 +95,7 @@ type Tracker struct {
 
 func NewTracker() *Tracker {
 	return &Tracker{
+		ingress:        map[string]*UsageAggregate{},
 		conns:          map[uint64]*TrackedConn{},
 		recent:         make([]ConnInfo, 0),
 		traffic:        make([]TrafficPoint, 0),
@@ -126,11 +131,12 @@ func (t *Tracker) StartSampling(ctx context.Context, interval time.Duration) {
 
 // Open registers a new connection; Close on the returned handle archives it.
 // proto should be "tcp" or "udp".
-func (t *Tracker) Open(srcIP, dstHost string, dstPort int, viaProxy bool, proto string) *TrackedConn {
+func (t *Tracker) Open(srcIP, dstHost string, dstPort int, viaProxy bool, proto string, ingress ...string) *TrackedConn {
 	t.mu.Lock()
 	t.nextID++
 	c := &TrackedConn{
 		t:         t,
+		ingress:   ingressName(ingress),
 		id:        t.nextID,
 		srcIP:     srcIP,
 		dstHost:   dstHost,
@@ -141,14 +147,15 @@ func (t *Tracker) Open(srcIP, dstHost string, dstPort int, viaProxy bool, proto 
 		startedAt: time.Now(),
 	}
 	t.conns[c.id] = c
+	t.recordUsage(c, 0, 0, 1, c.startedAt)
 	t.mu.Unlock()
 	return c
 }
 
 // RecordRejected archives a connection refused by a routing rule. It appears
 // in the recent history but never counts toward device/service usage.
-func (t *Tracker) RecordRejected(srcIP, dstHost string, dstPort int) {
-	t.recordTerminal(srcIP, dstHost, dstPort, "tcp", "rejected", "", false)
+func (t *Tracker) RecordRejected(srcIP, dstHost string, dstPort int, ingress ...string) {
+	t.recordTerminal(srcIP, dstHost, dstPort, "tcp", "rejected", "", false, ingress...)
 }
 
 // RecordRejectedProto is like RecordRejected but accepts an explicit protocol.
@@ -157,16 +164,17 @@ func (t *Tracker) RecordRejectedProto(srcIP, dstHost string, dstPort int, proto 
 }
 
 // RecordDialFailure archives a connection whose egress dial failed.
-func (t *Tracker) RecordDialFailure(srcIP, dstHost string, dstPort int, viaProxy bool, reason string) {
-	t.recordTerminal(srcIP, dstHost, dstPort, "tcp", "dial_failed", reason, viaProxy)
+func (t *Tracker) RecordDialFailure(srcIP, dstHost string, dstPort int, viaProxy bool, reason string, ingress ...string) {
+	t.recordTerminal(srcIP, dstHost, dstPort, "tcp", "dial_failed", reason, viaProxy, ingress...)
 }
 
-func (t *Tracker) recordTerminal(srcIP, dstHost string, dstPort int, proto, status, failure string, viaProxy bool) {
+func (t *Tracker) recordTerminal(srcIP, dstHost string, dstPort int, proto, status, failure string, viaProxy bool, ingress ...string) {
 	now := time.Now()
 	t.mu.Lock()
 	t.nextID++
 	info := ConnInfo{
-		ID: t.nextID, SrcIP: srcIP, DstHost: dstHost, DstPort: dstPort,
+		Ingress: ingressName(ingress),
+		ID:      t.nextID, SrcIP: srcIP, DstHost: dstHost, DstPort: dstPort,
 		Proto: proto, Service: ClassifyService(dstHost), StartedAt: now, EndedAt: &now,
 		ViaProxy: viaProxy, Rejected: status == "rejected",
 		Status: status, Failure: failure,
@@ -189,6 +197,7 @@ func pruneRecent(items []ConnInfo, now time.Time) []ConnInfo {
 func (t *Tracker) Snapshot() Snapshot {
 	t.mu.Lock()
 	t.recent = pruneRecent(t.recent, time.Now())
+	ingress := cloneAggregates(t.ingress)
 	devices := cloneAggregates(t.devices)
 	services := cloneAggregates(t.services)
 	deviceServices := cloneDeviceServices(t.deviceServices)
@@ -200,10 +209,12 @@ func (t *Tracker) Snapshot() Snapshot {
 	for _, c := range t.conns {
 		info := c.info()
 		out.Active = append(out.Active, info)
+		updateAggregate(ingress, c.ingress, info, c.startedAt)
 		updateAggregate(devices, c.srcIP, info, c.startedAt)
 		updateAggregate(services, c.service, info, c.startedAt)
 		updateDeviceService(deviceServices, c.srcIP, c.service, info, c.startedAt)
 	}
+	out.Ingress = aggregateSlice(ingress)
 	out.Devices = aggregateSlice(devices)
 	out.Services = aggregateSlice(services)
 	out.DeviceServices = deviceServiceSlice(deviceServices)
@@ -233,6 +244,7 @@ func cloneAggregates(source map[string]*UsageAggregate) map[string]*UsageAggrega
 
 // TrackedConn is one live connection's counters.
 type TrackedConn struct {
+	ingress   string
 	t         *Tracker
 	id        uint64
 	srcIP     string
@@ -255,11 +267,17 @@ func (c *TrackedConn) MarkFallback() { c.fallback.Store(true) }
 func (c *TrackedConn) AddUp(n int64) {
 	c.up.Add(n)
 	c.t.upTotal.Add(n)
+	if n > 0 {
+		c.t.recordUsage(c, n, 0, 0, time.Now())
+	}
 }
 
 func (c *TrackedConn) AddDown(n int64) {
 	c.down.Add(n)
 	c.t.downTotal.Add(n)
+	if n > 0 {
+		c.t.recordUsage(c, 0, n, 0, time.Now())
+	}
 }
 
 func (c *TrackedConn) Close() {
@@ -273,6 +291,7 @@ func (c *TrackedConn) Close() {
 	delete(c.t.conns, c.id)
 	c.t.recent = appendBoundedFront(c.t.recent, info, maxRecentConnections)
 	c.t.recent = pruneRecent(c.t.recent, now)
+	updateAggregate(c.t.ingress, c.ingress, info, now)
 	updateAggregate(c.t.devices, c.srcIP, info, now)
 	updateAggregate(c.t.services, c.service, info, now)
 	updateDeviceService(c.t.deviceServices, c.srcIP, c.service, info, now)
@@ -302,7 +321,8 @@ func (c *TrackedConn) Down() int64 { return c.down.Load() }
 
 func (c *TrackedConn) info() ConnInfo {
 	return ConnInfo{
-		ID: c.id, SrcIP: c.srcIP, DstHost: c.dstHost, DstPort: c.dstPort,
+		Ingress: c.ingress,
+		ID:      c.id, SrcIP: c.srcIP, DstHost: c.dstHost, DstPort: c.dstPort,
 		Proto: c.proto, Service: c.service, Up: c.up.Load(), Down: c.down.Load(),
 		StartedAt: c.startedAt, ViaProxy: c.viaProxy, Fallback: c.fallback.Load(),
 	}
@@ -401,4 +421,11 @@ func ClassifyService(host string) string {
 		return domain
 	}
 	return host
+}
+
+func ingressName(values []string) string {
+	if len(values) > 0 && values[0] == "http-proxy" {
+		return "http-proxy"
+	}
+	return "gateway"
 }

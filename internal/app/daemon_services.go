@@ -22,7 +22,27 @@ func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST re
 		crashCounts: make(map[string]int),
 	}
 	rt.tracker = relay.NewTracker()
+	if err := rt.tracker.EnableHistory(filepath.Join(a.Paths.Root, "usage-history.json")); err != nil {
+		return nil, err
+	}
 	rt.tracker.StartSampling(ctx, 5*time.Second)
+	go func() {
+		tick := time.NewTicker(5 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				if err := rt.tracker.SaveHistory(); err != nil {
+					logger.Error("保存流量历史失败", "err", err)
+				}
+				return
+			case <-tick.C:
+				if err := rt.tracker.SaveHistory(); err != nil {
+					logger.Error("保存流量历史失败", "err", err)
+				}
+			}
+		}
+	}()
 
 	rt.learner = newFallbackLearner(filepath.Join(a.Paths.Root, "fallback-learn.json"), logger)
 	rt.learner.promote = func(host string) {

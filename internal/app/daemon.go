@@ -133,7 +133,12 @@ func (a *App) Run(ctx context.Context) error {
 		_ = a.Gateway.Disable()
 		return err
 	}
-	defer rt.shutdown()
+	defer func() {
+		rt.shutdown()
+		if err := rt.tracker.SaveHistory(); err != nil {
+			logger.Error("保存流量历史失败", "err", err)
+		}
+	}()
 
 	if err := writePIDFile(a.Paths.PIDFile); err != nil {
 		logger.Warn("写 pidfile 失败", "err", err)

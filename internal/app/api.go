@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/tght/lan-proxy-gateway/internal/config"
@@ -24,6 +25,7 @@ type ComponentHealth struct {
 }
 
 type StatsResponse struct {
+	UsageHistory   []relay.DailyUsage           `json:"usage_history"`
 	SchemaVersion  int                          `json:"schema_version"`
 	Egress         string                       `json:"egress"`
 	Proxy          string                       `json:"proxy,omitempty"`
@@ -45,12 +47,31 @@ type egressHealthJSON struct {
 	Actions        []relay.EgressAction `json:"actions,omitempty"`
 	Alerts         []string             `json:"alerts,omitempty"`
 	DirectFailures []directFailure      `json:"direct_failures,omitempty"`
+	FailureStats   []egressFailureStat  `json:"failure_stats,omitempty"`
+	AlertThreshold int                  `json:"alert_threshold"`
+	AlertWindowSec int                  `json:"alert_window_sec"`
+	StatsWindowSec int                  `json:"stats_window_sec"`
 }
 
 type directFailure struct {
-	Device string `json:"device"`
-	Host   string `json:"host"`
-	Reason string `json:"reason"`
+	Device string    `json:"device"`
+	Host   string    `json:"host"`
+	Reason string    `json:"reason"`
+	Count  int       `json:"count"`
+	LastAt time.Time `json:"last_at"`
+}
+
+// egressFailureStat is one (device, host) failure aggregate over the stats
+// window, including entries below the alert threshold or suppressed by a
+// recent success, so the dashboard can show why something did NOT alert.
+type egressFailureStat struct {
+	Device     string    `json:"device"`
+	Host       string    `json:"host"`
+	Reason     string    `json:"reason"`
+	Count      int       `json:"count"`
+	LastAt     time.Time `json:"last_at"`
+	Suppressed bool      `json:"suppressed"` // a recent success indicates the target actually works
+	Alerting   bool      `json:"alerting"`   // included in direct_failures
 }
 
 // FallbackStats reports the proxy→direct fallback auto-learning state.
@@ -113,6 +134,7 @@ func (s *apiServer) Close() error {
 func (s *apiServer) handleStats(w http.ResponseWriter, r *http.Request) {
 	cfg := s.app.getCfg()
 	resp := StatsResponse{
+		UsageHistory:   s.rt.tracker.UsageHistory(),
 		SchemaVersion:  3,
 		Egress:         cfg.Egress.Mode,
 		UptimeSec:      int64(time.Since(s.started).Seconds()),
@@ -147,41 +169,130 @@ func (s *apiServer) handleStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	eh := s.rt.relay.EgressHealth()
-	resp.EgressHealth = buildEgressHealthJSON(eh, resp.Relay.Recent)
+	resp.EgressHealth = buildEgressHealthJSON(eh, resp.Relay.Recent, resp.Relay.Active)
 	resp.Components = s.rt.componentHealth()
 	writeJSON(w, resp)
 }
 
+const (
+	// A (device, host) pair only alerts after this many direct dial failures
+	// inside egressAlertWindow with zero successes — one-off timeouts from
+	// telemetry/PCDN domains used to spam the banner.
+	egressAlertThreshold = 3
+	egressAlertWindow    = 10 * time.Minute
+	egressStatsWindow    = time.Hour
+)
+
 // buildEgressHealthJSON merges the relay monitor snapshot with the recent
-// connection log to list devices/hosts still failing after being switched
-// to direct (proxy down or learned direct).
-func buildEgressHealthJSON(snap relay.EgressSnapshot, recent []relay.ConnInfo) *egressHealthJSON {
+// connection log. Failures are aggregated per (device, host); only pairs at
+// or above the alert threshold with no recent success raise DirectFailures,
+// while FailureStats carries the full aggregate for the dashboard.
+func buildEgressHealthJSON(snap relay.EgressSnapshot, recent, active []relay.ConnInfo) *egressHealthJSON {
 	out := &egressHealthJSON{
-		ProxyDown: snap.ProxyDown,
-		Actions:   snap.Actions,
-		Alerts:    snap.Alerts,
+		ProxyDown:      snap.ProxyDown,
+		Actions:        snap.Actions,
+		Alerts:         snap.Alerts,
+		AlertThreshold: egressAlertThreshold,
+		AlertWindowSec: int(egressAlertWindow / time.Second),
+		StatsWindowSec: int(egressStatsWindow / time.Second),
 	}
 	if !snap.Since.IsZero() {
 		since := snap.Since
 		out.Since = &since
 	}
-	cutoff := time.Now().Add(-10 * time.Minute)
-	seen := map[[2]string]string{}
+
+	now := time.Now()
+	statsCutoff := now.Add(-egressStatsWindow)
+	alertCutoff := now.Add(-egressAlertWindow)
+
+	type pairKey struct{ device, host string }
+	type pairAgg struct {
+		count       int // failures in the stats window
+		alertCount  int // failures in the alert window
+		lastFail    time.Time
+		lastSuccess time.Time
+		reason      string
+	}
+	pairs := map[pairKey]*pairAgg{}
+	get := func(key pairKey) *pairAgg {
+		a := pairs[key]
+		if a == nil {
+			a = &pairAgg{}
+			pairs[key] = a
+		}
+		return a
+	}
+
 	for _, c := range recent {
-		if c.EndedAt == nil || c.EndedAt.Before(cutoff) {
+		if c.Rejected || c.ViaProxy || c.SrcIP == "" || c.DstHost == "" {
 			continue
 		}
-		if c.ViaProxy || c.Rejected || c.Status != "dial_failed" || c.Failure == "" {
+		key := pairKey{c.SrcIP, c.DstHost}
+		if c.Status == "dial_failed" && c.Failure != "" {
+			if c.EndedAt == nil || c.EndedAt.Before(statsCutoff) {
+				continue
+			}
+			a := get(key)
+			a.count++
+			if c.EndedAt.After(a.lastFail) {
+				a.lastFail = *c.EndedAt
+				a.reason = c.Failure
+			}
+			if c.EndedAt.After(alertCutoff) {
+				a.alertCount++
+			}
 			continue
 		}
-		key := [2]string{c.SrcIP, c.DstHost}
-		seen[key] = c.Failure
+		if c.Status == "" {
+			// A completed direct connection that dialed fine counts as success.
+			at := c.StartedAt
+			if c.EndedAt != nil {
+				at = *c.EndedAt
+			}
+			if at.Before(statsCutoff) {
+				continue
+			}
+			a := get(key)
+			if at.After(a.lastSuccess) {
+				a.lastSuccess = at
+			}
+		}
 	}
-	for key, reason := range seen {
-		out.DirectFailures = append(out.DirectFailures, directFailure{
-			Device: key[0], Host: key[1], Reason: reason,
+	// Live direct connections prove the target is reachable right now.
+	for _, c := range active {
+		if c.ViaProxy || c.SrcIP == "" || c.DstHost == "" {
+			continue
+		}
+		a := get(pairKey{c.SrcIP, c.DstHost})
+		if now.After(a.lastSuccess) {
+			a.lastSuccess = now
+		}
+	}
+
+	for key, a := range pairs {
+		if a.count == 0 {
+			continue
+		}
+		suppressed := a.lastSuccess.After(a.lastFail)
+		alerting := !suppressed && a.alertCount >= egressAlertThreshold
+		out.FailureStats = append(out.FailureStats, egressFailureStat{
+			Device: key.device, Host: key.host, Reason: a.reason,
+			Count: a.count, LastAt: a.lastFail,
+			Suppressed: suppressed, Alerting: alerting,
 		})
+		if alerting {
+			out.DirectFailures = append(out.DirectFailures, directFailure{
+				Device: key.device, Host: key.host, Reason: a.reason,
+				Count: a.alertCount, LastAt: a.lastFail,
+			})
+		}
 	}
+	sort.Slice(out.FailureStats, func(i, j int) bool {
+		return out.FailureStats[i].LastAt.After(out.FailureStats[j].LastAt)
+	})
+	sort.Slice(out.DirectFailures, func(i, j int) bool {
+		return out.DirectFailures[i].LastAt.After(out.DirectFailures[j].LastAt)
+	})
 	return out
 }
 
