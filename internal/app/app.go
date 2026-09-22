@@ -311,8 +311,9 @@ func firewallConfig(cfg *config.Config) firewall.Config {
 		}
 	}
 	fwCfg := firewall.Config{
-		RedirPort: cfg.Runtime.RedirPort,
-		DNSPort:   cfg.DNS.Port,
+		RedirPort:        cfg.Runtime.RedirPort,
+		DNSPort:          cfg.DNS.Port,
+		DNSLocalRedirect: cfg.DNS.Enabled && cfg.DNS.Port != 53,
 		// Relay TCP in both modes. On a single-interface macOS gateway, pf NAT
 		// does not translate packets that enter and leave on the same interface,
 		// so kernel-forwarded direct connections never receive replies.
@@ -354,19 +355,19 @@ func dnsOptions(cfg *config.Config, cachePath string, logger *slog.Logger) dns.O
 
 // Status is a read-only snapshot for UI rendering and `gateway status --json`.
 type Status struct {
-	Configured bool                 `json:"configured"`
-	Running    bool                 `json:"running"`
-	Egress     string               `json:"egress"`
-	Proxy      string               `json:"proxy,omitempty"` // "socks5 127.0.0.1:7897" when egress=proxy
-	Routing    []config.RoutingRule `json:"routing"`
-	DNS        DNSStatus            `json:"dns"`
-	QUICBlock  bool                 `json:"quic_block"`
-	IPv6Policy       string               `json:"ipv6_policy,omitempty"`
-	ProxyFailAction  string               `json:"proxy_fail_action,omitempty"`
-	Gateway    gateway.Status       `json:"gateway"`
-	Ports      PortsStatus          `json:"ports"`
-	ConfigFile string               `json:"config_file"`
-	LogFile    string               `json:"log_file"`
+	Configured      bool                 `json:"configured"`
+	Running         bool                 `json:"running"`
+	Egress          string               `json:"egress"`
+	Proxy           string               `json:"proxy,omitempty"` // "socks5 127.0.0.1:7897" when egress=proxy
+	Routing         []config.RoutingRule `json:"routing"`
+	DNS             DNSStatus            `json:"dns"`
+	QUICBlock       bool                 `json:"quic_block"`
+	IPv6Policy      string               `json:"ipv6_policy,omitempty"`
+	ProxyFailAction string               `json:"proxy_fail_action,omitempty"`
+	Gateway         gateway.Status       `json:"gateway"`
+	Ports           PortsStatus          `json:"ports"`
+	ConfigFile      string               `json:"config_file"`
+	LogFile         string               `json:"log_file"`
 }
 
 type DNSStatus struct {
@@ -397,10 +398,10 @@ func (a *App) Status() Status {
 			Hijack:  a.Cfg.DNS.Hijack,
 			FakeIP:  a.Cfg.DNS.FakeIP && a.Cfg.Egress.Mode == config.EgressProxy,
 		},
-		QUICBlock:  a.Cfg.QUICBlock && a.Cfg.Egress.Mode == config.EgressProxy,
+		QUICBlock:       a.Cfg.QUICBlock && a.Cfg.Egress.Mode == config.EgressProxy,
 		IPv6Policy:      a.Cfg.IPv6Policy,
 		ProxyFailAction: a.Cfg.ProxyFailure.Action,
-		Gateway:   gs,
+		Gateway:         gs,
 		Ports: PortsStatus{
 			Redir:    a.Cfg.Runtime.RedirPort,
 			UDPRedir: a.Cfg.Runtime.UDPRedirPort,

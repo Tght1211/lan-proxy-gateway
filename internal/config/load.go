@@ -187,7 +187,7 @@ func Normalize(cfg *Config) {
 		cfg.Egress.Proxy.Port = 7897
 	}
 	if cfg.DNS.Port == 0 {
-		cfg.DNS.Port = 53
+		cfg.DNS.Port = DefaultDNSPort
 	}
 	if len(cfg.DNS.Upstreams) == 0 {
 		cfg.DNS.Upstreams = []string{"223.5.5.5", "119.29.29.29"}

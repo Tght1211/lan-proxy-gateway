@@ -26,7 +26,7 @@ func TestDefaultValidAndRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Egress.Mode != EgressDirect || got.DNS.Port != 53 || got.Runtime.RedirPort != 17892 {
+	if got.Egress.Mode != EgressDirect || got.DNS.Port != DefaultDNSPort || got.Runtime.RedirPort != 17892 {
 		t.Fatalf("roundtrip mismatch: %+v", got)
 	}
 	if len(got.Routing.Rules) != 0 {
@@ -51,7 +51,7 @@ egress:
 	if cfg.Egress.Mode != EgressProxy {
 		t.Fatalf("mode = %q", cfg.Egress.Mode)
 	}
-	if cfg.DNS.Port != 53 || cfg.Runtime.APIPort != 19090 || !cfg.QUICBlock {
+	if cfg.DNS.Port != DefaultDNSPort || cfg.Runtime.APIPort != 19090 || !cfg.QUICBlock {
 		t.Fatalf("defaults not applied: %+v", cfg)
 	}
 }

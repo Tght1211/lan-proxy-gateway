@@ -338,9 +338,15 @@ func TestRenderLinuxRulesUDPFakeIP(t *testing.T) {
 func TestRenderPFAnchorIPv6Block(t *testing.T) {
 	cfg := Config{Iface: "en0", GatewayIP: "192.168.1.100", IPv6Block: true}
 	got := renderPFAnchor(cfg)
-	want := "block return quick on en0 inet6 from any to any"
-	if !strings.Contains(got, want) {
-		t.Fatalf("anchor missing IPv6 block rule %q in:\n%s", want, got)
+	// Forward-only block: host's own IPv6 (NDP, inbound-to-self) must stay alive.
+	for _, want := range []string{
+		"pass quick on en0 inet6 proto ipv6-icmp",
+		"pass in quick on en0 inet6 from any to (en0)",
+		"block return in quick on en0 inet6 from any to any",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("anchor missing IPv6 rule %q in:\n%s", want, got)
+		}
 	}
 	// Without IPv6Block the rule must not appear
 	cfg.IPv6Block = false
@@ -387,12 +393,19 @@ func TestRenderPFAnchorLANCIDRs(t *testing.T) {
 func TestRenderPFAnchorExcludeCIDRs(t *testing.T) {
 	cfg := Config{
 		Iface: "en0", GatewayIP: "192.168.1.100",
-		TCPRedirect:  true, RedirPort: 17892,
+		TCPRedirect: true, RedirPort: 17892,
 		ExcludeCIDRs: []string{"172.17.0.0/16"},
 	}
 	got := renderPFAnchor(cfg)
-	if !strings.Contains(got, "pass in quick on en0 from 172.17.0.0/16") {
-		t.Fatalf("anchor should exclude Docker CIDR:\n%s", got)
+	// `no rdr` must precede the rdr rules (first matching translation rule wins),
+	// and no filter rule may precede translation rules on macOS pf.
+	noRdr := strings.Index(got, "no rdr on en0 from 172.17.0.0/16 to any")
+	rdr := strings.Index(got, "rdr pass on en0")
+	if noRdr < 0 {
+		t.Fatalf("anchor should exclude Docker CIDR via no rdr:\n%s", got)
+	}
+	if rdr >= 0 && noRdr > rdr {
+		t.Fatalf("no rdr must precede rdr rules:\n%s", got)
 	}
 }
 

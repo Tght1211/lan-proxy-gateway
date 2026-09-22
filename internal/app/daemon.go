@@ -96,6 +96,9 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 	defer logFile.Close()
+	if err := a.prepareDNSPort(logger); err != nil {
+		return err
+	}
 
 	// 端口预检：冲突时报出占用者，避免守护进程起来即死
 	var checks []procutil.PortCheck

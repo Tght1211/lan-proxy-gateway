@@ -28,6 +28,16 @@ func renderLinuxRules(c Config) (nat [][]string, filter [][]string) {
 		))
 	}
 
+	// Port translation to our DNS must precede the LOCAL exemption.
+	if c.DNSLocalRedirect {
+		for _, proto := range []string{"udp", "tcp"} {
+			nat = append(nat, joinArgs(
+				[]string{"PREROUTING"}, iface, iptablesSrcArgs(c.LANCIDRs),
+				[]string{"-d", c.GatewayIP, "-p", proto, "--dport", "53"},
+				tag, []string{"-j", "REDIRECT", "--to-ports", dnsPort},
+			))
+		}
+	}
 	if c.DNSHijack || c.TCPRedirect {
 		nat = append(nat, joinArgs(
 			[]string{"PREROUTING", "-m", "addrtype", "--dst-type", "LOCAL"},
@@ -41,7 +51,7 @@ func renderLinuxRules(c Config) (nat [][]string, filter [][]string) {
 		for _, proto := range []string{"udp", "tcp"} {
 			nat = append(nat, joinArgs(
 				[]string{"PREROUTING"}, iface, srcArgs,
-				[]string{"-p", proto, "--dport", dnsPort},
+				[]string{"-p", proto, "--dport", "53"},
 				tag, []string{"-j", "REDIRECT", "--to-ports", dnsPort},
 			))
 		}

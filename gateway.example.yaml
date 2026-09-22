@@ -33,7 +33,7 @@ routing:
 # ========== DNS 服务 ==========
 dns:
   enabled: true
-  port: 53
+  port: 1053 # Internal listener; LAN devices continue to use standard DNS port 53.
   upstreams: ["223.5.5.5", "119.29.29.29"]
   # 代理模式返回 fake-IP，让 relay 把原始域名交给 Clash/sing-box 解析和分流。
   fake_ip: true
