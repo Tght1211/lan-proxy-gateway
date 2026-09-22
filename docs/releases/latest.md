@@ -1,57 +1,54 @@
-# lan-proxy-gateway v4.0.4
+# LAN Proxy Gateway v4.3.0
 
-这是 v4 的正式稳定版本，面向常驻 Mac mini 和低功耗 Linux 小主机。Switch、PS5、Apple TV、iPhone、Android 和电视无需安装代理 App，只需配置静态 IP、网关和 DNS，即可共享宿主机现有的 Clash、Mihomo、sing-box 或其他 HTTP/SOCKS5 代理。
+本次更新新增局域网 HTTP/HTTPS 代理与 PAC 自动配置、可跨重启保留的设备流量历史，以及外部 Agent 诊断和控制接口；同时改进设备接入、路由学习和网络转发稳定性。
 
-## 小白接入体验
+## 新功能
 
-- `gateway status` 和终端菜单现在直接按设备页面逐项打印配置，不再只给一个抽象的“本机 IP”。
-- 自动给出同网段设备 IP 建议值，默认优先使用 `.112`，并避开 gateway 电脑和路由器地址。
-- 输出完整包含：手动/静态 IP、设备 IP、子网掩码、Android 前缀长度、网关、DNS 设置、首选/备用 DNS、设备代理和 Android 私人 DNS。
-- 明确只有“设备 IP”是手机或游戏机自己的地址且每台不同；网关和两个 DNS 都填 gateway 电脑 IP。
-- 推荐 IP 只是建议值，使用前仍需确认未占用，建议在路由器中固定。
+- **手动 HTTP 代理与 PAC**：设备可通过 Wi-Fi 或浏览器代理设置接入，无需修改网关和 DNS。支持 HTTP 请求、HTTPS CONNECT、可选用户名密码认证，以及同端口的 `/proxy.pac` 自动配置。服务默认关闭，仅接受本机、私有地址和链路本地地址来源。
+- **持久化流量历史**：按日期、设备 IP 和接入方式统计上传、下载及连接数；长连接实时计数，支持日期范围查询，重启后保留历史。持久化统计不保存访问网址，异常断电可能丢失最后约 5 秒数据。
+- **由用户确认的学习建议**：代理失败、直连回退收到响应后积累证据；建议可确认、忽略、恢复观察或撤销，不再自动写入永久学习规则，也不覆盖显式规则。
+- **共享路由预设**：核心与 App 共用 14 组、76 条默认规则。新建配置自动带入预设，已有配置和空规则列表保持原样；设备级规则优先于域名规则。
+- **外部 Agent 接入**：新增 `gateway agent snapshot`、`gateway skill export` 和 `gateway learning`。App 可导出 Skill ZIP 和安装说明；快照不包含代理密码，导出包不包含本机配置或凭据。
+- **设备与网络工具**：增加 UDP fake-IP 转发、设备临时直连保护、NAT/STUN 与 UPnP 诊断、子网及在线设备探测、可用 IP 推荐和 DNS 响应缓存。UDP fake-IP 流量通过直连转发，不代表支持上游 UDP 代理。
 
-## README 与设备教程
+## macOS App
 
-- README 重新按“准备、安装、设备配置、代理出口、验证”组织，新用户可以从顶部直接完成接入。
-- 新增带标注的 Nintendo Switch 与 Android 静态网络设置实图。
-- 加入可直接复制给 Codex、Claude Code 等终端 AI 的 Prompt，让 AI 自动检查、安装、启动并输出填写清单。
-- 新增 Clash Verge 同机示例：地址通常为 `127.0.0.1`，端口示例为 `7897`，实际值必须以代理软件界面为准。
-- 统一 Switch、PS5、手机、电视、Apple TV 和 FAQ 的 DNS 说明，删除旧文档中的冲突配置。
-- 修复 README 中 Star History 动态图片报错导致的破图，改用 GitHub Stargazer 数据生成仓库内曲线图，并保留在线入口。
+- 重组网络总览、设备接入、访问记录和设置页面，整合实时吞吐、流量拓扑及历史查询。
+- 提供网关接入、手动 HTTP 代理和 PAC 三种设备接入指引。
+- 接入代理认证设置、学习建议操作及外部 Agent Skill 导出。
+- 更新菜单栏图标、应用图标和界面组件组织，保留主题与路由编辑能力。
 
-## 稳定性说明
+## 安全与稳定性
 
-- 网络转发核心沿用已完成真实局域网验证的 v4.0.3：HTTP CONNECT 隧道、长连接和 Linux 零拷贝路径保持不变。
-- 代理模式继续拒绝 QUIC（UDP/443），让浏览器和 YouTube 回退到可代理的 TCP；gateway 与第三方代理均无需开启 TUN。
-- gateway 不提供节点、订阅或流媒体解锁，最终速度和可用性由第三方代理软件的节点及分流规则决定。
+- **管理 API 独立认证**：除绑定 `127.0.0.1` 外，管理 API 现在要求独立的 Bearer 令牌，防止 LAN 客户端通过 HTTP 转发或 CONNECT 操作管理接口。核心启动时生成权限为 `0600` 的 `api-token`，CLI 与 App 自动读取；局域网代理账号不具备管理权限。
+- **修复代理超时回退**：上游拨号耗尽超时后，直连回退获得独立拨号时间；客户端取消或总截止时间到达后不再重试。显式代理规则及拒绝回退策略仍按配置执行。
+- DNS 默认使用内部端口 `1053`，网关将设备访问的标准 `53` 端口映射到内部监听；发生端口冲突时自动选择并保存备用端口，不终止已有监听进程。
+- 修复 HTTP CONNECT 缓冲连接的半关闭、握手取消、长连接实时计数、UDP 会话并发访问、重复启动 UDP 服务和 STUN 截断报文处理。
+- 支持子服务故障重启、可配置的代理故障策略、LAN 捕获范围及可选 IPv6 阻断；出口失败统计按设备和目标聚合，减少偶发失败造成的告警。
 
 ## 升级说明
 
-### 从任意 v4.0.x 升级
-
-可直接执行：
+### 已有 v4 用户
 
 ```bash
-gateway update v4.0.4
+gateway update v4.3.0
 ```
 
-现有 v4 配置可以继续使用。升级后建议执行 `sudo gateway restart`，再运行 `gateway status` 查看新的设备填写清单。
+- v4 配置可继续使用，已有路由规则不会被新预设替换。
+- **macOS 用户请同步更新 App 与核心，并重启核心服务。** 新管理 API 需要本地令牌，旧 App 与新核心不能正常配合；仅替换 App 而继续运行旧核心也可能无法读取状态。
+- App 用户下载下方 DMG；若使用已安装的 CLI 或后台服务，请同时更新对应核心。手动替换二进制后执行 `sudo gateway restart`。
+- 自建 API 客户端需读取配置文件同目录的 `api-token`，使用 `Authorization: Bearer <token>`；令牌会在核心重新启动时更换，不应写入日志或共享诊断材料。
+- 流量历史从升级启用后开始记录，无法补回旧版未保存的流量。启用 LAN HTTP 代理后，设备才可使用新的手动代理或 PAC 接入方式。
 
-### 从 v3 升级
+v3 用户请先备份配置，并按仓库的 [v3 → v4 迁移说明](https://github.com/Tght1211/lan-proxy-gateway/blob/main/docs/migration-v4.md) 重新初始化；v3 配置不兼容 v4。
 
-v4 是完整重构，不兼容 v3 配置。更新程序会明确提示并要求确认：
+## 下载与验证
 
-- 内置 mihomo、订阅、节点、规则集、WebUI、流量面板、脚本和 Windows 构建均已移除。
-- 旧配置会备份为 `gateway.yaml.pre-v4.bak*`，之后需要重新完成 v4 初始化。
-- 节点与分流规则必须迁移到独立运行的第三方代理软件。
-- 更新前请备份 `~/.config/lan-proxy-gateway/`，并记下 HTTP/SOCKS5 代理地址与端口。
+- CLI：macOS / Linux，分别提供 arm64、amd64 二进制和 `.tar.gz`。
+- macOS App：DMG 安装包。
+- Agent：`lan-proxy-gateway-skill.zip`。
+- `SHA256SUMS`：校验上述发布文件的完整性。
 
-## 支持范围
+已通过 Go 全量 race 测试、`go vet`、Linux amd64 交叉编译、macOS App 构建及 Swift 模型解码测试。本次验证不包含真实 LAN/防火墙和 DMG 安装实机测试。
 
-- macOS amd64 / arm64
-- Linux amd64 / arm64
-- IPv4 TCP 透明转发
-- HTTP CONNECT / SOCKS5 上游
-- macOS `pf` / Linux `iptables`
-
-暂不支持 Windows、Docker、普通路由器/OpenWrt、IPv6 透明转发、UDP 代理或 TUN 模式。代理模式会拒绝 UDP/443，使客户端从 QUIC 快速回退到可代理的 TCP；其他 UDP 保持直连。
+[完整提交记录：v4.2.0…v4.3.0](https://github.com/Tght1211/lan-proxy-gateway/compare/v4.2.0...v4.3.0)
