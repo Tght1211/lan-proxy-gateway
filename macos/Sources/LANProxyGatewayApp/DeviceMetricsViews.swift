@@ -3,8 +3,10 @@ import SwiftUI
 
 struct DeviceRanking: View {
     @EnvironmentObject private var model: AppModel
-    @State private var selectedDevice = ""
-    @State private var showUsage = false
+    private struct Selection: Identifiable {
+        let id: String
+    }
+    @State private var selection: Selection?
 
     var body: some View {
         let activeIPs = Set(model.stats?.relay.active.map(\.srcIP) ?? [])
@@ -17,7 +19,7 @@ struct DeviceRanking: View {
                         Text("按本次核心运行期间的流量排序").font(.caption).foregroundStyle(Theme.muted)
                     }
                     Spacer()
-                    Button("按设备查看代理用量") { selectedDevice = ""; showUsage = true }
+                    Button("按设备查看代理用量") { selection = Selection(id: "") }
                 }
                 .padding(.bottom, 14)
                 if devices.isEmpty {
@@ -42,7 +44,7 @@ struct DeviceRanking: View {
                                     HStack(spacing: 9) {
                                         Image(systemName: "desktopcomputer")
                                             .foregroundStyle(activeIPs.contains(item.name) ? Theme.lime : Theme.muted)
-                                        Button { selectedDevice = item.name; showUsage = true } label: {
+                                        Button { selection = Selection(id: item.name) } label: {
                                             Text(item.name).font(.system(size: 13, weight: .medium, design: .monospaced))
                                                 .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                                         }.buttonStyle(.plain).foregroundStyle(Theme.cyan)
@@ -99,8 +101,8 @@ struct DeviceRanking: View {
                 }
             }
         }
-        .sheet(isPresented: $showUsage) {
-            DeviceTrafficSheet(device: selectedDevice).environmentObject(model)
+        .sheet(item: $selection) { selected in
+            DeviceTrafficSheet(device: selected.id).environmentObject(model)
         }
     }
 }
