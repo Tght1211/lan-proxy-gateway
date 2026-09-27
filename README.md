@@ -5,7 +5,9 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)]()
 [![License](https://img.shields.io/github/license/Tght1211/lan-proxy-gateway)](LICENSE)
 
-把常驻的 Mac mini 或 Linux 小主机变成局域网旁路由。Switch、PS5、Apple TV、手机和电视不必安装代理 App，即可复用已有的 Clash、Mihomo、sing-box 或其他 HTTP/SOCKS5 代理。通过网线上网的 Mac 可使用代理 Wi-Fi 引导，让设备自动获取地址；其他环境保留手动网关接入。
+让 Switch、PS5、Apple TV、手机和电视连接代理 Wi-Fi，即可使用已有代理，无需安装代理 App，也无需手动填写静态 IP、网关或 DNS。通过网线上网的 Mac mini / Mac 开启系统互联网共享后，在本 App 中开启热点接管，即可复用 Clash、Mihomo、sing-box 或其他 HTTP/SOCKS5 代理。
+
+也支持将 Mac 或 Linux 小主机作为局域网旁路由，通过手动网关方式接入。
 
 > [!IMPORTANT]
 > 本项目不提供代理节点、订阅或流媒体解锁。能否访问特定服务取决于你配置的代理软件和节点。
@@ -21,6 +23,7 @@
 
 ## 核心能力
 
+- **代理 Wi-Fi（有线 Mac）**：配合 macOS 互联网共享，设备连接 Wi-Fi 后自动获取 IP、网关和 DNS；在 App 中开启接管，保留 Mac 原有系统代理和 DNS 设置。
 - **LAN 旁路由**：接管局域网设备的 IPv4 TCP 流量，出口可直连或转发到一个 HTTP/SOCKS5 上游。
 - **原始域名转发**：代理模式使用 fake-IP 保存域名，让 Clash/sing-box 继续按域名分流；无需开启 TUN。
 - **轻量分流**：设备策略优先于域名、域名后缀和 IP-CIDR，可选择代理、直连或拒绝；代理失败支持域名学习和设备级临时直连保护。

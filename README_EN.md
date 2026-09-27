@@ -5,7 +5,9 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)]()
 [![License](https://img.shields.io/github/license/Tght1211/lan-proxy-gateway)](LICENSE)
 
-Turn an always-on Mac mini or small Linux host into a LAN gateway. Switch, PS5, Apple TV, phones, and TVs can reuse an existing Clash, Mihomo, sing-box, or HTTP/SOCKS5 proxy by pointing their gateway and DNS at this host. No proxy app is needed on the client device.
+Connect a Switch, PS5, Apple TV, phone, or TV to proxy Wi-Fi to use your existing proxy—no client proxy app or manual static IP, gateway, or DNS settings required. On an Ethernet-connected Mac mini / Mac, enable macOS Internet Sharing and hotspot takeover in this app to reuse Clash, Mihomo, sing-box, or another HTTP/SOCKS5 proxy.
+
+Mac and Linux hosts also support LAN gateway mode for devices configured with a manual gateway.
 
 > [!IMPORTANT]
 > This project provides no proxy nodes, subscriptions, or streaming unlocks. Service availability depends on your external proxy software and node.
@@ -21,6 +23,7 @@ Turn an always-on Mac mini or small Linux host into a LAN gateway. Switch, PS5, 
 
 ## Features
 
+- **Proxy Wi-Fi (Ethernet-connected Mac):** use macOS Internet Sharing to assign client IP, gateway, and DNS settings automatically; enable hotspot takeover in the app while preserving the Mac’s system proxy and DNS settings.
 - **LAN gateway:** route client IPv4 TCP traffic directly or through one HTTP/SOCKS5 upstream.
 - **Original-domain forwarding:** fake-IP preserves domains for Clash/sing-box routing without requiring TUN mode.
 - **Lightweight routing:** device policy precedes domain, domain-suffix, and IP-CIDR rules; choose proxy, direct, or reject, with per-domain learning and temporary per-device direct protection during failure bursts.
@@ -59,6 +62,18 @@ Direct egress is also supported when you only need a LAN gateway.
 The gateway DNS listener defaults to internal port `1053`. If occupied, the gateway selects and saves a fallback port. LAN devices continue using standard DNS port `53`, forwarded by the gateway firewall; no Clash DNS changes are needed. Available ports in existing configurations are preserved.
 
 ### 3. Connect a device
+
+**Recommended for Switch / PS5: proxy Wi-Fi on an Ethernet-connected Mac**
+
+Open the device onboarding guide in the app:
+
+1. In macOS System Settings, share Ethernet to Wi-Fi and set a network name and password.
+2. Return to the app, configure the proxy upstream, and enable hotspot takeover.
+3. Connect the console to the new Wi-Fi. Keep IP and DNS automatic and the device proxy disabled.
+
+No static IP selection is needed. Initial Internet Sharing setup is manual; test actual game connectivity on your console. See the [hotspot guide and limitations](docs/hotspot-setup.md) (Chinese).
+
+**Other environments: manual gateway setup (advanced)**
 
 Run `gateway status`, then enter the reported values on the phone, TV, or console:
 
