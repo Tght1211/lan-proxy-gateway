@@ -39,6 +39,7 @@ struct HotspotOnboardingPanel: View {
             }
             Divider()
             OnboardingStep(number: "1", title: "在系统设置中创建 Wi-Fi", detail: "先打开 Mac 的 Wi-Fi。再到「通用 → 共享 → 互联网共享」，从以太网共享给 Wi-Fi。设置名称和密码后，依次点击「好」「完成」，确认共享开关已开启。这里不需要填写任何代理。")
+            HotspotSystemSetupGuide()
             HStack {
                 Button("打开系统共享设置") {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.Sharing-Settings.extension") {
@@ -215,11 +216,14 @@ struct HotspotQuickControls: View {
             Button {
                 showCredentialHelp.toggle()
             } label: {
-                Label("查看 Wi-Fi 名称与密码…", systemImage: "key.fill")
+                Label("Wi-Fi 名称、密码与频段…", systemImage: "wifi")
             }.buttonStyle(.bordered)
             if showCredentialHelp {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("名称和密码由 macOS 管理，请以系统 Wi-Fi 选项中的内容为准。")
+                    DisclosureGroup("主机版本与频段建议") {
+                        HotspotSystemSetupGuide()
+                    }
+                    Text("名称、密码和频段由 macOS 管理，请以系统 Wi-Fi 选项中的内容为准。")
                     Text("进入「互联网共享」详情 →「Wi-Fi 选项」。如果选项变灰，需先关闭互联网共享；热点设备会暂时断网。查看或修改后，请重新开启共享。")
                     Button("打开系统共享设置") {
                         if let url = URL(string: "x-apple.systempreferences:com.apple.Sharing-Settings.extension") {
@@ -265,5 +269,52 @@ struct HotspotQuickControls: View {
         }
         .padding(18).frame(width: 360)
         .task { await model.refreshHotspot() }
+    }
+}
+
+/// Advice only: selecting a recommendation does not change system Wi-Fi settings.
+private struct HotspotSystemSetupGuide: View {
+    @State private var prefer5GHz = true
+    @AppStorage("hotspot.consoleRegion") private var consoleRegion = "HK"
+
+    private var regionAdvice: String {
+        switch consoleRegion {
+        case "JP": return "日版：先试 36，再试 40 / 44 / 48；不要直接套用其他地区的高信道设置。"
+        case "US": return "美版：先试 36，再试 40 / 44 / 48；回退 2.4 GHz 时选择 1 / 6 / 11。"
+        default: return "港版（默认）：PS5 / Switch 优先尝试 5 GHz 信道 36，找不到热点时再试 40 / 44 / 48。"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Wi-Fi 设置建议", systemImage: "slider.horizontal.3")
+                .font(.headline)
+            Picker("主机销售版本", selection: $consoleRegion) {
+                Text("港版").tag("HK")
+                Text("日版").tag("JP")
+                Text("美版").tag("US")
+            }.pickerStyle(.segmented)
+            Text(regionAdvice)
+            Text("按主机购买版本选择，不是账号地区；此选项只调整引导，不修改 Mac 的无线地区。")
+                .foregroundStyle(Theme.muted)
+            Picker("使用场景", selection: $prefer5GHz) {
+                Text("近距离 · 5 GHz").tag(true)
+                Text("隔墙 / 兼容 · 2.4 GHz").tag(false)
+            }.pickerStyle(.segmented)
+            Text(prefer5GHz
+                 ? "在系统「Wi-Fi 选项 → 频道」中优先选择 36；也可选择 40、44 或 48（以系统提供的选项为准）。这些是 5 GHz 信道。"
+                 : "在系统「Wi-Fi 选项 → 频道」中选择 1、6 或 11。这些是 2.4 GHz 信道；设备找不到 5 GHz 热点时可尝试此模式。")
+            Text("共享来源选「以太网」，共享给「Wi-Fi」。设置容易辨认的名称及至少 8 位密码。Switch / Lite / OLED 需要 WPA2 兼容：在 Mac 上选择「WPA2/WPA3 个人级」，不要选择仅 WPA3。")
+            Text("上述为兼容性优先的建议，不是各版本完整支持列表。信道以 Mac 所在地区可选项为准；找不到热点时先靠近 Mac，仍不可见再回退 2.4 GHz 的 1 / 6 / 11，并在主机上测试。")
+                .foregroundStyle(Theme.muted)
+            Text("点击「好」「完成」后开启互联网共享。修改频道后，需关闭再开启共享才能应用，已连接设备会暂时断网。")
+            Text("这里仅展示设置建议，不会自动切换频段。系统热点设置完成后，App 会自动检测；代理出口、规则与接管由本 App 管理。")
+                .foregroundStyle(Theme.muted)
+        }
+        .font(.caption)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(12)
+        .background(Theme.panelRaised)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
