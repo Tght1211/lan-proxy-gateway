@@ -3,6 +3,8 @@ import SwiftUI
 
 struct DeviceRanking: View {
     @EnvironmentObject private var model: AppModel
+    @State private var selectedDevice = ""
+    @State private var showUsage = false
 
     var body: some View {
         let activeIPs = Set(model.stats?.relay.active.map(\.srcIP) ?? [])
@@ -15,6 +17,7 @@ struct DeviceRanking: View {
                         Text("按本次核心运行期间的流量排序").font(.caption).foregroundStyle(Theme.muted)
                     }
                     Spacer()
+                    Button("按设备查看代理用量") { selectedDevice = ""; showUsage = true }
                 }
                 .padding(.bottom, 14)
                 if devices.isEmpty {
@@ -39,8 +42,11 @@ struct DeviceRanking: View {
                                     HStack(spacing: 9) {
                                         Image(systemName: "desktopcomputer")
                                             .foregroundStyle(activeIPs.contains(item.name) ? Theme.lime : Theme.muted)
-                                        Text(item.name).font(.system(size: 13, weight: .medium, design: .monospaced))
-                                            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                                        Button { selectedDevice = item.name; showUsage = true } label: {
+                                            Text(item.name).font(.system(size: 13, weight: .medium, design: .monospaced))
+                                                .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                                        }.buttonStyle(.plain).foregroundStyle(Theme.cyan)
+                                            .help("查看此设备的代理用量、直连域名和访问明细")
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
 									let ov = model.deviceOverride(for: item.name)
@@ -92,6 +98,9 @@ struct DeviceRanking: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showUsage) {
+            DeviceTrafficSheet(device: selectedDevice).environmentObject(model)
         }
     }
 }

@@ -47,7 +47,7 @@ func (a *App) Start(ctx context.Context) error {
 // it pointed at is going away.
 func (a *App) Stop() error {
 	var firstErr error
-	if a.Plat != nil {
+	if a.Plat != nil && a.Cfg.Gateway.AccessMode != "hotspot" {
 		if loopback, err := a.Plat.LocalDNSIsLoopback(); err == nil && loopback {
 			if err := a.Plat.RestoreLocalDNS(); err != nil && !errors.Is(err, platform.ErrNotSupported) {
 				firstErr = err

@@ -159,3 +159,16 @@ func TestSetEgressValidates(t *testing.T) {
 		t.Fatalf("config should have been saved: %v", err)
 	}
 }
+
+func TestHotspotStopPreservesMacDNS(t *testing.T) {
+	plat := &fakePlatform{loopback: true}
+	cfg := config.Default()
+	cfg.Gateway.AccessMode = "hotspot"
+	a := &App{Plat: plat, Cfg: cfg}
+	if err := a.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if plat.restoreCalled != 0 {
+		t.Fatal("hotspot must not change Mac DNS, even if another proxy uses loopback")
+	}
+}

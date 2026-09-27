@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)]()
 [![License](https://img.shields.io/github/license/Tght1211/lan-proxy-gateway)](LICENSE)
 
-把常驻的 Mac mini 或 Linux 小主机变成局域网旁路由。Switch、PS5、Apple TV、手机和电视不必安装代理 App，只需把网关和 DNS 指向这台电脑，即可复用已有的 Clash、Mihomo、sing-box 或其他 HTTP/SOCKS5 代理。
+把常驻的 Mac mini 或 Linux 小主机变成局域网旁路由。Switch、PS5、Apple TV、手机和电视不必安装代理 App，即可复用已有的 Clash、Mihomo、sing-box 或其他 HTTP/SOCKS5 代理。通过网线上网的 Mac 可使用代理 Wi-Fi 引导，让设备自动获取地址；其他环境保留手动网关接入。
 
 > [!IMPORTANT]
 > 本项目不提供代理节点、订阅或流媒体解锁。能否访问特定服务取决于你配置的代理软件和节点。
@@ -60,6 +60,18 @@ sudo gateway install
 网关 DNS 默认在内部端口 `1053` 监听，端口被占用时会自动选择备用端口并保存配置。局域网设备仍使用标准 DNS 端口 `53`，由网关防火墙转发，无需修改 Clash 的 DNS 设置。已有配置中的空闲端口会继续保留。
 
 ### 3. 接入设备
+
+**Switch / PS5 推荐：代理 Wi-Fi（有线 Mac）**
+
+在 App 中打开「设备接入 → 接入设备」，按引导完成：
+
+1. 在系统设置中从以太网共享到 Wi-Fi，设置名称和密码。
+2. 回到 App，设置代理出口并点击「开启热点接管」。
+3. 游戏机连接新 Wi-Fi，IP、DNS 保持自动，代理选不使用。
+
+不需要手填或猜测设备 IP。App 的设备出口设置保留 Mac 的系统代理和 DNS。首次系统共享需要手动开启；真实游戏联机效果需在设备上测试。[查看完整引导与限制](docs/hotspot-setup.md)。
+
+**其他环境：手动网关接入（高级）**
 
 运行 `gateway status`，按输出在手机、电视或游戏机中填写：
 

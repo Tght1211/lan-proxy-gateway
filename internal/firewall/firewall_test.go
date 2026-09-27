@@ -295,11 +295,18 @@ func TestRenderPFAnchorUDPFakeIP(t *testing.T) {
 		QUICBlock:      true,
 	}
 	got := renderPFAnchor(cfg)
-	// Fake-IP rdr covers all ports — fake IPs never host real QUIC servers,
-	// so no port 443 exclusion is needed even when QUICBlock is on.
+	// QUIC must remain unredirected so the filter can reject it.
 	wantLine := "rdr pass on en0 proto udp from any to 198.18.0.0/16 -> 127.0.0.1 port 17893"
 	if !strings.Contains(got, wantLine) {
 		t.Fatalf("anchor missing UDP fake-IP rdr rule %q in:\n%s", wantLine, got)
+	}
+	exclusion := "no rdr on en0 proto udp from any to 198.18.0.0/16 port 443"
+	if i := strings.Index(got, exclusion); i < 0 || i > strings.Index(got, wantLine) {
+		t.Fatalf("QUIC must bypass UDP rdr before the filter rejects it:\n%s", got)
+	}
+	cfg.QUICBlock = false
+	if strings.Contains(renderPFAnchor(cfg), exclusion) {
+		t.Fatal("QUIC disabled but still excluded")
 	}
 	// UDP rdr must come after DNS hijack but before TCP rdr
 	dnsIdx := strings.Index(got, "port 53")
@@ -319,10 +326,10 @@ func TestRenderLinuxRulesUDPFakeIP(t *testing.T) {
 	cfg.UDPFakeIPRedir = true
 	cfg.UDPRedirPort = 17893
 	cfg.FakeIPRange = "198.18.0.0/16"
-	cfg.QUICBlock = true // even with QUIC block, fake-IP rdr covers all ports
+	cfg.QUICBlock = true // Keep QUIC in FORWARD so its reject rule applies.
 	nat, _ := renderLinuxRules(cfg)
 	rules := joinRules(nat)
-	wantRule := "PREROUTING -i eth0 -p udp -d 198.18.0.0/16 -m comment --comment lan-proxy-gateway -j REDIRECT --to-ports 17893"
+	wantRule := "PREROUTING -i eth0 -p udp -d 198.18.0.0/16 ! --dport 443 -m comment --comment lan-proxy-gateway -j REDIRECT --to-ports 17893"
 	found := false
 	for _, r := range rules {
 		if r == wantRule {

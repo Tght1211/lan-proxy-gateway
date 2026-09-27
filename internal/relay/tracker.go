@@ -23,22 +23,23 @@ const (
 
 // ConnInfo is a point-in-time view of one relayed connection.
 type ConnInfo struct {
-	Ingress   string     `json:"ingress"` // gateway | http-proxy
-	ID        uint64     `json:"id"`
-	SrcIP     string     `json:"src_ip"`
-	DstHost   string     `json:"dst_host"`
-	DstPort   int        `json:"dst_port"`
-	Proto     string     `json:"proto,omitempty"` // "tcp" (default) or "udp"
-	Service   string     `json:"service"`
-	Up        int64      `json:"up"`
-	Down      int64      `json:"down"`
-	StartedAt time.Time  `json:"started_at"`
-	EndedAt   *time.Time `json:"ended_at,omitempty"`
-	ViaProxy  bool       `json:"via_proxy"`
-	Rejected  bool       `json:"rejected,omitempty"`
-	Status    string     `json:"status,omitempty"`   // "" | "rejected" | "dial_failed"
-	Failure   string     `json:"failure,omitempty"`  // human-readable dial failure reason
-	Fallback  bool       `json:"fallback,omitempty"` // proxy dial failed, direct retry succeeded
+	ProxyEndpoint string     `json:"proxy_endpoint,omitempty"`
+	Ingress       string     `json:"ingress"` // gateway | http-proxy
+	ID            uint64     `json:"id"`
+	SrcIP         string     `json:"src_ip"`
+	DstHost       string     `json:"dst_host"`
+	DstPort       int        `json:"dst_port"`
+	Proto         string     `json:"proto,omitempty"` // "tcp" (default) or "udp"
+	Service       string     `json:"service"`
+	Up            int64      `json:"up"`
+	Down          int64      `json:"down"`
+	StartedAt     time.Time  `json:"started_at"`
+	EndedAt       *time.Time `json:"ended_at,omitempty"`
+	ViaProxy      bool       `json:"via_proxy"`
+	Rejected      bool       `json:"rejected,omitempty"`
+	Status        string     `json:"status,omitempty"`   // "" | "rejected" | "dial_failed"
+	Failure       string     `json:"failure,omitempty"`  // human-readable dial failure reason
+	Fallback      bool       `json:"fallback,omitempty"` // proxy dial failed, direct retry succeeded
 }
 
 // TrafficPoint is one five-second throughput sample.
@@ -77,7 +78,7 @@ type Snapshot struct {
 }
 
 // Tracker keeps live connection telemetry in memory. Optional daily device
-// counters persist separately; destination history is never written to disk.
+// daily destination/egress counters persist separately from recent connections.
 type Tracker struct {
 	history        *usageHistory
 	ingress        map[string]*UsageAggregate
@@ -132,19 +133,29 @@ func (t *Tracker) StartSampling(ctx context.Context, interval time.Duration) {
 // Open registers a new connection; Close on the returned handle archives it.
 // proto should be "tcp" or "udp".
 func (t *Tracker) Open(srcIP, dstHost string, dstPort int, viaProxy bool, proto string, ingress ...string) *TrackedConn {
+	return t.OpenWithEgress(srcIP, dstHost, dstPort, viaProxy, proto, "", ingress...)
+}
+
+// OpenWithEgress freezes the actual proxy peer when the connection is opened,
+// so later config changes cannot relabel historical bytes.
+func (t *Tracker) OpenWithEgress(srcIP, dstHost string, dstPort int, viaProxy bool, proto, endpoint string, ingress ...string) *TrackedConn {
+	if !viaProxy {
+		endpoint = ""
+	}
 	t.mu.Lock()
 	t.nextID++
 	c := &TrackedConn{
-		t:         t,
-		ingress:   ingressName(ingress),
-		id:        t.nextID,
-		srcIP:     srcIP,
-		dstHost:   dstHost,
-		dstPort:   dstPort,
-		proto:     proto,
-		service:   ClassifyService(dstHost),
-		viaProxy:  viaProxy,
-		startedAt: time.Now(),
+		t:             t,
+		ingress:       ingressName(ingress),
+		id:            t.nextID,
+		srcIP:         srcIP,
+		dstHost:       dstHost,
+		dstPort:       dstPort,
+		proto:         proto,
+		service:       ClassifyService(dstHost),
+		viaProxy:      viaProxy,
+		proxyEndpoint: endpoint,
+		startedAt:     time.Now(),
 	}
 	t.conns[c.id] = c
 	t.recordUsage(c, 0, 0, 1, c.startedAt)
@@ -244,20 +255,21 @@ func cloneAggregates(source map[string]*UsageAggregate) map[string]*UsageAggrega
 
 // TrackedConn is one live connection's counters.
 type TrackedConn struct {
-	ingress   string
-	t         *Tracker
-	id        uint64
-	srcIP     string
-	dstHost   string
-	dstPort   int
-	proto     string // "tcp" or "udp"
-	service   string
-	viaProxy  bool
-	startedAt time.Time
-	up        atomic.Int64
-	down      atomic.Int64
-	closed    atomic.Bool
-	fallback  atomic.Bool
+	proxyEndpoint string
+	ingress       string
+	t             *Tracker
+	id            uint64
+	srcIP         string
+	dstHost       string
+	dstPort       int
+	proto         string // "tcp" or "udp"
+	service       string
+	viaProxy      bool
+	startedAt     time.Time
+	up            atomic.Int64
+	down          atomic.Int64
+	closed        atomic.Bool
+	fallback      atomic.Bool
 }
 
 // MarkFallback flags the connection as proxy→direct fallback so the history
@@ -324,7 +336,7 @@ func (c *TrackedConn) info() ConnInfo {
 		Ingress: c.ingress,
 		ID:      c.id, SrcIP: c.srcIP, DstHost: c.dstHost, DstPort: c.dstPort,
 		Proto: c.proto, Service: c.service, Up: c.up.Load(), Down: c.down.Load(),
-		StartedAt: c.startedAt, ViaProxy: c.viaProxy, Fallback: c.fallback.Load(),
+		StartedAt: c.startedAt, ViaProxy: c.viaProxy, Fallback: c.fallback.Load(), ProxyEndpoint: c.proxyEndpoint,
 	}
 }
 

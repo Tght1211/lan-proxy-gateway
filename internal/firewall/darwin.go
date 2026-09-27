@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	pfAnchorName = "com.apple/lan-proxy-gateway"
-	pfAnchorFile = "/etc/pf.anchors/lan-proxy-gateway"
+	pfAnchorName    = "com.apple/lan-proxy-gateway"
+	pfHotspotAnchor = "com.apple/000.lan-proxy-gateway"
+	pfAnchorFile    = "/etc/pf.anchors/lan-proxy-gateway"
 )
 
 type darwinManager struct {
@@ -41,12 +42,34 @@ func newPlatformManager() Manager {
 }
 
 func (m *darwinManager) Apply(c Config) (Report, error) {
+	anchor := pfAnchorName
+	if c.Hotspot {
+		anchor = pfHotspotAnchor
+		enabled, err := m.pfEnabled()
+		if err != nil {
+			return Report{}, err
+		}
+		if !enabled {
+			return Report{}, fmt.Errorf("系统互联网共享尚未启用防火墙，请重新开启共享后重试")
+		}
+	}
+
 	if err := m.write(pfAnchorFile, []byte(renderPFAnchor(c))); err != nil {
 		return Report{}, fmt.Errorf("写入 pf anchor 失败: %w", err)
 	}
-	if err := m.run("-a", pfAnchorName, "-f", pfAnchorFile); err != nil {
+	if err := m.run("-a", anchor, "-f", pfAnchorFile); err != nil {
 		return Report{}, err
 	}
+	// A launchd replacement can leave the previous process's anchor behind.
+	// Keep exactly one ingress mode, without touching Apple's sharing anchors.
+	other := pfHotspotAnchor
+	if c.Hotspot {
+		other = pfAnchorName
+	}
+	if err := m.run("-a", other, "-F", "all"); err != nil {
+		return Report{}, err
+	}
+
 	// Stock macOS pf.conf references the com.apple/* wildcard anchors; a custom
 	// pf.conf without them would load our rules but never execute them. Detect
 	// that and tell the user exactly what to add instead of editing their file.
@@ -60,7 +83,7 @@ func (m *darwinManager) Apply(c Config) (Report, error) {
 		return Report{}, err
 	}
 	var rep Report
-	if !enabled {
+	if !enabled && !c.Hotspot {
 		if err := m.run("-e"); err != nil {
 			return Report{}, err
 		}
@@ -72,8 +95,10 @@ func (m *darwinManager) Apply(c Config) (Report, error) {
 func (m *darwinManager) Remove() error {
 	// flush our anchor; disabling pf itself is the caller's decision (only
 	// when WeEnabledPF was recorded)
-	if err := m.run("-a", pfAnchorName, "-F", "all"); err != nil {
-		return err
+	for _, anchor := range []string{pfAnchorName, pfHotspotAnchor} {
+		if err := m.run("-a", anchor, "-F", "all"); err != nil {
+			return err
+		}
 	}
 	_ = os.Remove(pfAnchorFile)
 	return nil

@@ -105,3 +105,88 @@ func TestHistoryConcurrentWritesAndCorruption(t *testing.T) {
 		t.Fatal("overwrote corrupt history")
 	}
 }
+
+func TestUsageTracksActualProxyPeerAndDirectSeparately(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "usage.json")
+	tr := NewTracker()
+	if err := tr.EnableHistory(path); err != nil {
+		t.Fatal(err)
+	}
+	proxy := tr.OpenWithEgress("device-a", "Example.COM.", 443, true, "tcp", "127.0.0.1:7897")
+	proxy.AddUp(100)
+	proxy.AddDown(900)
+	direct := tr.OpenWithEgress("device-a", "example.com", 443, false, "tcp", "203.0.113.1:443")
+	direct.MarkFallback()
+	direct.AddDown(300)
+	other := tr.OpenWithEgress("device-a", "example.com", 443, true, "tcp", "127.0.0.1:7898")
+	other.AddDown(50)
+	deviceB := tr.OpenWithEgress("device-b", "example.com", 443, true, "tcp", "127.0.0.1:7897")
+	deviceB.AddDown(40)
+	if proxy.info().ProxyEndpoint != "127.0.0.1:7897" || direct.info().ProxyEndpoint != "" {
+		t.Fatal("incorrect actual peer")
+	}
+	if err := tr.SaveHistory(); err != nil {
+		t.Fatal(err)
+	}
+	proxy.Close()
+	direct.Close()
+	other.Close()
+	deviceB.Close()
+	if err := tr.SaveHistory(); err != nil {
+		t.Fatal(err)
+	}
+	loaded := NewTracker()
+	if err := loaded.EnableHistory(path); err != nil {
+		t.Fatal(err)
+	}
+	rows := loaded.UsageHistory()
+	if len(rows) != 4 {
+		t.Fatalf("rows %+v", rows)
+	}
+	for _, r := range rows {
+		if r.Destination != "example.com" {
+			t.Fatal("domain not normalized")
+		}
+		if r.Device != "device-a" {
+			continue
+		}
+		switch {
+		case r.Egress == "direct":
+			if r.Down != 300 || r.ProxyEndpoint != "" {
+				t.Fatalf("fallback counted as proxy: %+v", r)
+			}
+		case r.ProxyEndpoint == "127.0.0.1:7897":
+			if r.Up != 100 || r.Down != 900 || r.Connections != 1 {
+				t.Fatalf("wrong proxy totals: %+v", r)
+			}
+		case r.ProxyEndpoint == "127.0.0.1:7898":
+			if r.Down != 50 {
+				t.Fatal("proxy endpoints merged")
+			}
+		default:
+			t.Fatalf("unknown row %+v", r)
+		}
+	}
+}
+
+func TestLegacyUsageRemainsUnclassified(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "usage.json")
+	data := `[{"date":"2026-09-28","device":"device-a","ingress":"gateway","up":10,"down":20,"connections":1,"last_seen":"2026-09-28T00:00:00Z"}]`
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	tr := NewTracker()
+	if err := tr.EnableHistory(path); err != nil {
+		t.Fatal(err)
+	}
+	old := tr.UsageHistory()[0]
+	if old.Egress != "" || old.ProxyEndpoint != "" || old.Destination != "" || old.Up+old.Down != 30 {
+		t.Fatalf("guessed legacy attribution: %+v", old)
+	}
+	c := tr.OpenWithEgress("device-a", "example.com", 443, true, "tcp", "127.0.0.1:7897")
+	c.AddDown(7)
+	c.Close()
+	if len(tr.UsageHistory()) != 2 {
+		t.Fatal("legacy totals mixed into new proxy usage")
+	}
+}

@@ -6,25 +6,37 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
 
-// DailyUsage stores only device/ingress byte totals, never destination history.
+// DailyUsage stores daily device/destination totals by the actual socket egress.
+// Empty Egress/Destination on legacy rows means unknown, never direct.
 type DailyUsage struct {
-	Date        string    `json:"date"`
-	Device      string    `json:"device"`
-	Ingress     string    `json:"ingress"`
-	Up          int64     `json:"up"`
-	Down        int64     `json:"down"`
-	Connections int64     `json:"connections"`
-	LastSeen    time.Time `json:"last_seen"`
+	Egress        string    `json:"egress,omitempty"`
+	ProxyEndpoint string    `json:"proxy_endpoint,omitempty"`
+	Destination   string    `json:"destination,omitempty"`
+	Service       string    `json:"service,omitempty"`
+	Date          string    `json:"date"`
+	Device        string    `json:"device"`
+	Ingress       string    `json:"ingress"`
+	Up            int64     `json:"up"`
+	Down          int64     `json:"down"`
+	Connections   int64     `json:"connections"`
+	LastSeen      time.Time `json:"last_seen"`
 }
+type usageKey struct{ Date, Device, Ingress, Egress, ProxyEndpoint, Destination string }
+
+func (r DailyUsage) key() usageKey {
+	return usageKey{r.Date, r.Device, r.Ingress, r.Egress, r.ProxyEndpoint, r.Destination}
+}
+
 type usageHistory struct {
 	mu     sync.Mutex
 	saveMu sync.Mutex
 	path   string
-	rows   map[string]*DailyUsage
+	rows   map[usageKey]*DailyUsage
 }
 
 func (t *Tracker) EnableHistory(path string) error {
@@ -38,13 +50,23 @@ func (t *Tracker) EnableHistory(path string) error {
 			return fmt.Errorf("read usage history: %w", err)
 		}
 	}
-	h := &usageHistory{path: path, rows: map[string]*DailyUsage{}}
+	h := &usageHistory{path: path, rows: map[usageKey]*DailyUsage{}}
 	for _, row := range rows {
 		if _, err := time.Parse("2006-01-02", row.Date); err != nil || row.Up < 0 || row.Down < 0 {
 			return fmt.Errorf("invalid usage history")
 		}
 		copy := row
-		h.rows[row.Date+"|"+row.Device+"|"+row.Ingress] = &copy
+		key := row.key()
+		if previous := h.rows[key]; previous != nil {
+			previous.Up += row.Up
+			previous.Down += row.Down
+			previous.Connections += row.Connections
+			if row.LastSeen.After(previous.LastSeen) {
+				previous.LastSeen = row.LastSeen
+			}
+		} else {
+			h.rows[key] = &copy
+		}
 	}
 	t.history = h
 	return nil
@@ -55,12 +77,18 @@ func (t *Tracker) recordUsage(c *TrackedConn, up, down, connections int64, now t
 		return
 	}
 	day := now.Local().Format("2006-01-02")
-	key := day + "|" + c.srcIP + "|" + c.ingress
+	egress := "direct"
+	if c.viaProxy {
+		egress = "proxy"
+	}
+	entry := DailyUsage{Date: day, Device: c.srcIP, Ingress: c.ingress, Egress: egress,
+		ProxyEndpoint: c.proxyEndpoint, Destination: strings.TrimSuffix(strings.ToLower(c.dstHost), "."), Service: c.service}
+	key := entry.key()
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	row := h.rows[key]
 	if row == nil {
-		row = &DailyUsage{Date: day, Device: c.srcIP, Ingress: c.ingress}
+		row = &entry
 		h.rows[key] = row
 	}
 	row.Up += up
@@ -86,7 +114,17 @@ func (t *Tracker) UsageHistory() []DailyUsage {
 		if rows[i].Device != rows[j].Device {
 			return rows[i].Device < rows[j].Device
 		}
-		return rows[i].Ingress < rows[j].Ingress
+		a, b := rows[i], rows[j]
+		if a.Ingress != b.Ingress {
+			return a.Ingress < b.Ingress
+		}
+		if a.Egress != b.Egress {
+			return a.Egress < b.Egress
+		}
+		if a.ProxyEndpoint != b.ProxyEndpoint {
+			return a.ProxyEndpoint < b.ProxyEndpoint
+		}
+		return a.Destination < b.Destination
 	})
 	return rows
 }

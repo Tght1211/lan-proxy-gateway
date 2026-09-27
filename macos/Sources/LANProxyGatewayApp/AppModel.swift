@@ -3,6 +3,30 @@ import Foundation
 
 @MainActor
 final class AppModel: ObservableObject {
+    @Published var hotspot: HotspotStatus?
+    @Published var hotspotError: String?
+    @Published var hotspotOperation: String?
+    @Published var hotspotActionError: String?
+
+    var hotspotControlState: HotspotControlState {
+        HotspotControlState.resolve(operation: hotspotOperation, error: hotspotActionError,
+            desired: hotspot?.enabled == true, running: isRunning,
+            hasStats: stats != nil, runtime: stats?.hotspot)
+    }
+
+    var hotspotControlDetail: String {
+        switch hotspotControlState {
+        case .off: return "发现 Wi-Fi 不代表已接管。点击开启后，游戏机流量才会按本 App 的规则转发。"
+        case .enabling: return "正在更新并重启后台核心。若系统弹出管理员授权，请完成授权；不要重复点击。"
+        case .stopping: return "正在撤销接管。系统 Wi-Fi 共享会保留，可继续提供普通网络。"
+        case .verifying: return "正在读取运行中核心的确认结果，保存配置并不代表已经生效。"
+        case .enabled: return "后台核心已确认流量接管。现在可连接热点，在游戏机上测试网络。"
+        case .waiting: return stats?.hotspot?.message ?? hotspot?.message ?? "等待共享网络和核心准备就绪。"
+        case .needsCoreUpdate: return "配置已保存，但运行中的旧核心不支持热点状态。点击「更新核心并开启接管」完成更新。"
+        case .unavailable: return "核心尚未运行或状态接口不可用，不能确认已开启。请重试；不要把 Wi-Fi 已连接当作代理已生效。"
+        case .failed: return hotspotActionError ?? stats?.hotspot?.message ?? "请重试并检查核心日志。"
+        }
+    }
     @Published var status: GatewayStatus?
     @Published var stats: RuntimeStats?
     @Published var selectedSection: AppSection? = .overview
@@ -93,6 +117,53 @@ final class AppModel: ObservableObject {
         } catch {
             if !silent { errorMessage = error.localizedDescription }
         }
+    }
+
+    func refreshHotspot() async {
+        do {
+            hotspot = try await client.hotspotStatus()
+            hotspotError = nil
+        } catch {
+            hotspot = nil
+            hotspotError = error.localizedDescription
+        }
+    }
+
+    func configureHotspot(_ action: String) async {
+        guard !isBusy else { return }
+        isBusy = true
+        hotspotOperation = action
+        hotspotActionError = nil
+        errorMessage = nil
+        defer { isBusy = false; hotspotOperation = nil }
+        do {
+            _ = try await client.configureHotspot(action)
+            hotspotOperation = "verify"
+            var confirmed = false
+            // Verify the running process, not just the config written by the CLI.
+            for _ in 0..<12 {
+                let latest = try await client.status()
+                status = latest
+                if latest.running, let live = try? await client.stats(apiPort: latest.ports.api, configFile: latest.configFile) {
+                    stats = live
+                    if let runtime = live.hotspot {
+                        if action == "enable" && runtime.enabled && runtime.applied { confirmed = true }
+                        if action == "disable" && !runtime.enabled && !runtime.applied { confirmed = true }
+                    }
+                    if action == "use-lan" && latest.accessMode != "hotspot" { confirmed = true }
+                    if confirmed { break }
+                } else { stats = nil }
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            if confirmed {
+                showNotice(action == "disable" ? "热点接管已停止" : "接入已确认生效")
+            } else {
+                throw GatewayClientError.commandFailed(stats?.hotspot?.message ?? "配置已保存，但后台核心没有确认接管结果。可能仍在运行旧版核心；请重试更新，或查看核心日志。")
+            }
+        } catch {
+            hotspotActionError = error.localizedDescription
+        }
+        await refreshHotspot()
     }
 
     func initializeAndStart() {

@@ -15,6 +15,9 @@ var ErrNotSupported = errors.New("当前平台不支持防火墙规则管理")
 
 // Config is the desired rule set.
 type Config struct {
+	Hotspot           bool     // Internet Sharing owns NAT, PF and forwarding; capture only its ingress
+	CaptureInterfaces []string // hotspot bridge plus wireless members
+
 	Iface            string   // LAN interface, e.g. "eth0" / "en0"
 	GatewayIP        string   // this host's LAN IP (excluded from redirect on macOS)
 	RedirPort        int      // transparent TCP relay port

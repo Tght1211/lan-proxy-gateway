@@ -119,6 +119,7 @@ struct CoreHero: View {
 struct GettingStartedPanel: View {
     @EnvironmentObject private var model: AppModel
     @State private var showProxyConfig = false
+    @State private var showOnboarding = false
 
     var body: some View {
         Panel {
@@ -131,7 +132,7 @@ struct GettingStartedPanel: View {
                 .frame(width: 54, height: 54)
                 VStack(alignment: .leading, spacing: 5) {
                     Text("首次使用").font(.system(size: 15, weight: .semibold))
-                    Text("先填写 Clash、Mihomo 或 sing-box 提供的本机代理地址与端口，再启动网关。")
+                    Text("Mac 接网线，游戏机连代理 Wi-Fi。跟着引导设置一次，之后自动连接。")
                         .font(.caption).foregroundStyle(Theme.muted).lineLimit(2)
                 }
                 Spacer(minLength: 12)
@@ -142,14 +143,17 @@ struct GettingStartedPanel: View {
                 }
                 .buttonStyle(ActionButtonStyle(tint: Theme.cyan))
                 Button {
-                    model.initializeAndStart()
+                    showOnboarding = true
                 } label: {
-                    Label("使用直连启动", systemImage: "play.fill")
+                    Label("连接游戏机", systemImage: "wifi")
                 }
                 .buttonStyle(ActionButtonStyle(tint: Theme.lime))
             }
         }
         .frame(minHeight: 88)
+        .sheet(isPresented: $showOnboarding) {
+            DeviceOnboardingSheet().environmentObject(model)
+        }
         .sheet(isPresented: $showProxyConfig) {
             ProxyConfigSheet().environmentObject(model)
         }

@@ -40,6 +40,43 @@ struct GatewayClient {
         }
     }
 
+    func hotspotStatus() async throws -> HotspotStatus {
+        let data = try await run(arguments: ["hotspot", "status"], privileged: false).data
+        return try JSONDecoder().decode(HotspotStatus.self, from: data)
+    }
+
+    func configureHotspot(_ action: String) async throws -> String {
+        _ = try await output(arguments: ["hotspot", action], privileged: false)
+        let service = try await serviceStatus()
+        if service == "运行中" || service == "已加载" {
+            return try await restartInstalledCore()
+        }
+        return try await restart()
+    }
+
+    // Keep launchd's existing environment/config location and executable path.
+    // Restarting a detached copy lets KeepAlive immediately relaunch the old core.
+    private func restartInstalledCore() async throws -> String {
+        guard let source = engineURL else { throw GatewayClientError.engineNotFound }
+        let plistURL = URL(fileURLWithPath: "/Library/LaunchDaemons/com.lan-proxy-gateway.plist")
+        let data = try Data(contentsOf: plistURL)
+        let plist = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        let args = plist?["ProgramArguments"] as? [String]
+        guard args?.first == "/usr/local/bin/gateway" else {
+            throw GatewayClientError.commandFailed("开机自启使用了自定义核心路径，请先更新该核心，再重新开启接管。")
+        }
+        let installed = "/usr/local/bin/gateway"
+        let staged = "/usr/local/bin/.gateway-update-\(UUID().uuidString)"
+        let command = [
+            "trap \(shellQuote("/bin/rm -f " + shellQuote(staged))) EXIT",
+            "/bin/cp \(shellQuote(source.path)) \(shellQuote(staged))",
+            "/bin/chmod 755 \(shellQuote(staged))",
+            "/bin/mv -f \(shellQuote(staged)) \(shellQuote(installed))",
+            "/bin/launchctl kickstart -k system/com.lan-proxy-gateway"
+        ].joined(separator: " && ")
+        return try await runPrivilegedShell(command).text
+    }
+
     func status() async throws -> GatewayStatus {
         let data = try await run(arguments: ["status", "--json"], privileged: false).data
         let decoder = JSONDecoder()
@@ -79,13 +116,17 @@ struct GatewayClient {
     }
 
     func restart() async throws -> String {
-        try await output(arguments: ["restart"], privileged: true)
+        let service = try await serviceStatus()
+        if service == "运行中" || service == "已加载" {
+            return try await restartInstalledCore()
+        }
+        return try await output(arguments: ["restart"], privileged: true)
     }
 
     func setProxy(type: String, host: String, port: Int) async throws -> String {
         try await output(
-            arguments: ["system-proxy", "on", "--type", type, "--host", host, "--port", String(port)],
-            privileged: true
+            arguments: ["egress", "proxy", "--type", type, "--host", host, "--port", String(port)],
+            privileged: false
         )
     }
 
@@ -97,7 +138,7 @@ struct GatewayClient {
     }
 
     func setDirect() async throws -> String {
-        try await output(arguments: ["system-proxy", "off"], privileged: true)
+        try await output(arguments: ["egress", "direct"], privileged: false)
     }
 
     func learningAction(_ action: String, host: String) async throws -> String {

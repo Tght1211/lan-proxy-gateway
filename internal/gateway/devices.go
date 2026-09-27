@@ -39,31 +39,33 @@ type DeviceOnboarding struct {
 // DeviceOnboardingInfo gathers subnet info, scans for online devices, and
 // recommends available IPs for new device onboarding.
 func (g *Gateway) DeviceOnboardingInfo() (*DeviceOnboarding, error) {
-	if g.info.Interface == "" {
+	info := g.Info()
+	if info.Interface == "" {
 		if err := g.Detect(); err != nil {
 			return nil, err
 		}
 	}
 
-	subnet, err := detectSubnet(g.info.Interface, g.info.IP)
+	info = g.Info()
+	subnet, err := detectSubnet(info.Interface, info.IP)
 	if err != nil {
 		return nil, fmt.Errorf("detect subnet: %w", err)
 	}
-	subnet.GatewayIP = g.info.Gateway
-	subnet.LocalIP = g.info.IP
+	subnet.GatewayIP = info.Gateway
+	subnet.LocalIP = info.IP
 
-	devs := scanARPTable(g.info.Interface)
+	devs := scanARPTable(info.Interface)
 
 	occupied := make(map[string]bool)
 	for _, d := range devs {
 		occupied[d.IP] = true
 	}
-	occupied[g.info.IP] = true
-	if g.info.Gateway != "" {
-		occupied[g.info.Gateway] = true
+	occupied[info.IP] = true
+	if info.Gateway != "" {
+		occupied[info.Gateway] = true
 	}
 
-	recommends := recommendIPs(g.info.IP, occupied, 5)
+	recommends := recommendIPs(info.IP, occupied, 5)
 
 	return &DeviceOnboarding{
 		Subnet:       *subnet,

@@ -74,6 +74,8 @@ struct TopoLinkLayer: View {
     let devicePorts: [String]
     let httpDevicePorts: Set<String>
     let gatewayDevicePorts: Set<String>
+    let hotspotDevicePorts: Set<String>
+    let hotspotActivePorts: Set<String>
     let httpActivePorts: Set<String>
     let gatewayActivePorts: Set<String>
     let active: Bool
@@ -95,6 +97,10 @@ struct TopoLinkLayer: View {
                         link(ctx, from: port, to: "ingress.http.b", color: Theme.cyan, phase: t,
                              offset: Double(index) * 0.37, strong: httpActivePorts.contains(port), flow: httpActivePorts.contains(port))
                     }
+                    if hotspotDevicePorts.contains(port) {
+                        link(ctx, from: port, to: "ingress.hotspot.b", color: Theme.cyan, phase: t,
+                             offset: Double(index) * 0.37, strong: hotspotActivePorts.contains(port), flow: hotspotActivePorts.contains(port))
+                    }
                     if gatewayDevicePorts.contains(port) {
                         link(ctx, from: port, to: "ingress.gateway.b", color: Theme.lime, phase: t,
                              offset: Double(index) * 0.37, strong: gatewayActivePorts.contains(port), flow: gatewayActivePorts.contains(port))
@@ -104,6 +110,8 @@ struct TopoLinkLayer: View {
                      strong: !httpActivePorts.isEmpty, flow: !httpActivePorts.isEmpty)
                 link(ctx, from: "ingress.gateway.t", to: "gw.b", color: Theme.lime, phase: t, offset: 0,
                      strong: !gatewayActivePorts.isEmpty, flow: !gatewayActivePorts.isEmpty)
+                link(ctx, from: "ingress.hotspot.t", to: "gw.b", color: Theme.cyan, phase: t, offset: 0,
+                     strong: !hotspotActivePorts.isEmpty, flow: !hotspotActivePorts.isEmpty)
                 // Gateway → ① Device Policy
                 link(ctx, from: "gw.t", to: "devpolicy.b", color: Theme.cyan, phase: t, offset: 0.10,
                      strong: anyFlow, flow: anyFlow)

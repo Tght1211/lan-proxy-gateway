@@ -1,5 +1,7 @@
 # Nintendo Switch 网络设置指南
 
+> 使用网线上网的 Mac？先看 [代理 Wi-Fi 接入](hotspot-setup.md)：连接新 Wi-Fi，IP 和 DNS 自动获取，不需要手填地址。下文为手动网关方式。
+
 在电脑上启动 LAN Proxy Gateway 后，按以下步骤配置 Switch。
 
 ## 前提条件

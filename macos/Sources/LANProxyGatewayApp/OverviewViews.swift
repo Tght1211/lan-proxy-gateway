@@ -84,6 +84,17 @@ struct TopologyPanel: View {
                     Text("↓ \(shortBytes(history.reduce(0) { $0 + $1.down }))  ↑ \(shortBytes(history.reduce(0) { $0 + $1.up }))")
                         .font(.caption.monospacedDigit()).foregroundStyle(Theme.cyan)
                 }
+                if model.status?.accessMode == "hotspot" {
+                    HStack {
+                        Label("代理 Wi-Fi 使用本 App 共用规则", systemImage: "wifi")
+                        Spacer()
+                        Text("设备策略优先 · 域名规则按顺序匹配 · 未匹配使用默认出口")
+                    }.font(.caption).foregroundStyle(Theme.cyan)
+                    let connections = (model.stats?.relay.active ?? []) + (model.stats?.relay.recent ?? [])
+                    let hotspotConnections = connections.filter { !$0.isHTTPProxy && model.stats?.hotspot?.containsClient($0.srcIP) == true }
+                    Text("热点连接结果（当前及最近记录）：代理 \(hotspotConnections.filter { $0.viaProxy && !$0.rejected }.count) · 直连 \(hotspotConnections.filter { !$0.viaProxy && !$0.rejected }.count) · 拒绝 \(hotspotConnections.filter { $0.rejected }.count)。出口结果不代表请求一定成功。")
+                        .font(.caption2).foregroundStyle(Theme.muted)
+                }
                 if model.stats?.usageHistory == nil {
                     Text("历史统计需要更新并重启核心；从启用后开始记录。").font(.caption).foregroundStyle(Theme.muted)
                 }

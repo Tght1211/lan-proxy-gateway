@@ -26,6 +26,8 @@ struct RouteDiagram: View {
     var onShowDevices: () -> Void = {}
     @State private var devicesExpanded = false
     @State private var showDevicePolicy = false
+    @State private var showHotspotControls = false
+    @State private var showHotspotGuide = false
 
     var body: some View {
         let rules = model.status?.routing ?? []
@@ -39,8 +41,11 @@ struct RouteDiagram: View {
         let observed = activeConns + (model.stats?.relay.recent ?? [])
         let httpIPs = Set(observed.filter { $0.isHTTPProxy }.map(\.srcIP) + historyRows.filter { $0.ingress == "http-proxy" }.map(\.device))
         let gatewayIPs = Set(observed.filter { !$0.isHTTPProxy }.map(\.srcIP) + historyRows.filter { $0.ingress == "gateway" }.map(\.device))
+        let hotspot = model.stats?.hotspot
+        let hotspotIPs = Set(gatewayIPs.filter { hotspot?.containsClient($0) == true })
+        let hotspotActive = Set(activeConns.filter { !$0.isHTTPProxy && hotspotIPs.contains($0.srcIP) }.map { "dev.\($0.srcIP)" })
         let httpActive = Set(activeConns.filter { $0.isHTTPProxy }.map { "dev.\($0.srcIP)" })
-        let gatewayActive = Set(activeConns.filter { !$0.isHTTPProxy }.map { "dev.\($0.srcIP)" })
+        let gatewayActive = Set(activeConns.filter { !$0.isHTTPProxy && !hotspotIPs.contains($0.srcIP) }.map { "dev.\($0.srcIP)" })
         let activeIPs = Set(activeConns.map(\.srcIP))
         let flowProxy = activeConns.contains { $0.viaProxy }
         let flowDirect = activeConns.contains { !$0.viaProxy }
@@ -86,7 +91,7 @@ struct RouteDiagram: View {
             Button(action: onEditRules) {
                 TopoStage(
                     portID: "rules", icon: "arrow.triangle.branch", tint: Theme.yellow,
-                    title: "② 域名规则",
+                    title: "② 共用分流规则",
                     detail: domainRules.isEmpty ? "点击配置分流规则" : "\(domainRules.count) 条 · 首条命中",
                     clickable: true
                 )
@@ -110,11 +115,26 @@ struct RouteDiagram: View {
             }
             Spacer(minLength: 18)
             TopoStage(portID: "gw", icon: "server.rack", tint: Theme.cyan,
-                      title: "旁路由", detail: model.status?.gateway.localIP.nonEmpty ?? "--")
+                      title: "旁路由", detail: hotspot?.ip.nonEmpty ?? model.status?.gateway.localIP.nonEmpty ?? "--")
             Spacer(minLength: 18)
-            HStack(spacing: 24) {
+            HStack(spacing: 16) {
+                if model.status?.accessMode == "hotspot" {
+                    Button { showHotspotControls = true } label: {
+                        TopoStage(portID: "ingress.hotspot", icon: "wifi", tint: Theme.cyan,
+                                  title: "代理 Wi-Fi", detail: "\(hotspot?.applied == true ? "接管已开启" : "等待接管") · \(hotspotActive.count) 台活跃",
+                                  clickable: true)
+                    }
+                    .buttonStyle(.plain)
+                    .help("点击管理 Wi-Fi：名称与密码、接管开关、分流规则")
+                    .popover(isPresented: $showHotspotControls, arrowEdge: .bottom) {
+                        HotspotQuickControls(
+                            onRules: { showHotspotControls = false; onEditRules() },
+                            onGuide: { showHotspotControls = false; showHotspotGuide = true }
+                        ).environmentObject(model)
+                    }
+                }
                 TopoStage(portID: "ingress.gateway", icon: "network", tint: Theme.lime,
-                          title: "网关接入", detail: ingressSummary("gateway", active: gatewayActive.count))
+                          title: "手动网关", detail: "\(gatewayActive.count) 台活跃")
                 TopoStage(portID: "ingress.http", icon: "globe", tint: Theme.cyan,
                           title: "HTTP 代理", detail: ingressSummary("http-proxy", active: httpActive.count))
                     .help("显示手动与 PAC HTTP 代理的连接及流量；服务端无法区分客户端的配置方式。穿透连接显示隧道客户端的来源 IP。")
@@ -122,7 +142,7 @@ struct RouteDiagram: View {
             Spacer(minLength: 18)
             HStack(spacing: 12) {
                 if devices.isEmpty {
-                    TopoDeviceChip(icon: "desktopcomputer", title: "等待设备接入", subtitle: "选择网关 / HTTP 代理接入", active: false)
+                    TopoDeviceChip(icon: "desktopcomputer", title: "等待设备接入", subtitle: "连接代理 Wi-Fi 或选择其他接入方式", active: false)
                         .topoPort("dev.empty", .top)
                 } else {
                     ForEach(devices) { device in
@@ -156,6 +176,7 @@ struct RouteDiagram: View {
                 }
             }
         }
+        .sheet(isPresented: $showHotspotGuide) { DeviceOnboardingSheet().environmentObject(model) }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .backgroundPreferenceValue(TopoAnchors.self) { anchors in
             GeometryReader { geo in
@@ -163,7 +184,9 @@ struct RouteDiagram: View {
                     points: anchors.mapValues { geo[$0] },
                     devicePorts: devices.isEmpty ? ["dev.empty"] : devices.map { "dev.\($0.name)" },
                     httpDevicePorts: Set(devices.filter { httpIPs.contains($0.name) }.map { "dev.\($0.name)" }),
-                    gatewayDevicePorts: Set(devices.filter { gatewayIPs.contains($0.name) || !httpIPs.contains($0.name) }.map { "dev.\($0.name)" }),
+                    gatewayDevicePorts: Set(devices.filter { (gatewayIPs.contains($0.name) || !httpIPs.contains($0.name)) && !hotspotIPs.contains($0.name) }.map { "dev.\($0.name)" }),
+                    hotspotDevicePorts: Set(devices.filter { hotspotIPs.contains($0.name) }.map { "dev.\($0.name)" }),
+                    hotspotActivePorts: hotspotActive,
                     httpActivePorts: httpActive,
                     gatewayActivePorts: gatewayActive,
                     active: model.isRunning,

@@ -245,6 +245,13 @@ func Normalize(cfg *Config) {
 
 // Validate checks the config is internally consistent.
 func Validate(cfg *Config) error {
+	if cfg.Gateway.AccessMode != "" && cfg.Gateway.AccessMode != "hotspot" {
+		return errors.New("gateway.access_mode 必须为空或 hotspot")
+	}
+	if cfg.Gateway.AccessMode == "hotspot" && (!cfg.DNS.Enabled || cfg.DNS.Port == 53) {
+		return errors.New("热点接入需要开启内置 DNS，且使用非 53 端口以兼容系统互联网共享")
+	}
+
 	p := cfg.HTTPProxy
 	if p.Port < 1 || p.Port > 65535 {
 		return errors.New("http_proxy.port 必须在 1–65535 之间")

@@ -27,17 +27,21 @@ GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w -X github.com/tght/lan-proxy-g
 GOOS=darwin GOARCH=amd64 go build -ldflags "-s -w -X github.com/tght/lan-proxy-gateway/cmd.Version=$VERSION" -o "$TEMP_DIR/gateway-amd64" "$ROOT_DIR"
 lipo -create "$TEMP_DIR/gateway-arm64" "$TEMP_DIR/gateway-amd64" -output "$TEMP_DIR/gateway"
 
-echo "Building universal SwiftUI app..."
+echo "Building SwiftUI app..."
+SWIFT_ARGS=(--package-path "$MACOS_DIR" --configuration release)
+if [[ -n "${SDKROOT:-}" ]]; then
+    SWIFT_ARGS+=(--sdk "$SDKROOT")
+fi
 if xcodebuild -version >/dev/null 2>&1; then
     APP_ARCH="universal"
-    swift build --package-path "$MACOS_DIR" --configuration release --arch arm64 --arch x86_64
-    SWIFT_BINARY="$MACOS_DIR/.build/apple/Products/Release/LANProxyGatewayApp"
+    SWIFT_ARGS+=(--arch arm64 --arch x86_64)
 else
     APP_ARCH="$(uname -m)"
     echo "Full Xcode not found; building the SwiftUI shell for $APP_ARCH."
-    swift build --package-path "$MACOS_DIR" --configuration release
-    SWIFT_BINARY="$MACOS_DIR/.build/release/LANProxyGatewayApp"
+
 fi
+swift build "${SWIFT_ARGS[@]}"
+SWIFT_BINARY="$(swift build "${SWIFT_ARGS[@]}" --show-bin-path)/LANProxyGatewayApp"
 DMG_PATH="$DIST_DIR/LANProxyGateway-$VERSION-macos-$APP_ARCH.dmg"
 rm -f "$DMG_PATH"
 if [[ ! -x "$SWIFT_BINARY" ]]; then

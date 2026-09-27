@@ -39,3 +39,5 @@
 - 不支持：Windows、Docker、普通路由器/OpenWrt、IPv6 透明代理、通用 UDP 代理和 TUN 模式。
 
 项目不提供代理节点、订阅或流媒体解锁。复杂节点选择与规则集应继续交给 Clash、Mihomo 或 sing-box。
+
+- [Switch / PS5 代理 Wi-Fi 接入（有线 Mac）](hotspot-setup.md)：自动分配地址、首次系统共享设置、停止与排错。

@@ -9,6 +9,9 @@ package gateway
 
 import (
 	"fmt"
+	"sync"
+
+	"github.com/tght/lan-proxy-gateway/internal/hotspot"
 
 	"github.com/tght/lan-proxy-gateway/internal/firewall"
 	"github.com/tght/lan-proxy-gateway/internal/platform"
@@ -16,6 +19,11 @@ import (
 
 // Gateway represents the LAN-gateway subsystem.
 type Gateway struct {
+	mu            sync.Mutex
+	hotspotStatus hotspot.Status
+	detectHotspot func() hotspot.Status
+	stopped       bool
+
 	plat      platform.Platform
 	fw        firewall.Manager
 	info      platform.NetworkInfo
@@ -29,7 +37,7 @@ func New() *Gateway {
 
 // newForTest injects fakes.
 func newForTest(plat platform.Platform, fw firewall.Manager) *Gateway {
-	return &Gateway{plat: plat, fw: fw}
+	return &Gateway{plat: plat, fw: fw, detectHotspot: func() hotspot.Status { return hotspot.Status{} }}
 }
 
 // SetStatePath 让 app 层把 runtime.state 的位置交给 gateway。
@@ -39,10 +47,18 @@ func (g *Gateway) SetStatePath(path string) {
 }
 
 // Info returns cached network info; populated by Detect().
-func (g *Gateway) Info() platform.NetworkInfo { return g.info }
+func (g *Gateway) Info() platform.NetworkInfo { g.mu.Lock(); defer g.mu.Unlock(); return g.info }
+
+func (g *Gateway) HotspotStatus() hotspot.Status {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.hotspotStatus
+}
 
 // Detect populates the network info (default interface, IP, router gateway).
-func (g *Gateway) Detect() error {
+func (g *Gateway) Detect() error { g.mu.Lock(); defer g.mu.Unlock(); return g.detect() }
+
+func (g *Gateway) detect() error {
 	info, err := g.plat.DetectNetwork()
 	if err != nil {
 		return err
@@ -54,8 +70,17 @@ func (g *Gateway) Detect() error {
 // Enable turns on IP forwarding and applies the firewall rule set
 // (idempotent full-sync; safe to re-run for live reconfiguration).
 func (g *Gateway) Enable(fwCfg firewall.Config) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.stopped {
+		return fmt.Errorf("网关已停止，请重新启动核心")
+	}
+	if fwCfg.Hotspot {
+		return g.enableHotspot(fwCfg)
+	}
+
 	if g.info.Interface == "" {
-		if err := g.Detect(); err != nil {
+		if err := g.detect(); err != nil {
 			return fmt.Errorf("detect network: %w", err)
 		}
 	}
@@ -90,6 +115,11 @@ func (g *Gateway) Enable(fwCfg firewall.Config) error {
 // Disable is the inverse of Enable, best-effort: remove our firewall rules,
 // restore ip_forward only if we flipped it, disable pf only if we enabled it.
 func (g *Gateway) Disable() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.stopped = true
+	g.hotspotStatus.Applied = false
+
 	state, _ := readRuntimeState(g.statePath)
 
 	var fwErr error
@@ -98,10 +128,13 @@ func (g *Gateway) Disable() error {
 	}
 
 	var disableErr error
-	if state.WeEnabledIPForward {
+	// Internet Sharing may have started since our legacy LAN mode. Its globals
+	// must remain enabled even if this process originally enabled them.
+	preserve := state.PreserveGlobals || ((state.WeEnabledIPForward || state.WeEnabledPF) && g.discoverHotspot().Available)
+	if state.WeEnabledIPForward && !preserve {
 		disableErr = g.plat.DisableIPForward()
 	}
-	if state.WeEnabledPF {
+	if state.WeEnabledPF && !preserve {
 		_ = firewall.DisablePF()
 	}
 	_ = removeRuntimeState(g.statePath)
@@ -121,8 +154,10 @@ type Status struct {
 
 // Status returns the live status.
 func (g *Gateway) Status() (Status, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	if g.info.Interface == "" {
-		_ = g.Detect()
+		_ = g.detect()
 	}
 	on, err := g.plat.IPForwardEnabled()
 	if err != nil {

@@ -79,6 +79,7 @@ type ProxyFailureConfig struct {
 
 // GatewayConfig controls LAN device onboarding.
 type GatewayConfig struct {
+	AccessMode   string   `yaml:"access_mode,omitempty"` // "" (existing LAN) | hotspot (macOS Internet Sharing)
 	Enabled      bool     `yaml:"enabled"`
 	LANInterface string   `yaml:"lan_interface,omitempty"` // override auto-detected interface
 	LANCIDRs     []string `yaml:"lan_cidrs,omitempty"`     // only handle these source CIDRs

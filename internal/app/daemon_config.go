@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -16,6 +17,11 @@ import (
 // Everything is idempotent: relay dialer swap, dns toggles, firewall re-sync.
 // Runs from API/watch goroutines, so service pointers go through services().
 func (rt *daemonRuntime) applyConfig(a *App, cfg *config.Config) error {
+	old := a.getCfg()
+	if old.Gateway.AccessMode != cfg.Gateway.AccessMode || old.Gateway.Enabled != cfg.Gateway.Enabled {
+		return fmt.Errorf("接入模式已保存，请重启核心后生效")
+	}
+
 	if err := rt.syncHTTPProxy(cfg); err != nil {
 		rt.logger.Error("HTTP 代理配置应用失败，保留原配置", "err", err)
 		return err
@@ -118,6 +124,7 @@ func (rt *daemonRuntime) bindUDPRelayFakeIP() {
 // /api/reload poke is the suspenders).
 func (rt *daemonRuntime) watchConfig(ctx context.Context, a *App) {
 	var lastMod time.Time
+	var lastHotspotSync time.Time
 	if fi, err := os.Stat(a.Paths.ConfigFile); err == nil {
 		lastMod = fi.ModTime()
 	}
@@ -128,6 +135,15 @@ func (rt *daemonRuntime) watchConfig(ctx context.Context, a *App) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			// Reconcile only hotspot ingress after Sharing restarts, including
+			// a changed bridge address. Never fall back to the default LAN.
+			live := a.getCfg()
+			if live.Gateway.Enabled && live.Gateway.AccessMode == "hotspot" && time.Since(lastHotspotSync) >= 10*time.Second {
+				lastHotspotSync = time.Now()
+				if err := a.Gateway.Enable(firewallConfig(live)); err != nil {
+					rt.logger.Warn("热点接管等待恢复", "err", err)
+				}
+			}
 			fi, err := os.Stat(a.Paths.ConfigFile)
 			if err != nil || !fi.ModTime().After(lastMod) {
 				continue

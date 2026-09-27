@@ -14,6 +14,7 @@ import (
 // 看到已经是 1 就不应该把它当成"我们打开的"；gateway stop 也就不应该把它打回 0，
 // 不然 docker 暴露给局域网的端口立刻就不通了。
 type runtimeState struct {
+	PreserveGlobals    bool   `json:"preserve_globals,omitempty"`
 	Iface              string `json:"iface,omitempty"`                 // 防火墙规则作用的 LAN 网卡
 	WeEnabledIPForward bool   `json:"we_enabled_ip_forward,omitempty"` // 我们是否真的把 ip_forward 从 0 改成 1
 	WeEnabledPF        bool   `json:"we_enabled_pf,omitempty"`         // macOS: pf 原本关着，是我们打开的

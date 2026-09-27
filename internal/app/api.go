@@ -13,6 +13,7 @@ import (
 
 	"github.com/tght/lan-proxy-gateway/internal/config"
 	"github.com/tght/lan-proxy-gateway/internal/dns"
+	"github.com/tght/lan-proxy-gateway/internal/hotspot"
 	"github.com/tght/lan-proxy-gateway/internal/relay"
 )
 
@@ -26,6 +27,7 @@ type ComponentHealth struct {
 }
 
 type StatsResponse struct {
+	Hotspot        *hotspot.Status              `json:"hotspot,omitempty"`
 	UsageHistory   []relay.DailyUsage           `json:"usage_history"`
 	HTTPProxy      HTTPProxyStatus              `json:"http_proxy"`
 	SchemaVersion  int                          `json:"schema_version"`
@@ -147,6 +149,11 @@ func (s *apiServer) handleStats(w http.ResponseWriter, r *http.Request) {
 		Relay:          s.rt.tracker.Snapshot(),
 		Health:         s.app.Health(),
 		DeviceAdaptive: relaySrv.DeviceAdaptiveHealth(),
+	}
+	if cfg.Gateway.AccessMode == "hotspot" {
+		st := s.app.Gateway.HotspotStatus()
+		st.Enabled = cfg.Gateway.Enabled
+		resp.Hotspot = &st
 	}
 	if udpRelay != nil {
 		st := udpRelay.Stats()

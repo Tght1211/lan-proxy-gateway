@@ -16,6 +16,15 @@ import (
 func renderPFAnchor(c Config) string {
 	var b strings.Builder
 	b.WriteString("# lan-proxy-gateway — managed file, do not edit\n")
+	if c.Hotspot && len(c.CaptureInterfaces) > 0 {
+		c.Iface = "{ " + strings.Join(c.CaptureInterfaces, " ") + " }"
+	}
+	if c.Hotspot {
+		fmt.Fprintf(&b, "no rdr on %s from %s to any\n", c.Iface, c.GatewayIP)
+		for _, source := range c.BlockedSources {
+			fmt.Fprintf(&b, "no rdr on %s from %s to any\n", c.Iface, source)
+		}
+	}
 
 	// Exclude CIDRs: `no rdr` opts flows out of translation. Must stay in the
 	// translation section (macOS pf rejects filter rules before rdr), and must
@@ -43,12 +52,19 @@ func renderPFAnchor(c Config) string {
 		fmt.Fprintf(&b, "rdr pass on %s proto tcp from %s to ! %s port 53 -> 127.0.0.1 port %d\n", c.Iface, src, c.GatewayIP, c.DNSPort)
 	}
 	if c.UDPFakeIPRedir && c.FakeIPRange != "" && c.UDPRedirPort > 0 {
+		// rdr pass bypasses filters. Keep QUIC untranslated so the reject
+		// rule below can make clients fall back to proxied TCP.
+		if c.QUICBlock {
+			fmt.Fprintf(&b, "no rdr on %s proto udp from %s to %s port 443\n", c.Iface, src, c.FakeIPRange)
+		}
 		fmt.Fprintf(&b, "rdr pass on %s proto udp from %s to %s -> 127.0.0.1 port %d\n", c.Iface, src, c.FakeIPRange, c.UDPRedirPort)
 	}
 	if c.TCPRedirect {
 		fmt.Fprintf(&b, "rdr pass on %s proto tcp from %s to ! %s -> 127.0.0.1 port %d\n", c.Iface, src, c.GatewayIP, c.RedirPort)
 	}
-	fmt.Fprintf(&b, "nat on %s from %s to any -> (%s)\n", c.Iface, src, c.Iface)
+	if !c.Hotspot {
+		fmt.Fprintf(&b, "nat on %s from %s to any -> (%s)\n", c.Iface, src, c.Iface)
+	}
 	for _, source := range c.BlockedSources {
 		fmt.Fprintf(&b, "block return quick on %s from %s to any\n", c.Iface, source)
 	}
@@ -60,7 +76,11 @@ func renderPFAnchor(c Config) string {
 		// NDP/RA alive and let the gateway host itself stay reachable over
 		// IPv6; only inbound LAN traffic destined elsewhere is refused.
 		fmt.Fprintf(&b, "pass quick on %s inet6 proto ipv6-icmp\n", c.Iface)
-		fmt.Fprintf(&b, "pass in quick on %s inet6 from any to (%s)\n", c.Iface, c.Iface)
+		if c.Hotspot {
+			fmt.Fprintf(&b, "pass in quick on %s inet6 from any to self\n", c.Iface)
+		} else {
+			fmt.Fprintf(&b, "pass in quick on %s inet6 from any to (%s)\n", c.Iface, c.Iface)
+		}
 		fmt.Fprintf(&b, "block return in quick on %s inet6 from any to any\n", c.Iface)
 	}
 	return b.String()

@@ -78,6 +78,12 @@ func init() {
 
 // printDeviceGuide prints the "point your devices at me" instructions.
 func printDeviceGuide(a *app.App) {
+	if a.Cfg.Gateway.AccessMode == "hotspot" {
+		fmt.Println("游戏机连接系统共享的 Wi-Fi；IP 和 DNS 选自动，代理选不使用。请在游戏机上测试连接。")
+		fmt.Println("Mac 的系统代理与 DNS 保持原样。停止核心不会关闭系统互联网共享。")
+		return
+	}
+
 	gs, _ := a.Gateway.Status()
 	fmt.Println()
 	fmt.Println(gateway.DeviceGuide(gs))

@@ -63,7 +63,7 @@ func (s *Server) dialExplicit(ctx context.Context, srcIP, target string, timeout
 		s.tracker.RecordDialFailure(srcIP, host, n, via, classifyDialError(err, via), "http-proxy")
 		return nil, err
 	}
-	tracked := s.tracker.Open(srcIP, host, n, via, "tcp", "http-proxy")
+	tracked := s.tracker.OpenWithEgress(srcIP, host, n, via, "tcp", conn.RemoteAddr().String(), "http-proxy")
 	if fellBack {
 		tracked.MarkFallback()
 	}

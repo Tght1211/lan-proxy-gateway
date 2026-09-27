@@ -4,7 +4,8 @@ import SwiftUI
 struct DeviceOnboardingSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    @State private var method = "gateway"
+    @State private var method = "hotspot"
+    @State private var advanced = false
     @State private var batch = 0
     @State private var candidates: [String] = []
     @State private var probing = false
@@ -23,7 +24,7 @@ struct DeviceOnboardingSheet: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("接入新设备").font(.title3.weight(.semibold))
-                    Text("选择设备支持的接入方式，使用当前出口与分流规则。")
+                    Text("Switch / PS5 推荐连接代理 Wi-Fi，地址由系统自动分配。")
                         .font(.caption).foregroundStyle(Theme.muted)
                 }
                 Spacer()
@@ -34,18 +35,39 @@ struct DeviceOnboardingSheet: View {
             .background(Theme.panel)
             Divider().overlay(Theme.border)
 
-            Picker("接入方式", selection: $method) {
-                Text("网关接入").tag("gateway")
-                Text("手动 HTTP 代理").tag("http")
-                Text("自动代理 PAC").tag("pac")
-            }.pickerStyle(.segmented).padding(20)
+            HStack {
+                Button("代理 Wi-Fi · 推荐") { method = "hotspot"; advanced = false }
+                    .buttonStyle(.borderedProminent)
+                Spacer()
+                Button(advanced ? "收起其他方式" : "其他接入方式…") {
+                    advanced.toggle()
+                    method = advanced ? "gateway" : "hotspot"
+                }.buttonStyle(.bordered)
+            }.padding(.horizontal, 20).padding(.top, 16)
+            if advanced {
+                Picker("其他接入方式", selection: $method) {
+                    Text("手动网关").tag("gateway")
+                    Text("HTTP 代理").tag("http")
+                    Text("自动代理 PAC").tag("pac")
+                }.pickerStyle(.segmented).padding(.horizontal, 20).padding(.top, 8)
+            }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    if method == "gateway" {
+                    if method == "hotspot" {
+                        HotspotOnboardingPanel()
+                    } else if method == "gateway" {
+                        if model.status?.accessMode == "hotspot" {
+                            Text("当前只接管代理 Wi-Fi。使用下面的手动方式前，请先切换接入模式。")
+                                .font(.caption).foregroundStyle(Theme.yellow)
+                            Button("切换为手动网关接入") {
+                                Task { await model.configureHotspot("use-lan") }
+                            }.disabled(model.isBusy)
+                        }
+
                         VStack(alignment: .leading, spacing: 0) {
                             OnboardingStep(number: "1", title: "打开设备的网络设置", detail: "Switch / PS5 / Apple TV / 手机的 Wi-Fi 或有线网络里，选择「手动 / 静态 IP」")
-                            OnboardingStep(number: "2", title: "填写一个候选 IP", detail: probed ? "以下地址已 ping 探测未被占用，点击即可复制" : "以下地址未在设备列表中出现，点击即可复制")
+                            OnboardingStep(number: "2", title: "填写一个候选 IP", detail: probed ? "以下地址暂未响应探测，不代表未被占用；请先在路由器中预留" : "高级设置：请在路由器中预留设备地址，避免与自动分配冲突")
                             HStack(spacing: 6) {
                                 Text(suggestionPrefix(candidates.isEmpty ? pool : candidates))
                                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
@@ -108,9 +130,11 @@ struct DeviceOnboardingSheet: View {
             .padding(.horizontal, 20).padding(.vertical, 14)
             .background(Theme.panel)
         }
-        .frame(width: 640, height: 600)
+        .frame(width: 700, height: 720)
         .background(Theme.canvasBackground)
-        .onAppear { refreshCandidates() }
+        .onChange(of: method) { value in
+            if value == "gateway" { refreshCandidates() }
+        }
     }
 
     @ViewBuilder

@@ -1,6 +1,7 @@
 import Foundation
 
 struct GatewayStatus: Decodable {
+    let accessMode: String?
     let httpProxy: LANHTTPProxyStatus?
     let configured: Bool
     let running: Bool
@@ -15,6 +16,7 @@ struct GatewayStatus: Decodable {
     let logFile: String
 
     enum CodingKeys: String, CodingKey {
+        case accessMode = "access_mode"
         case httpProxy = "http_proxy"
         case configured, running, egress, proxy, routing, dns, gateway, ports
         case quicBlock = "quic_block"
@@ -105,6 +107,7 @@ struct ComponentHealth: Decodable, Identifiable {
 }
 
 struct RuntimeStats: Decodable {
+    let hotspot: HotspotStatus?
     let usageHistory: [DailyUsage]?
     let httpProxy: LANHTTPProxyStatus?
     let schemaVersion: Int?
@@ -121,6 +124,7 @@ struct RuntimeStats: Decodable {
     let components: [ComponentHealth]?
 
     enum CodingKeys: String, CodingKey {
+        case hotspot
         case usageHistory = "usage_history"
         case httpProxy = "http_proxy"
         case egress, proxy, relay, dns, health, fallback, components
@@ -317,6 +321,11 @@ struct LANHTTPProxyStatus: Decodable, Equatable {
 }
 
 struct DailyUsage: Decodable {
+    let egress: String?
+    let proxyEndpoint: String?
+    let destination: String?
+    let service: String?
+    var total: Int64 { up + down }
     let date: String
     let device: String
     let ingress: String
@@ -325,7 +334,79 @@ struct DailyUsage: Decodable {
     let connections: Int64
     let lastSeen: Date
     enum CodingKeys: String, CodingKey {
-        case date, device, ingress, up, down, connections
+        case date, device, ingress, up, down, connections, egress, destination, service
+        case proxyEndpoint = "proxy_endpoint"
         case lastSeen = "last_seen"
     }
+}
+
+struct HotspotStatus: Decodable {
+    let stage: String?
+
+    let supported: Bool
+    let available: Bool
+    let enabled: Bool
+    let applied: Bool
+    let message: String
+    let interface: String
+    let ip: String
+    let cidr: String
+    let uplink: String
+
+    func containsClient(_ address: String) -> Bool {
+        func ipv4(_ value: String) -> UInt32? {
+            let parts = value.split(separator: ".", omittingEmptySubsequences: false)
+            guard parts.count == 4 else { return nil }
+            var result: UInt32 = 0
+            for part in parts {
+                guard let byte = UInt8(part) else { return nil }
+                result = (result << 8) | UInt32(byte)
+            }
+            return result
+        }
+        let parts = cidr.split(separator: "/", omittingEmptySubsequences: false)
+        guard address != ip, parts.count == 2, let bits = Int(parts[1]), (0...32).contains(bits),
+              let network = ipv4(String(parts[0])), let client = ipv4(address) else { return false }
+        let mask: UInt32 = bits == 0 ? 0 : UInt32.max << (32 - bits)
+        return client & mask == network & mask
+    }
+}
+
+// Runtime confirmation is distinct from saved settings and Wi-Fi availability.
+enum HotspotControlState: Equatable {
+    case off, enabling, stopping, verifying, enabled, waiting, needsCoreUpdate, unavailable, failed
+
+    static func resolve(operation: String?, error: String?, desired: Bool,
+                        running: Bool, hasStats: Bool, runtime: HotspotStatus?) -> Self {
+        if operation == "enable" || operation == "use-lan" { return .enabling }
+        if operation == "disable" { return .stopping }
+        if operation == "verify" { return .verifying }
+        if error != nil { return .failed }
+        if running, let runtime, runtime.enabled {
+            if runtime.applied { return .enabled }
+            return runtime.stage == "apply_failed" ? .failed : .waiting
+        }
+        if desired {
+            if !running || !hasStats { return .unavailable }
+            if runtime == nil { return .needsCoreUpdate }
+            return .waiting
+        }
+        return .off
+    }
+
+    var title: String {
+        switch self {
+        case .off: return "热点接管未开启"
+        case .enabling: return "正在开启热点接管…"
+        case .stopping: return "正在停止热点接管…"
+        case .verifying: return "正在确认接管结果…"
+        case .enabled: return "热点接管已开启"
+        case .waiting: return "接管尚未生效 · 等待热点就绪"
+        case .needsCoreUpdate: return "接管尚未生效 · 需要更新后台核心"
+        case .unavailable: return "暂时无法确认接管状态"
+        case .failed: return "热点接管操作失败"
+        }
+    }
+
+    var isWorking: Bool { self == .enabling || self == .stopping || self == .verifying }
 }

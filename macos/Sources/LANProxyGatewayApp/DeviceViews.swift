@@ -10,6 +10,7 @@ struct DevicesView: View {
     var body: some View {
         ScrollPage {
             DeviceAccessSummary { showOnboarding = true }
+            ProxyUsageOverview()
             LabeledDevicesStrip()
             NATDiagPanel()
             HStack(alignment: .top, spacing: 16) {
@@ -181,13 +182,18 @@ struct DeviceAccessSummary: View {
                 Spacer()
                 CompactSetupValue(label: "活动连接", value: "\(model.stats?.relay.active.count ?? 0)")
                 CompactSetupValue(label: "已识别服务", value: "\(model.stats?.relay.services.count ?? 0)")
-                CompactSetupValue(label: "网关与 DNS", value: model.status?.gateway.localIP.nonEmpty ?? "--", copyable: true)
-                CompactSetupValue(label: "子网掩码", value: "255.255.255.0", copyable: true)
+                if model.status?.accessMode == "hotspot" {
+                    CompactSetupValue(label: "设备地址", value: "自动分配")
+                    CompactSetupValue(label: "代理 Wi-Fi", value: model.stats?.hotspot?.applied == true ? "接管已开启" : "等待接管")
+                } else {
+                    CompactSetupValue(label: "网关与 DNS", value: model.status?.gateway.localIP.nonEmpty ?? "--", copyable: true)
+                    CompactSetupValue(label: "子网掩码", value: "255.255.255.0", copyable: true)
+                }
                 Button(action: onOnboard) {
                     Label("接入设备", systemImage: "plus.circle.fill")
                 }
                 .buttonStyle(ActionButtonStyle(tint: Theme.cyan))
-                .help("查看网关与手动 HTTP 代理接入教程")
+                .help("让 Switch / PS5 连接代理 Wi-Fi")
             }
         }
     }

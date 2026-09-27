@@ -197,7 +197,7 @@ func installUpdateBinary(ctx context.Context, target, tmpPath string) error {
 func stopGatewayBeforeUpdate(a *app.App) (bool, bool, error) {
 	wasRunning := a.Status().Running
 	localDNSWasLoopback := false
-	if wasRunning && a.Plat != nil {
+	if wasRunning && a.Plat != nil && a.Cfg.Gateway.AccessMode != "hotspot" {
 		localDNSWasLoopback, _ = a.Plat.LocalDNSIsLoopback()
 	}
 	if wasRunning {
@@ -218,7 +218,7 @@ func restartGatewayAfterUpdate(ctx context.Context, a *app.App, localDNSWasLoopb
 	if err := a.Start(ctx); err != nil {
 		return err
 	}
-	if localDNSWasLoopback && a.Plat != nil {
+	if localDNSWasLoopback && a.Plat != nil && a.Cfg.Gateway.AccessMode != "hotspot" {
 		if err := a.Plat.SetLocalDNSToLoopback(); err != nil {
 			color.Yellow("gateway 已启动，但恢复本机 DNS 到 127.0.0.1 失败: %v", err)
 		}

@@ -310,6 +310,7 @@ func firewallConfig(cfg *config.Config) firewall.Config {
 		}
 	}
 	fwCfg := firewall.Config{
+		Hotspot:          cfg.Gateway.AccessMode == "hotspot",
 		RedirPort:        cfg.Runtime.RedirPort,
 		DNSPort:          cfg.DNS.Port,
 		DNSLocalRedirect: cfg.DNS.Enabled && cfg.DNS.Port != 53,
@@ -354,6 +355,7 @@ func dnsOptions(cfg *config.Config, cachePath string, logger *slog.Logger) dns.O
 
 // Status is a read-only snapshot for UI rendering and `gateway status --json`.
 type Status struct {
+	AccessMode      string               `json:"access_mode"`
 	HTTPProxy       HTTPProxyStatus      `json:"http_proxy"`
 	Configured      bool                 `json:"configured"`
 	Running         bool                 `json:"running"`
@@ -401,6 +403,7 @@ type PortsStatus struct {
 func (a *App) Status() Status {
 	gs, _ := a.Gateway.Status()
 	st := Status{
+		AccessMode: a.Cfg.Gateway.AccessMode,
 		HTTPProxy:  a.HTTPProxyStatus(),
 		Configured: a.Configured(),
 		Running:    a.Running(),

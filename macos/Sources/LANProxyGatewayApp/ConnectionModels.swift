@@ -39,6 +39,7 @@ struct DeviceServiceAggregate: Decodable, Identifiable {
 }
 
 struct ConnectionInfo: Decodable, Identifiable {
+    let proxyEndpoint: String?
     let ingress: String
     var isHTTPProxy: Bool { ingress == "http-proxy" }
     var ingressTitle: String { isHTTPProxy ? "HTTP 代理" : "网关接入" }
@@ -61,6 +62,7 @@ struct ConnectionInfo: Decodable, Identifiable {
     var isUDP: Bool { proto == "udp" }
 
     enum CodingKeys: String, CodingKey {
+        case proxyEndpoint = "proxy_endpoint"
         case ingress, id, up, down, proto
         case service
         case rejected
@@ -77,6 +79,7 @@ struct ConnectionInfo: Decodable, Identifiable {
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        proxyEndpoint = try values.decodeIfPresent(String.self, forKey: .proxyEndpoint)
         ingress = try values.decodeIfPresent(String.self, forKey: .ingress) ?? "gateway"
         id = try values.decode(UInt64.self, forKey: .id)
         srcIP = try values.decodeIfPresent(String.self, forKey: .srcIP) ?? "--"

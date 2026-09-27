@@ -75,6 +75,8 @@ struct RoutingRulesEditor: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("分流规则").font(.title3.weight(.semibold))
+                    Text("代理 Wi-Fi、手动网关和 HTTP 代理共用此规则；保存后即时应用。")
+                        .font(.caption).foregroundStyle(Theme.cyan)
                     Text("自上而下匹配，命中第一条即生效；分组仅用于整理，组顺序即优先级块。")
                         .font(.caption).foregroundStyle(Theme.muted)
                 }

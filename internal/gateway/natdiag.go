@@ -31,12 +31,14 @@ type UPnPStatus struct {
 
 // DiagnoseNAT performs NAT type detection, double-NAT check, and UPnP discovery.
 func (g *Gateway) DiagnoseNAT(ctx context.Context) (*NATDiag, error) {
-	if g.info.Interface == "" {
+	info := g.Info()
+	if info.Interface == "" {
 		if err := g.Detect(); err != nil {
 			return nil, err
 		}
 	}
 
+	info = g.Info()
 	diag := &NATDiag{NATType: "unknown"}
 
 	// 1. STUN NAT type detection
@@ -48,8 +50,8 @@ func (g *Gateway) DiagnoseNAT(ctx context.Context) (*NATDiag, error) {
 	diag.ExternalPort = stunResult.externalPort
 
 	// 2. Double NAT detection
-	if g.info.Gateway != "" && diag.ExternalIP != "" {
-		routerIP, err := netip.ParseAddr(g.info.Gateway)
+	if info.Gateway != "" && diag.ExternalIP != "" {
+		routerIP, err := netip.ParseAddr(info.Gateway)
 		if err == nil && isPrivate(routerIP) {
 			externalIP, err := netip.ParseAddr(diag.ExternalIP)
 			if err == nil && !isPrivate(externalIP) {
@@ -58,7 +60,7 @@ func (g *Gateway) DiagnoseNAT(ctx context.Context) (*NATDiag, error) {
 				diag.DoubleNAT = true
 				diag.DoubleNATDetail = fmt.Sprintf(
 					"本机网关 %s 是内网地址，STUN 检测到的外部 IP %s 也是内网地址，存在双重 NAT",
-					g.info.Gateway, diag.ExternalIP)
+					info.Gateway, diag.ExternalIP)
 				diag.Warnings = append(diag.Warnings,
 					"检测到双重 NAT，可能导致游戏联机受限 (NAT Type 3/Strict)")
 			}

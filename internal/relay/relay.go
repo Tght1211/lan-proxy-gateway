@@ -403,7 +403,7 @@ func (s *Server) handle(client *net.TCPConn) {
 	}
 
 	observedHost := routeHost
-	tc := s.tracker.Open(srcIP, observedHost, int(orig.Port()), viaProxy, "tcp")
+	tc := s.tracker.OpenWithEgress(srcIP, observedHost, int(orig.Port()), viaProxy, "tcp", upstream.RemoteAddr().String())
 	if fellBack || directTest {
 		tc.MarkFallback()
 	}
