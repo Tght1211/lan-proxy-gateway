@@ -32,6 +32,56 @@ Mac and Linux hosts also support LAN gateway mode for devices configured with a 
 
 LAN Proxy Gateway is designed for an always-on computer with an existing proxy application or HTTP/SOCKS5 endpoint. It does not target Windows, consumer routers/OpenWrt, IPv6 transparent proxying, or proxied game/voice UDP. Proxy mode rejects QUIC (UDP/443) so clients fall back to TCP; other UDP remains direct.
 
+## Choose a connection mode
+
+Both modes remain supported. Proxy Wi-Fi simplifies onboarding; manual IP and gateway configuration remains an option for existing LANs.
+
+| Mode | Environment | Client setup |
+|---|---|---|
+| **Proxy Wi-Fi (recommended for Ethernet-connected Macs)** | macOS Internet Sharing with hotspot takeover enabled | Join the new Wi-Fi; obtain IP, gateway, and DNS automatically. No client proxy setting is needed. |
+| **Manual gateway (optional)** | A Mac / Linux gateway on an existing LAN, without creating a hotspot | Stay on the existing Wi-Fi or wired LAN, assign a device IP, and point gateway and DNS settings to the gateway host. |
+
+For manual setup, choose an unused IP in the same subnet that DHCP will not allocate to another device: reserve it on the main router or use an address outside its DHCP pool. See the connection instructions below and the [device guide](docs/device-setup.md). Switching access modes requires a core restart.
+
+## Technical architecture
+
+The system combines **macOS Internet Sharing, a Go gateway core, and an external proxy upstream**. macOS manages Wi-Fi, DHCP, and NAT. The gateway handles transparent forwarding, routing decisions, and traffic accounting. Existing proxy software manages its own nodes and rules; the native SwiftUI app provides configuration and status views.
+
+This diagram shows hotspot mode on an Ethernet-connected Mac. Solid arrows represent the main IPv4 TCP forwarding path; dotted arrows carry domain metadata or traffic statistics.
+
+```mermaid
+flowchart TD
+    Device["PS5 / Switch / Apple TV / phones"] -->|Wi-Fi with automatic addressing| Hotspot
+    subgraph Mac["Mac mini / Mac · Ethernet uplink"]
+        Hotspot["macOS Internet Sharing<br/>Wi-Fi / DHCP / NAT"]
+        Hotspot --> Capture["pf hotspot rules<br/>Capture client TCP and DNS"]
+        Capture --> Relay["Go transparent TCP relay<br/>Recover original destination"]
+        Capture --> DNS["Built-in DNS / fake-IP<br/>Domain mappings"]
+        DNS -.->|Original domain| Relay
+        Relay --> Rules["Routing decisions<br/>Device policy → ordered domain / IP rules → default"]
+        Rules -->|Proxy| Proxy["HTTP CONNECT / SOCKS5 upstream<br/>Example: 127.0.0.1:7897"]
+        Rules -->|Direct| Direct["DIRECT · Host connection"]
+        Rules -->|Reject| Reject["REJECT · Block connection"]
+        Relay -.-> Stats["Device / destination / actual egress accounting<br/>Separate proxy and direct bytes · Daily persistence"]
+        Stats -.-> UI["SwiftUI app<br/>Topology / rules / traffic details"]
+    end
+    Proxy --> Internet["Internet"]
+    Direct --> Internet
+```
+
+| Layer | Implementation |
+|---|---|
+| Hotspot and addressing | Reuses macOS Internet Sharing for DHCP and NAT. Clients receive IP, gateway, and DNS settings automatically; the project does not run a separate DHCP server. |
+| Transparent interception | macOS uses `pf rdr` and `DIOCNATLOOK`; Linux manual gateway mode uses `iptables REDIRECT` and `SO_ORIGINAL_DST`. Clients do not need an HTTP proxy setting. |
+| DNS and domain recovery | In proxy mode, fake-IP mappings preserve original domains for routing and upstream proxy handling, without requiring the proxy application's TUN mode. |
+| Routing and egress | Device policy takes precedence over ordered domain, domain-suffix, and IP-CIDR rules, followed by the default egress. Supports HTTP CONNECT, SOCKS5, direct, and reject; upstream proxy rules still apply. |
+| Isolation | Hotspot takeover is scoped to the sharing interfaces and source subnet, preserving the Mac's default route, system proxy, and DNS settings. Sharing changes trigger reapplication of project rules. |
+| Observability | Upload and download counters are grouped by device IP, date, destination, and actual proxy endpoint. Direct fallback is counted as direct. Daily aggregates persist locally; the app reads runtime data through a local status API. |
+
+**Accounting and protocol boundaries:** bytes attributed to `127.0.0.1:7897` measure traffic this gateway sends to that upstream endpoint. If the upstream chooses direct routing, those bytes still count as proxy-endpoint traffic; this is not remote-node consumption or provider billing. Device identity is IP-based, so reassignment can affect attribution. HTTPS is not decrypted and page contents are not recorded. The diagram does not imply general UDP proxy support: proxy mode blocks QUIC (UDP/443) to encourage TCP fallback; other UDP remains direct. IPv6 transparent proxying is unsupported.
+
+See the [architecture](docs/architecture.md) and [hotspot guide](docs/hotspot-setup.md) for implementation details (Chinese).
+
 ## Quick start
 
 ### 1. Install
@@ -73,7 +123,7 @@ Open the device onboarding guide in the app:
 
 No static IP selection is needed. Initial Internet Sharing setup is manual; test actual game connectivity on your console. See the [hotspot guide and limitations](docs/hotspot-setup.md) (Chinese).
 
-**Other environments: manual gateway setup (advanced)**
+**Optional: manual IP and gateway setup (Mac / Linux)**
 
 Run `gateway status`, then enter the reported values on the phone, TV, or console:
 
