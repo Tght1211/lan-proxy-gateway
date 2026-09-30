@@ -1,7 +1,18 @@
 import Foundation
 
 @main struct ModelDecodingTests {
-    static func main() throws { try ModelDecodingTests().testUsageCompatibility(); try ModelDecodingTests().testIngressCompatibility(); try ModelDecodingTests().testHotspotCompatibility(); try ModelDecodingTests().testHotspotControlStates(); print("Model decoding tests passed") }
+    static func main() throws { try ModelDecodingTests().testUsageCompatibility(); try ModelDecodingTests().testIngressCompatibility(); try ModelDecodingTests().testHotspotCompatibility(); try ModelDecodingTests().testHotspotControlStates(); try ModelDecodingTests().testPlayBridgeMetrics(); ModelDecodingTests().testThroughputWindows(); try ModelDecodingTests().testResponseOutcomes(); print("Model decoding tests passed") }
+    func testResponseOutcomes() throws {
+        func row(_ fields: String) throws -> ConnectionInfo {
+            try JSONDecoder().decode(ConnectionInfo.self, from: Data(("{\"id\":1,\"started_at\":0," + fields + "}").utf8))
+        }
+        let waiting = try row("\"up\":1366,\"down\":0")
+        precondition(waiting.outcome.label == "等待响应")
+        let failed = try row("\"up\":1366,\"down\":0,\"ended_at\":10")
+        precondition(failed.outcome == .failed("未收到响应"))
+        let response = try row("\"up\":1366,\"down\":100,\"ended_at\":10")
+        precondition(response.outcome == .success)
+    }
     func testUsageCompatibility() throws {
         let old = #"{"date":"2026-09-28","device":"device","ingress":"gateway","up":10,"down":20,"connections":1,"last_seen":0}"#
         let row = try JSONDecoder().decode(DailyUsage.self, from: Data(old.utf8))
@@ -46,6 +57,59 @@ import Foundation
         precondition(HotspotControlState.resolve(operation: nil, error: nil, desired: true, running: true, hasStats: true, runtime: pending) == .waiting)
         precondition(HotspotControlState.resolve(operation: nil, error: nil, desired: true, running: true, hasStats: true, runtime: ready) == .enabled)
         precondition(HotspotControlState.resolve(operation: nil, error: nil, desired: false, running: false, hasStats: false, runtime: nil) == .off)
+    }
+
+    func testPlayBridgeMetrics() throws {
+        precondition(InterfaceMode.restored(nil) == .classic)
+        precondition(InterfaceMode.restored("unknown") == .classic)
+        precondition(InterfaceMode.restored("playBridge") == .playBridge)
+        let networkJSON = #"{"supported":true,"available":true,"enabled":true,"applied":true,"message":"ready","interface":"bridge100","ip":"192.168.2.1","cidr":"192.168.2.0/24","uplink":"en0"}"#
+        let network = try JSONDecoder().decode(HotspotStatus.self, from: Data(networkJSON.utf8))
+        func usage(_ device: String, _ ingress: String, _ date: String) throws -> DailyUsage {
+            let json = "{\"date\":\"\(date)\",\"device\":\"\(device)\",\"ingress\":\"\(ingress)\",\"up\":10,\"down\":20,\"connections\":1,\"last_seen\":0}"
+            return try JSONDecoder().decode(DailyUsage.self, from: Data(json.utf8))
+        }
+        let rows = try [usage("192.168.2.4", "gateway", "2026-09-28"),
+                        usage("192.168.2.4", "http-proxy", "2026-09-28"),
+                        usage("192.168.1.4", "gateway", "2026-09-28"),
+                        usage("192.168.2.1", "gateway", "2026-09-28"),
+                        usage("192.168.2.4", "gateway", "2026-09-27")]
+        precondition(hotspotUsage(rows, network: network, date: "2026-09-28").count == 1)
+        precondition(hotspotUsage(rows, network: network).count == 2)
+        var sampler = HotspotTrafficSampler()
+        let start = Date(timeIntervalSince1970: 1000)
+        sampler.record(key: "a", at: start, up: 100, down: 500, uptime: 1)
+        precondition(sampler.points.isEmpty)
+        sampler.record(key: "a", at: start.addingTimeInterval(4), up: 300, down: 900, uptime: 5)
+        precondition(sampler.points.last?.up == 50 && sampler.points.last?.down == 100)
+        sampler.record(key: "a", at: start.addingTimeInterval(7), up: 0, down: 0, uptime: 8)
+        precondition(sampler.points.isEmpty) // Counters reset.
+        sampler.record(key: "a", at: start.addingTimeInterval(10), up: 30, down: 60, uptime: 11)
+        precondition(sampler.points.count == 1)
+        sampler.record(key: "b", at: start.addingTimeInterval(13), up: 90, down: 120, uptime: 14)
+        precondition(sampler.points.isEmpty) // Day or subnet changed.
+        sampler.record(key: "b", at: start.addingTimeInterval(16), up: 120, down: 180, uptime: 1)
+        precondition(sampler.points.isEmpty) // Core restarted.
+        sampler.record(key: "b", at: start.addingTimeInterval(36), up: 150, down: 240, uptime: 21)
+        precondition(sampler.points.isEmpty) // Stale sample.
+        sampler.reset()
+        precondition(sampler.points.isEmpty)
+    }
+
+    func testThroughputWindows() {
+        let end = Date(timeIntervalSince1970: 1000)
+        let recent = [HotspotRatePoint(at: end.addingTimeInterval(-10), up: 1, down: 2),
+                      HotspotRatePoint(at: end, up: 3, down: 4)]
+        let minute = HotspotChartWindow(points: recent, seconds: 60, now: end)
+        let five = HotspotChartWindow(points: recent, seconds: 300, now: end)
+        precondition(minute.domain.upperBound.timeIntervalSince(minute.domain.lowerBound) == 60)
+        precondition(five.domain.upperBound.timeIntervalSince(five.domain.lowerBound) == 300)
+        precondition(minute.points.count == 2 && five.points.count == 2)
+        let history = [HotspotRatePoint(at: end.addingTimeInterval(-200), up: 5, down: 6)] + recent
+        precondition(HotspotChartWindow(points: history, seconds: 60, now: end).points.count == 2)
+        precondition(HotspotChartWindow(points: history, seconds: 300, now: end).points.count == 3)
+        let empty = HotspotChartWindow(points: [], seconds: 300, now: end)
+        precondition(empty.points.isEmpty && empty.domain.upperBound == end)
     }
 
 }

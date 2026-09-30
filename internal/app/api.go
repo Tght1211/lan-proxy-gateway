@@ -78,8 +78,10 @@ type egressFailureStat struct {
 	Alerting   bool      `json:"alerting"`   // included in direct_failures
 }
 
-// FallbackStats reports the proxy→direct fallback auto-learning state.
+// FallbackStats reports automatic proxy learning and any retained legacy rules.
 type FallbackStats struct {
+	Settings    LearningSettings     `json:"settings"`
+	Strategy    string               `json:"strategy"`
 	Ignored     []string             `json:"ignored"`
 	Threshold   int                  `json:"threshold"`
 	WindowHours int                  `json:"window_hours"`
@@ -175,8 +177,10 @@ func (s *apiServer) handleStats(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		resp.Fallback = &FallbackStats{
+			Strategy:    "direct-first",
+			Settings:    s.rt.learner.Settings(),
 			Ignored:     s.rt.learner.Ignored(),
-			Threshold:   fallbackLearnThreshold,
+			Threshold:   s.rt.learner.Settings().Confirmations,
 			WindowHours: int(fallbackLearnWindow / time.Hour),
 			Candidates:  s.rt.learner.Snapshot(),
 			Learned:     learned,
@@ -451,10 +455,11 @@ func (s *apiServer) handleLearning(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if input.Action == "accept" || input.Action == "undo" {
-		if err := s.rt.applyConfig(s.app, s.app.getCfg()); err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
+		// Only routing changed. Serialize with automatic learning and apply the
+		// newest config without writing an older snapshot back into the app.
+		s.rt.learner.mu.Lock()
+		s.rt.applyRouting(s.app.getCfg())
+		s.rt.learner.mu.Unlock()
 	}
 	writeJSON(w, map[string]string{"status": "ok"})
 }

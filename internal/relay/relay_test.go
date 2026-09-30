@@ -669,9 +669,10 @@ func fallbackTestServer(t *testing.T, echoLn net.Listener, proxy, direct Dialer,
 	return srv
 }
 
-func TestServerFallbackToDirect(t *testing.T) {
+func TestServerUnknownStartsDirect(t *testing.T) {
 	echoLn := startEcho(t)
 	proxy := dialerFunc(func(context.Context, string, string) (net.Conn, error) {
+		t.Error("working direct route must not try proxy")
 		return nil, errors.New("proxy boom")
 	})
 	direct := dialerFunc(func(ctx context.Context, network, _ string) (net.Conn, error) {
@@ -700,18 +701,15 @@ func TestServerFallbackToDirect(t *testing.T) {
 		t.Fatalf("active = %+v", snap.Active)
 	}
 	c := snap.Active[0]
-	if c.ViaProxy || !c.Fallback || c.DstHost != "example.com" {
-		t.Fatalf("fallback conn = %+v, want direct + fallback marked", c)
+	if c.ViaProxy || c.Fallback || c.DstHost != "example.com" {
+		t.Fatalf("fallback conn = %+v, want direct without fallback", c)
 	}
 	_ = conn.Close()
 
 	select {
 	case host := <-learned:
-		if host != "example.com" {
-			t.Fatalf("learned host = %q, want example.com", host)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("fallback success callback never fired")
+		t.Fatalf("direct success must not learn a rule: %s", host)
+	case <-time.After(50 * time.Millisecond):
 	}
 
 }
@@ -798,4 +796,68 @@ func TestServerFallbackBothFail(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("dial failure never recorded")
+}
+
+func TestTransparentDirectFailureLearnsProxyResponse(t *testing.T) {
+	echo := startEcho(t)
+	direct := dialerFunc(func(context.Context, string, string) (net.Conn, error) { return nil, errors.New("direct unreachable") })
+	proxy := dialerFunc(func(ctx context.Context, network, target string) (net.Conn, error) {
+		host, _, _ := net.SplitHostPort(target)
+		if host != "example.com" {
+			t.Errorf("proxy lost domain: %s", target)
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, echo.Addr().String())
+	})
+	learned := make(chan string, 1)
+	orig := netip.MustParseAddrPort(echo.Addr().String())
+	srv := New(Options{ListenAddr: "127.0.0.1:0", OrigDST: OrigDSTFunc(func(*net.TCPConn) (netip.AddrPort, error) { return orig, nil }), ViaProxy: true,
+		OnProxyFallbackSuccess: func(host string) { learned <- host }})
+	srv.SetRealIPLookup(func(netip.Addr) (string, bool) { return "example.com", true })
+	srv.SetRouting(RouteProxy, direct, proxy, nil)
+	serveAndWait(t, srv)
+	c, err := net.Dial("tcp", srv.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(2 * time.Second))
+	c.Write([]byte("ok"))
+	if _, err = io.ReadFull(c, make([]byte, 2)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case host := <-learned:
+		if host != "example.com" {
+			t.Fatal(host)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no learned callback while connection is open")
+	}
+	active := srv.Tracker().Snapshot().Active
+	if len(active) != 1 || !active[0].ViaProxy || !active[0].Fallback {
+		t.Fatalf("wrong route: %+v", active)
+	}
+}
+
+func TestTrackerFirstResponseTimingIsStable(t *testing.T) {
+	tr := NewTracker()
+	c := tr.Open("192.168.2.5", "example.com", 443, false, "tcp")
+	if tr.Snapshot().Active[0].ResponseMS != nil {
+		t.Fatal("unanswered connection has response time")
+	}
+	c.AddUp(10)
+	c.firstSentAt.Store(time.Now().Add(-100 * time.Millisecond).UnixNano())
+	c.AddDown(20)
+	first := tr.Snapshot().Active[0].ResponseMS
+	if first == nil || *first < 100 || *first > 1000 {
+		t.Fatal("missing first data timing", first)
+	}
+	c.AddDown(30)
+	if next := tr.Snapshot().Active[0].ResponseMS; next == nil || *next != *first {
+		t.Fatal("timing changed with later data")
+	}
+	c.Close()
+	if got := tr.Snapshot().Recent[0].ResponseMS; got == nil || *got != *first {
+		t.Fatal("timing lost on close")
+	}
 }

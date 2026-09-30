@@ -32,11 +32,11 @@ func TestExplicitProxyRoutingAndTracking(t *testing.T) {
 	buffer := make([]byte, 2)
 	conn.Read(buffer)
 	conn.Close()
-	if proxyCalls != 1 || directCalls != 0 {
+	if proxyCalls != 0 || directCalls != 1 {
 		t.Fatal("wrong default route")
 	}
 	snapshot := s.Tracker().Snapshot()
-	if len(snapshot.Recent) != 1 || snapshot.Recent[0].Ingress != "http-proxy" || snapshot.Recent[0].Down != 2 || !snapshot.Recent[0].ViaProxy {
+	if len(snapshot.Recent) != 1 || snapshot.Recent[0].Ingress != "http-proxy" || snapshot.Recent[0].Down != 2 || snapshot.Recent[0].ViaProxy {
 		t.Fatalf("tracking failed: %+v", snapshot.Recent)
 	}
 	s.SetRouting("proxy", direct, proxy, []RouteRule{{Type: "src-ip", Value: "192.168.1.2", Action: "direct"}})
@@ -45,7 +45,7 @@ func TestExplicitProxyRoutingAndTracking(t *testing.T) {
 		t.Fatal(err)
 	}
 	conn.Close()
-	if directCalls != 1 {
+	if directCalls != 2 {
 		t.Fatal("device override ignored")
 	}
 	s.SetRouting("proxy", direct, proxy, []RouteRule{{Type: "domain", Value: "example.com", Action: "reject"}})
@@ -55,7 +55,7 @@ func TestExplicitProxyRoutingAndTracking(t *testing.T) {
 	if s.Tracker().Snapshot().Recent[0].Ingress != "http-proxy" {
 		t.Fatal("rejected ingress missing")
 	}
-	if directCalls != 1 || proxyCalls != 1 {
+	if directCalls != 2 || proxyCalls != 0 {
 		t.Fatal("rejected request dialed out")
 	}
 }
@@ -107,7 +107,7 @@ func TestExplicitTimeoutFallsBackWithFreshBudget(t *testing.T) {
 		return a, nil
 	})
 	s := New(Options{})
-	s.SetRouting("proxy", direct, stalled, nil)
+	s.SetRouting("proxy", stalled, direct, nil)
 	s.SetProxyFailAction("direct")
 	conn, err := s.dialExplicit(context.Background(), "192.168.1.20", "example.com:443", 10*time.Millisecond)
 	if err != nil {
@@ -117,7 +117,7 @@ func TestExplicitTimeoutFallsBackWithFreshBudget(t *testing.T) {
 	if directCalls != 1 {
 		t.Fatalf("direct calls=%d", directCalls)
 	}
-	if recent := s.Tracker().Snapshot().Recent; len(recent) != 1 || !recent[0].Fallback || recent[0].ViaProxy {
+	if recent := s.Tracker().Snapshot().Recent; len(recent) != 1 || !recent[0].Fallback || !recent[0].ViaProxy {
 		t.Fatalf("tracking: %+v", recent)
 	}
 }
@@ -142,11 +142,85 @@ func TestExplicitCallerCancellationPreventsFallback(t *testing.T) {
 				return nil, errors.New("unexpected dial")
 			})
 			s := New(Options{})
-			s.SetRouting("proxy", direct, stalled, nil)
+			s.SetRouting("proxy", stalled, direct, nil)
 			s.SetProxyFailAction("direct")
 			if _, err := s.dialExplicit(ctx, "192.168.1.20", "example.com:443", time.Second); !errors.Is(err, ctx.Err()) {
 				t.Fatalf("got %v; want %v", err, ctx.Err())
 			}
 		})
 	}
+}
+
+func TestDirectFailureLearnsProxyOnlyAfterResponse(t *testing.T) {
+	for _, response := range []bool{false, true} {
+		t.Run(fmt.Sprint(response), func(t *testing.T) {
+			learned := make(chan string, 2)
+			s := New(Options{OnProxyFallbackSuccess: func(host string) { learned <- host }})
+			order := ""
+			direct := dialerFunc(func(context.Context, string, string) (net.Conn, error) {
+				order += "d"
+				return nil, errors.New("unreachable")
+			})
+			proxy := dialerFunc(func(context.Context, string, string) (net.Conn, error) {
+				order += "p"
+				a, b := net.Pipe()
+				go func() {
+					defer b.Close()
+					if response {
+						b.Write([]byte("ok"))
+					}
+				}()
+				return a, nil
+			})
+			s.SetRouting("proxy", direct, proxy, nil)
+			c, err := s.DialExplicit(context.Background(), "192.168.1.2", "unknown.example:443")
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-learned:
+				t.Fatal("learned from dial alone")
+			default:
+			}
+			c.Read(make([]byte, 10))
+			c.Close()
+			if order != "dp" {
+				t.Fatalf("order %s", order)
+			}
+			select {
+			case host := <-learned:
+				if !response || host != "unknown.example" {
+					t.Fatalf("unexpected learning: %s", host)
+				}
+			case <-time.After(100 * time.Millisecond):
+				if response {
+					t.Fatal("missing learning")
+				}
+			}
+			recent := s.Tracker().Snapshot().Recent
+			if len(recent) != 1 || !recent[0].ViaProxy || !recent[0].Fallback {
+				t.Fatalf("wrong route telemetry: %+v", recent)
+			}
+		})
+	}
+}
+
+func TestExplicitFallbackUsesProxyBudget(t *testing.T) {
+	failing := dialerFunc(func(context.Context, string, string) (net.Conn, error) { return nil, errors.New("direct unavailable") })
+	proxy := dialerFunc(func(ctx context.Context, _, _ string) (net.Conn, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) < 3*time.Second {
+			t.Errorf("proxy received direct timeout instead of configured budget: %v", time.Until(deadline))
+		}
+		a, b := net.Pipe()
+		b.Close()
+		return a, nil
+	})
+	s := New(Options{ResponsePolicy: func() ResponsePolicy { return ResponsePolicy{DirectWait: time.Second, ProxyWait: 4 * time.Second} }})
+	s.SetRouting("proxy", failing, proxy, nil)
+	c, err := s.DialExplicit(context.Background(), "192.168.2.5", "example.com:443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
 }

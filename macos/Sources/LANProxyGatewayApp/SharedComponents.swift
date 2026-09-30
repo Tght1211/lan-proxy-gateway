@@ -6,11 +6,13 @@ import UniformTypeIdentifiers
 // MARK: - Components
 
 struct Panel<Content: View>: View {
+    var fillHeight = false
     @ViewBuilder let content: Content
     var body: some View {
         VStack(alignment: .leading, spacing: 0) { content }
-            .padding(16)
+            .padding(22)
             .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(maxHeight: fillHeight ? .infinity : nil, alignment: .topLeading)
             .background(Theme.panel)
             .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(Theme.border, lineWidth: Theme.borderWidth))
             .clipShape(RoundedRectangle(cornerRadius: Theme.radius))

@@ -28,6 +28,7 @@ func (s *Server) dialExplicit(ctx context.Context, srcIP, target string, timeout
 	ip, _ := netip.ParseAddr(host)
 	var d, fallback Dialer
 	via := s.viaProxy.Load()
+	directFirst := false
 	if policy := s.routing.Load(); policy != nil {
 		var rejected, matched bool
 		d, via, rejected, matched = policy.selectDialer(srcIP, host, ip)
@@ -37,7 +38,12 @@ func (s *Server) dialExplicit(ctx context.Context, srcIP, target string, timeout
 		}
 		action, _ := s.proxyFailAction.Load().(string)
 		if via && !matched && (action == "" || action == "direct") {
-			fallback = policy.direct
+			directFirst = s.preferDirect(via, matched, policy)
+			if directFirst {
+				d, fallback, via = policy.direct, policy.proxy, false
+			} else {
+				fallback = policy.direct
+			}
 		}
 	} else if holder := s.dialer.Load(); holder != nil {
 		d = holder.dialer
@@ -45,17 +51,33 @@ func (s *Server) dialExplicit(ctx context.Context, srcIP, target string, timeout
 	if d == nil {
 		return nil, fmt.Errorf("no egress configured")
 	}
-	dial := func(d Dialer) (net.Conn, error) {
-		dialCtx, cancel := context.WithTimeout(ctx, timeout)
+	dial := func(d Dialer, budget time.Duration) (net.Conn, error) {
+		dialCtx, cancel := context.WithTimeout(ctx, budget)
 		defer cancel()
 		return d.DialContext(dialCtx, "tcp", target)
 	}
-	conn, err := dial(d)
+	responseBudget, allowResponseProxy := s.responsePlan(host, time.Now())
+	if directFirst && timeout > responseBudget {
+		timeout = responseBudget
+	}
+	dialStarted := time.Now()
+	conn, err := dial(d, timeout)
+	remainingResponseBudget := responseBudget - time.Since(dialStarted)
+	if remainingResponseBudget <= 0 {
+		remainingResponseBudget = time.Nanosecond
+	}
 	fellBack := false
-	if err != nil && fallback != nil && ctx.Err() == nil {
-		conn, err = dial(fallback)
+	if err != nil && fallback != nil && ctx.Err() == nil && (!directFirst || allowResponseProxy) {
+		via = directFirst
+		fallbackBudget := timeout
+		if directFirst {
+			fallbackBudget = s.currentResponsePolicy().ProxyWait
+		}
+		conn, err = dial(fallback, fallbackBudget)
+		if directFirst && err != nil {
+			s.responseResult(host, true, false, time.Now())
+		}
 		if err == nil {
-			via = false
 			fellBack = true
 		}
 	}
@@ -63,12 +85,18 @@ func (s *Server) dialExplicit(ctx context.Context, srcIP, target string, timeout
 		s.tracker.RecordDialFailure(srcIP, host, n, via, classifyDialError(err, via), "http-proxy")
 		return nil, err
 	}
+	if fellBack && directFirst {
+		conn = s.watchProxyResponse(conn, host)
+	}
 	tracked := s.tracker.OpenWithEgress(srcIP, host, n, via, "tcp", conn.RemoteAddr().String(), "http-proxy")
 	if fellBack {
 		tracked.MarkFallback()
 	}
+	if directFirst && !fellBack {
+		conn = s.watchDirectResponse(conn, host, target, fallback, tracked, remainingResponseBudget, allowResponseProxy)
+	}
 	return &explicitConn{Conn: conn, tracked: tracked, onClose: func() {
-		if fellBack && tracked.Down() > 0 {
+		if fellBack && !directFirst && tracked.Down() > 0 {
 			s.notifyFallbackSuccess(host)
 		}
 	}}, nil

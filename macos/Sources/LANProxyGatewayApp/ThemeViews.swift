@@ -28,13 +28,13 @@ struct ThemeSelectorPanel: View {
                         Button { importTheme() } label: {
                             Label("导入", systemImage: "square.and.arrow.down")
                         }
-                        .buttonStyle(.bordered).controlSize(.small)
+                        .buttonStyle(StudioButtonStyle()).controlSize(.small)
                         .help("从 JSON 文件导入主题")
 
                         Button { exportCurrent() } label: {
                             Label("导出", systemImage: "square.and.arrow.up")
                         }
-                        .buttonStyle(.bordered).controlSize(.small)
+                        .buttonStyle(StudioButtonStyle()).controlSize(.small)
                         .help("将当前主题导出为 JSON 文件")
                     }
                 }

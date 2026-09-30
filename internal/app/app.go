@@ -171,6 +171,42 @@ func (a *App) PromoteLearnedDirectRule(host string) (bool, error) {
 	return true, nil
 }
 
+// PromoteLearnedProxyRule persists an exact domain only if no existing domain
+// rule covers it. Recheck while locked: user edits may race with the response.
+func (a *App) PromoteLearnedProxyRule(host string) (bool, error) {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	if host == "" {
+		return false, nil
+	}
+	if _, err := netip.ParseAddr(host); err == nil {
+		return false, nil
+	}
+	a.cfgMu.Lock()
+	defer a.cfgMu.Unlock()
+	if a.Cfg.Egress.Mode != config.EgressProxy {
+		return false, nil
+	}
+	for _, r := range a.Cfg.Routing.Rules {
+		value := strings.ToLower(strings.Trim(r.Value, "."))
+		if (r.Type == config.RuleDomain && host == value) ||
+			(r.Type == config.RuleDomainSuffix && (host == value || strings.HasSuffix(host, "."+value))) {
+			return false, nil
+		}
+	}
+	next := *a.Cfg
+	next.Routing.Rules = append(append([]config.RoutingRule(nil), a.Cfg.Routing.Rules...),
+		config.RoutingRule{Type: config.RuleDomain, Value: host, Action: config.EgressProxy, Group: learnedGroupName(host), Learned: true})
+	config.Normalize(&next)
+	if err := config.Validate(&next); err != nil {
+		return false, err
+	}
+	if err := config.Save(&next, a.Paths.ConfigFile); err != nil {
+		return false, err
+	}
+	a.Cfg = &next
+	return true, nil
+}
+
 // learnedGroupName returns a sub-grouped name for auto-learned rules based
 // on the service classification. Known services get "自动学习 · YouTube" etc.;
 // unrecognised domains fall into the generic "自动学习" bucket.

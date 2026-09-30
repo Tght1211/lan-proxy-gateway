@@ -16,19 +16,23 @@ func pipe(a, b net.Conn, tc *TrackedConn) {
 }
 
 func pipeWithDrainTimeout(a, b net.Conn, tc *TrackedConn, drainTimeout time.Duration) {
-	done := make(chan struct{}, 2)
+	done := make(chan error, 2)
 	go func() {
-		defer func() { done <- struct{}{} }()
-		copyOne(b, a, tc.AddUp) // client → upstream = upload
+		done <- copyOne(b, a, tc.AddUp) // client → upstream = upload
 	}()
 	go func() {
-		defer func() { done <- struct{}{} }()
-		copyOne(a, b, tc.AddDown) // upstream → client = download
+		done <- copyOne(a, b, tc.AddDown) // upstream → client = download
 	}()
 
 	// A healthy long-lived stream may transfer in both directions for hours.
 	// Start the drain timeout only after one direction reaches EOF.
-	<-done
+	firstErr := <-done
+	if e, ok := firstErr.(net.Error); ok && e.Timeout() {
+		a.Close()
+		b.Close()
+		<-done
+		return
+	}
 	timer := time.NewTimer(drainTimeout)
 	defer timer.Stop()
 	select {
@@ -41,14 +45,15 @@ func pipeWithDrainTimeout(a, b net.Conn, tc *TrackedConn, drainTimeout time.Dura
 	}
 }
 
-func copyOne(dst, src net.Conn, count func(int64)) {
+func copyOne(dst, src net.Conn, count func(int64)) error {
 	// Count each successful write so live streams appear in throughput and
 	// bytes are assigned to the day they were transferred, not the close date.
-	_, _ = io.Copy(trafficWriter{Conn: dst, count: count}, src)
+	_, err := io.Copy(trafficWriter{Conn: dst, count: count}, src)
 	// propagate EOF to the far side as a half-close when possible
 	if tc, ok := dst.(interface{ CloseWrite() error }); ok {
 		_ = tc.CloseWrite()
 	}
+	return err
 }
 
 type trafficWriter struct {

@@ -274,7 +274,42 @@ struct EgressFailureStat: Decodable, Identifiable {
     }
 }
 
+struct LearningSettings: Codable {
+    var enabled: Bool
+    var confirmations: Int
+    var autoSave: Bool
+    var directWaitSeconds = 5
+    var proxyWaitSeconds = 5
+    var maxDirectWaitSeconds = 30
+    var cooldownSeconds = 30
+    var memoryMinutes = 10
+    var responsePolicySupported = false
+    enum CodingKeys: String, CodingKey {
+        case enabled, confirmations
+        case autoSave = "auto_save"
+        case directWaitSeconds = "direct_wait_seconds", proxyWaitSeconds = "proxy_wait_seconds"
+        case maxDirectWaitSeconds = "max_direct_wait_seconds", cooldownSeconds = "cooldown_seconds", memoryMinutes = "memory_minutes"
+    }
+    init(enabled: Bool, confirmations: Int, autoSave: Bool) {
+        self.enabled = enabled; self.confirmations = confirmations; self.autoSave = autoSave
+    }
+    init(from decoder: Decoder) throws {
+        let v = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try v.decode(Bool.self, forKey: .enabled)
+        confirmations = try v.decode(Int.self, forKey: .confirmations)
+        autoSave = try v.decode(Bool.self, forKey: .autoSave)
+        directWaitSeconds = try v.decodeIfPresent(Int.self, forKey: .directWaitSeconds) ?? 5
+        proxyWaitSeconds = try v.decodeIfPresent(Int.self, forKey: .proxyWaitSeconds) ?? 5
+        maxDirectWaitSeconds = try v.decodeIfPresent(Int.self, forKey: .maxDirectWaitSeconds) ?? 30
+        cooldownSeconds = try v.decodeIfPresent(Int.self, forKey: .cooldownSeconds) ?? 30
+        memoryMinutes = try v.decodeIfPresent(Int.self, forKey: .memoryMinutes) ?? 10
+        responsePolicySupported = v.contains(.directWaitSeconds)
+    }
+}
+
 struct FallbackStats: Decodable {
+    let settings: LearningSettings?
+    let strategy: String
     let ignored: [String]
     let threshold: Int
     let windowHours: Int
@@ -282,12 +317,14 @@ struct FallbackStats: Decodable {
     let learned: [RoutingRule]
 
     enum CodingKeys: String, CodingKey {
-        case threshold, candidates, learned, ignored
+        case settings, strategy, threshold, candidates, learned, ignored
         case windowHours = "window_hours"
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        settings = try values.decodeIfPresent(LearningSettings.self, forKey: .settings)
+        strategy = try values.decodeIfPresent(String.self, forKey: .strategy) ?? "legacy"
         ignored = try values.decodeIfPresent([String].self, forKey: .ignored) ?? []
         threshold = try values.decodeIfPresent(Int.self, forKey: .threshold) ?? 3
         windowHours = try values.decodeIfPresent(Int.self, forKey: .windowHours) ?? 24

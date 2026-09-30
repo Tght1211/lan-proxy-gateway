@@ -14,11 +14,11 @@ struct IconButtonStyle: ButtonStyle {
 
 struct ActionButtonStyle: ButtonStyle {
     let tint: Color
-    func makeBody(configuration: Configuration) -> some View { configuration.label.font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.white).padding(.horizontal, 13).frame(minHeight: 30).background(tint.opacity(configuration.isPressed ? 0.72 : 0.92)).clipShape(RoundedRectangle(cornerRadius: Theme.radiusSmall)) }
+    func makeBody(configuration: Configuration) -> some View { configuration.label.font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.canvas).padding(.horizontal, 13).frame(minHeight: 30).background(tint.opacity(configuration.isPressed ? 0.72 : 0.92)).clipShape(RoundedRectangle(cornerRadius: Theme.radiusSmall)) }
 }
 
 struct DarkFieldStyle: TextFieldStyle {
-    func _body(configuration: TextField<Self._Label>) -> some View { configuration.padding(.horizontal, 11).frame(height: 36).background(Theme.panelRaised).overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(Theme.border, lineWidth: 0.8)).clipShape(RoundedRectangle(cornerRadius: Theme.radiusSmall)) }
+    func _body(configuration: TextField<Self._Label>) -> some View { configuration.textFieldStyle(.plain).padding(.horizontal, 11).frame(height: 36).background(Theme.panelRaised).overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(Theme.border, lineWidth: 0.8)).clipShape(RoundedRectangle(cornerRadius: Theme.radiusSmall)) }
 }
 
 extension Text {

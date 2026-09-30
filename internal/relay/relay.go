@@ -33,16 +33,21 @@ type Options struct {
 	// OnFallbackSuccess fires when a default-proxy connection whose proxy dial
 	// failed was retried directly and succeeded. Optional; used for route
 	// auto-learning.
-	OnFallbackSuccess func(host string)
-	Logger            *slog.Logger
+	OnFallbackSuccess      func(host string)
+	OnProxyFallbackSuccess func(host string)
+	ResponsePolicy         func() ResponsePolicy
+	Logger                 *slog.Logger
 }
 
 // Server accepts transparently redirected TCP connections and relays them
 // through the configured egress dialer.
 type Server struct {
-	origDST OrigDSTResolver
-	tracker *Tracker
-	logger  *slog.Logger
+	responseMu     sync.Mutex
+	responses      map[string]responseState
+	responsePolicy func() ResponsePolicy
+	origDST        OrigDSTResolver
+	tracker        *Tracker
+	logger         *slog.Logger
 
 	listenAddr      atomic.Value // string
 	dialer          atomic.Pointer[dialerHolder]
@@ -56,10 +61,11 @@ type Server struct {
 	missingMu  sync.Mutex
 	missingLog map[netip.Addr]time.Time
 
-	onFallbackSuccess atomic.Value // func(string)
-	health            *proxyHealth
-	deviceHealth      *deviceHealth
-	monitor           *egressMonitor
+	onProxyFallbackSuccess func(string)
+	onFallbackSuccess      atomic.Value // func(string)
+	health                 *proxyHealth
+	deviceHealth           *deviceHealth
+	monitor                *egressMonitor
 
 	mu   sync.Mutex
 	ln   *net.TCPListener
@@ -74,13 +80,15 @@ type dialerHolder struct {
 
 func New(opts Options) *Server {
 	s := &Server{
-		origDST:      opts.OrigDST,
-		tracker:      opts.Tracker,
-		logger:       opts.Logger,
-		done:         make(chan struct{}),
-		missingLog:   make(map[netip.Addr]time.Time),
-		health:       newProxyHealth(),
-		deviceHealth: newDeviceHealth(),
+		responsePolicy:         opts.ResponsePolicy,
+		origDST:                opts.OrigDST,
+		onProxyFallbackSuccess: opts.OnProxyFallbackSuccess,
+		tracker:                opts.Tracker,
+		logger:                 opts.Logger,
+		done:                   make(chan struct{}),
+		missingLog:             make(map[netip.Addr]time.Time),
+		health:                 newProxyHealth(),
+		deviceHealth:           newDeviceHealth(),
 	}
 	s.monitor = newEgressMonitor(s.health)
 	if s.tracker == nil {
@@ -330,8 +338,13 @@ func (s *Server) handle(client *net.TCPConn) {
 		return
 	}
 
-	// 代理端口全局异常：默认走代理且未命中显式规则时强制直连。
-	eligible := fallbackDialer != nil
+	// Unknown destinations in permissive proxy mode start directly.
+	directFirst := s.preferDirect(viaProxy, matchedRule, policy)
+	if directFirst {
+		dialer, fallbackDialer, viaProxy = policy.direct, policy.proxy, false
+	}
+	// Legacy recovery applies only to proxy-first connections.
+	eligible := fallbackDialer != nil && !directFirst
 	adaptiveEligible := eligible && policy != nil && !deviceOverride && viaProxy && policy.direct != nil
 	if adaptiveEligible && s.deviceHealth.directDecision(srcIP, time.Now()) {
 		dialer = policy.direct
@@ -358,11 +371,24 @@ func (s *Server) handle(client *net.TCPConn) {
 	}
 
 	target := net.JoinHostPort(host, strconv.Itoa(int(orig.Port())))
-	upstream, err := dialTarget(dialer, target)
+	responseBudget, allowResponseProxy := s.responsePlan(routeHost, time.Now())
+	dialBudget := 15 * time.Second
+	if directFirst {
+		dialBudget = responseBudget
+	}
+	dialStarted := time.Now()
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), dialBudget)
+	upstream, err := dialer.DialContext(dialCtx, "tcp", target)
+	dialCancel()
+	remainingResponseBudget := responseBudget - time.Since(dialStarted)
+	if remainingResponseBudget <= 0 {
+		remainingResponseBudget = time.Nanosecond
+	}
+	learnedProxy := false
 	fellBack := false
-	if err != nil && fallbackDialer != nil {
+	if err != nil && fallbackDialer != nil && (!directFirst || allowResponseProxy) {
 		firstErr := err
-		if directTest {
+		if directTest || directFirst {
 			s.logger.Info("直连测试拨号失败，回退代理", "src", client.RemoteAddr(), "target", target, "err", firstErr)
 		} else {
 			s.logger.Info("代理拨号失败，尝试直连回退", "src", client.RemoteAddr(), "target", target, "err", firstErr)
@@ -370,9 +396,21 @@ func (s *Server) handle(client *net.TCPConn) {
 				s.health.recordFailure(routeHost, time.Now())
 			}
 		}
-		upstream, err = dialTarget(fallbackDialer, target)
+		fallbackTarget := target
+		if directFirst {
+			// Preserve the observed domain for remote proxy resolution.
+			fallbackTarget = net.JoinHostPort(routeHost, strconv.Itoa(int(orig.Port())))
+			viaProxy = true
+		}
+		fallbackCtx, fallbackCancel := context.WithTimeout(context.Background(), s.currentResponsePolicy().ProxyWait)
+		upstream, err = fallbackDialer.DialContext(fallbackCtx, "tcp", fallbackTarget)
+		fallbackCancel()
+		if directFirst && err != nil {
+			s.responseResult(routeHost, true, false, time.Now())
+		}
 		if err == nil {
-			if directTest {
+			if directTest || directFirst {
+				learnedProxy = directFirst
 				viaProxy = true
 				directTest = false
 			} else {
@@ -396,6 +434,9 @@ func (s *Server) handle(client *net.TCPConn) {
 		s.tracker.RecordDialFailure(srcIP, routeHost, int(orig.Port()), viaProxy, classifyDialError(err, viaProxy))
 		return
 	}
+	if learnedProxy {
+		upstream = s.watchProxyResponse(upstream, routeHost)
+	}
 	defer upstream.Close()
 	s.logger.Debug("出口已建立", "src", client.RemoteAddr(), "target", target, "via_proxy", viaProxy, "fallback", fellBack)
 	if uc, ok := upstream.(*net.TCPConn); ok {
@@ -404,11 +445,15 @@ func (s *Server) handle(client *net.TCPConn) {
 
 	observedHost := routeHost
 	tc := s.tracker.OpenWithEgress(srcIP, observedHost, int(orig.Port()), viaProxy, "tcp", upstream.RemoteAddr().String())
-	if fellBack || directTest {
+	if fellBack || directTest || learnedProxy {
 		tc.MarkFallback()
 	}
 	defer tc.Close()
 
+	if directFirst && !learnedProxy {
+		upstream = s.watchDirectResponse(upstream, routeHost, net.JoinHostPort(routeHost, strconv.Itoa(int(orig.Port()))), policy.proxy, tc, remainingResponseBudget, allowResponseProxy)
+		defer upstream.Close()
+	}
 	pipe(client, upstream, tc)
 
 	if eligible {

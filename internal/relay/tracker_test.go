@@ -2,9 +2,59 @@ package relay
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 )
+
+// Read the public payload so this regression also covers the API contract.
+func deviceTrafficTime(t *testing.T, tracker *Tracker) *time.Time {
+	t.Helper()
+	data, err := json.Marshal(tracker.Snapshot().Devices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []struct {
+		LastTrafficAt *time.Time `json:"last_traffic_at"`
+	}
+	if err := json.Unmarshal(data, &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("device rows = %d, want 1", len(rows))
+	}
+	return rows[0].LastTrafficAt
+}
+
+func TestTrackerDeviceActivityUsesBytesNotConnectionLifecycle(t *testing.T) {
+	tr := NewTracker()
+	c := tr.Open("192.168.2.5", "example.com", 443, false, "tcp")
+	c.startedAt = time.Now().Add(-48 * time.Hour)
+	if got := deviceTrafficTime(t, tr); got != nil {
+		t.Fatal("opening an idle connection counts as traffic")
+	}
+	before := time.Now()
+	c.AddUp(10)
+	first := deviceTrafficTime(t, tr)
+	if first == nil || first.Before(before) {
+		t.Fatal("actual bytes must report a current last_traffic_at")
+	}
+	c.AddUp(0)
+	c.AddDown(0)
+	if got := deviceTrafficTime(t, tr); got == nil || !got.Equal(*first) {
+		t.Fatal("zero bytes or polling refreshed activity")
+	}
+	c.Close()
+	if got := deviceTrafficTime(t, tr); got == nil || !got.Equal(*first) {
+		t.Fatal("closing an idle connection refreshed activity")
+	}
+	second := tr.Open("192.168.2.5", "other.example", 443, true, "tcp")
+	second.AddDown(40)
+	latest := deviceTrafficTime(t, tr)
+	if latest == nil || !latest.After(*first) {
+		t.Fatal("new downstream bytes must reactivate a device")
+	}
+}
 
 func TestTrackerArchivesAndAggregates(t *testing.T) {
 	tr := NewTracker()

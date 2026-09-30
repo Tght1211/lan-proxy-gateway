@@ -146,7 +146,7 @@ struct DevicePolicyRow: View {
 func deviceIcon(label: String?) -> String {
     guard let label = label?.lowercased() else { return "desktopcomputer" }
     let phones = ["iphone", "手机", "phone", "一加", "oneplus", "xiaomi", "小米", "huawei", "华为", "oppo", "vivo", "pixel", "安卓", "android"]
-    let consoles = ["switch", "ps5", "ps4", "xbox", "游戏", "主机"]
+    let consoles = ["switch", "playstation", "ps5", "ps4", "xbox", "游戏", "主机"]
     let tvs = ["tv", "电视", "盒子"]
     let pads = ["ipad", "pad", "平板"]
     let laptops = ["mac", "笔记本", "电脑", "pc", "laptop"]

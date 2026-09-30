@@ -15,7 +15,7 @@ struct HotspotOnboardingPanel: View {
     }
 
     private var canEnable: Bool {
-        !model.isBusy && model.hotspot?.available == true && model.status?.egress == "proxy"
+        !model.isBusy && model.hotspot?.available == true
     }
 
     private var enableTitle: String {
@@ -23,7 +23,6 @@ struct HotspotOnboardingPanel: View {
         if model.hotspotControlState == .needsCoreUpdate { return "更新核心并开启接管" }
         if model.hotspot?.stage == "wifi_off" { return "先打开 Mac 的 Wi-Fi" }
         if model.hotspot?.available != true { return "等待热点启动" }
-        if model.status?.egress != "proxy" { return "先设置代理出口" }
         return "开启热点接管"
     }
 
@@ -32,7 +31,7 @@ struct HotspotOnboardingPanel: View {
             HStack(spacing: 14) {
                 Image(systemName: "wifi").font(.system(size: 28)).foregroundStyle(Theme.cyan)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("连上 Wi-Fi，就能使用设备代理").font(.headline)
+                    Text("为游戏机准备专属 Wi-Fi").font(.headline)
                     Text("不用填写 IP、网关或 DNS。Mac 继续通过网线上网。")
                         .font(.caption).foregroundStyle(Theme.muted)
                 }
@@ -69,7 +68,7 @@ struct HotspotOnboardingPanel: View {
                     .font(.caption2).foregroundStyle(Theme.muted)
             }
 
-            OnboardingStep(number: "2", title: "回到本 App，开启设备代理", detail: "代理在本 App 里设置，不在系统 Wi-Fi 页面里设置。热点启动后，点击下方按钮，由本 App 把游戏机流量交给已有的代理出口，保留 Mac 的系统代理和 DNS 设置。")
+            OnboardingStep(number: "2", title: "选择出口并开启热点接管", detail: "可直接上网，也可配置自己的代理地址与端口。开启接管会应用热点接入模式并重启核心；已有连接可能中断。默认出口和分流规则与经典界面共用。")
             takeoverStatus
             if model.status?.egress == "proxy" {
                 Label("已配置代理：\(model.status?.proxy ?? "现有代理出口")，无需重复填写。", systemImage: "checkmark.circle")
@@ -105,7 +104,7 @@ struct HotspotOnboardingPanel: View {
             .padding(12).background(Theme.panelRaised)
             .clipShape(RoundedRectangle(cornerRadius: 10))
             if model.status?.egress != "proxy" {
-                Text("请先设置代理出口；当前为普通直连上网。")
+                Text("当前默认出口为直连，无需 VPN 也可开启接管；显式代理规则仍按已有规则执行。")
                     .font(.caption).foregroundStyle(Theme.yellow)
             }
             if let error = model.errorMessage {
@@ -254,13 +253,13 @@ struct HotspotQuickControls: View {
             if model.hotspotControlState.isWorking {
                 HStack { ProgressView().controlSize(.small); Text(model.hotspotControlState.title).font(.caption) }
             } else {
-                Button(model.hotspotControlState == .enabled ? "停止代理接管" : "开启代理接管") {
+                Button(model.hotspotControlState == .enabled ? "停止热点接管" : "开启热点接管") {
                     Task { await model.configureHotspot(model.hotspotControlState == .enabled ? "disable" : "enable") }
                 }
-                .disabled(model.isBusy || (model.hotspotControlState != .enabled && (model.hotspot?.available != true || model.status?.egress != "proxy")))
+                .disabled(model.isBusy || (model.hotspotControlState != .enabled && (model.hotspot?.available != true)))
                 .buttonStyle(.bordered)
             }
-            Text("停止接管只关闭代理，Wi-Fi 仍由系统共享。")
+            Text("停止接管只停止本 App 管理热点流量，Wi-Fi 仍由系统共享。")
                 .font(.caption2).foregroundStyle(Theme.muted)
             if let error = model.hotspotActionError {
                 Text(error).font(.caption).foregroundStyle(Theme.yellow)
@@ -273,14 +272,16 @@ struct HotspotQuickControls: View {
 }
 
 /// Advice only: selecting a recommendation does not change system Wi-Fi settings.
-private struct HotspotSystemSetupGuide: View {
-    @State private var prefer5GHz = true
+struct HotspotSystemSetupGuide: View {
+    @AppStorage("hotspot.prefer5GHz") private var prefer5GHz = true
+    @AppStorage("hotspot.consoleModel") private var consoleModel = "switch"
     @AppStorage("hotspot.consoleRegion") private var consoleRegion = "HK"
 
     private var regionAdvice: String {
         switch consoleRegion {
         case "JP": return "日版：先试 36，再试 40 / 44 / 48；不要直接套用其他地区的高信道设置。"
         case "US": return "美版：先试 36，再试 40 / 44 / 48；回退 2.4 GHz 时选择 1 / 6 / 11。"
+        case "OTHER": return "其他销售地区：请核对主机说明书，在 Mac 提供的合法信道中选择，并在主机上测试连接。"
         default: return "港版（默认）：PS5 / Switch 优先尝试 5 GHz 信道 36，找不到热点时再试 40 / 44 / 48。"
         }
     }
@@ -289,10 +290,19 @@ private struct HotspotSystemSetupGuide: View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Wi-Fi 设置建议", systemImage: "slider.horizontal.3")
                 .font(.headline)
+            Picker("主机型号", selection: $consoleModel) {
+                Text("PS5 / Slim").tag("ps5")
+                Text("PS5 Pro").tag("ps5pro")
+                Text("Switch / Lite / OLED").tag("switch")
+                Text("Switch 2").tag("switch2")
+            }
+            Text(consoleModel == "switch" ? "Switch / Lite / OLED：优先使用兼容 WPA2 的安全模式。" : "采用兼容性优先的 2.4 / 5 GHz 建议；不假定系统热点提供主机的全部无线能力。")
+                .foregroundStyle(Theme.muted)
             Picker("主机销售版本", selection: $consoleRegion) {
                 Text("港版").tag("HK")
                 Text("日版").tag("JP")
                 Text("美版").tag("US")
+                Text("其他").tag("OTHER")
             }.pickerStyle(.segmented)
             Text(regionAdvice)
             Text("按主机购买版本选择，不是账号地区；此选项只调整引导，不修改 Mac 的无线地区。")
@@ -308,7 +318,7 @@ private struct HotspotSystemSetupGuide: View {
             Text("上述为兼容性优先的建议，不是各版本完整支持列表。信道以 Mac 所在地区可选项为准；找不到热点时先靠近 Mac，仍不可见再回退 2.4 GHz 的 1 / 6 / 11，并在主机上测试。")
                 .foregroundStyle(Theme.muted)
             Text("点击「好」「完成」后开启互联网共享。修改频道后，需关闭再开启共享才能应用，已连接设备会暂时断网。")
-            Text("这里仅展示设置建议，不会自动切换频段。系统热点设置完成后，App 会自动检测；代理出口、规则与接管由本 App 管理。")
+            Text("这里仅展示设置建议，不会自动切换频段，也不代表同时开启双频热点。系统热点设置完成后，App 会自动检测；代理出口、规则与接管由本 App 管理。")
                 .foregroundStyle(Theme.muted)
         }
         .font(.caption)

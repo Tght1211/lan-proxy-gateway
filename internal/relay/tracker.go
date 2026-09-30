@@ -23,6 +23,8 @@ const (
 
 // ConnInfo is a point-in-time view of one relayed connection.
 type ConnInfo struct {
+	LastTrafficAt *time.Time `json:"last_traffic_at,omitempty"` // positive payload bytes only, never open/close
+	ResponseMS    *int64     `json:"response_ms,omitempty"`     // first relayed payload to first upstream data; excludes initial dial
 	ProxyEndpoint string     `json:"proxy_endpoint,omitempty"`
 	Ingress       string     `json:"ingress"` // gateway | http-proxy
 	ID            uint64     `json:"id"`
@@ -39,7 +41,7 @@ type ConnInfo struct {
 	Rejected      bool       `json:"rejected,omitempty"`
 	Status        string     `json:"status,omitempty"`   // "" | "rejected" | "dial_failed"
 	Failure       string     `json:"failure,omitempty"`  // human-readable dial failure reason
-	Fallback      bool       `json:"fallback,omitempty"` // proxy dial failed, direct retry succeeded
+	Fallback      bool       `json:"fallback,omitempty"` // first dial failed, alternate egress succeeded
 }
 
 // TrafficPoint is one five-second throughput sample.
@@ -51,11 +53,12 @@ type TrafficPoint struct {
 
 // UsageAggregate groups completed connections for one device or service.
 type UsageAggregate struct {
-	Name        string    `json:"name"`
-	Up          int64     `json:"up"`
-	Down        int64     `json:"down"`
-	Connections int64     `json:"connections"`
-	LastSeen    time.Time `json:"last_seen"`
+	LastTrafficAt *time.Time `json:"last_traffic_at,omitempty"`
+	Name          string     `json:"name"`
+	Up            int64      `json:"up"`
+	Down          int64      `json:"down"`
+	Connections   int64      `json:"connections"`
+	LastSeen      time.Time  `json:"last_seen"`
 }
 
 // DeviceServiceAggregate groups service usage for one LAN device.
@@ -255,6 +258,7 @@ func cloneAggregates(source map[string]*UsageAggregate) map[string]*UsageAggrega
 
 // TrackedConn is one live connection's counters.
 type TrackedConn struct {
+	routeMu       sync.RWMutex
 	proxyEndpoint string
 	ingress       string
 	t             *Tracker
@@ -266,17 +270,23 @@ type TrackedConn struct {
 	service       string
 	viaProxy      bool
 	startedAt     time.Time
+	firstSentAt   atomic.Int64
+	lastTrafficAt atomic.Int64
+	responseMS    atomic.Int64 // milliseconds + 1, zero means no response
 	up            atomic.Int64
 	down          atomic.Int64
 	closed        atomic.Bool
 	fallback      atomic.Bool
 }
 
-// MarkFallback flags the connection as proxy→direct fallback so the history
-// can show why a "should-be-proxy" target went direct.
+// MarkFallback records a successful alternate egress; ViaProxy identifies its direction.
 func (c *TrackedConn) MarkFallback() { c.fallback.Store(true) }
 
 func (c *TrackedConn) AddUp(n int64) {
+	if n > 0 {
+		c.firstSentAt.CompareAndSwap(0, time.Now().UnixNano())
+		c.markTraffic()
+	}
 	c.up.Add(n)
 	c.t.upTotal.Add(n)
 	if n > 0 {
@@ -285,10 +295,30 @@ func (c *TrackedConn) AddUp(n int64) {
 }
 
 func (c *TrackedConn) AddDown(n int64) {
+	if n > 0 {
+		c.markTraffic()
+		start := c.firstSentAt.Load()
+		if start == 0 {
+			start = c.startedAt.UnixNano()
+		}
+		elapsed := max(int64(0), (time.Now().UnixNano()-start)/int64(time.Millisecond))
+		c.responseMS.CompareAndSwap(0, elapsed+1)
+	}
 	c.down.Add(n)
 	c.t.downTotal.Add(n)
 	if n > 0 {
 		c.t.recordUsage(c, 0, n, 0, time.Now())
+	}
+}
+
+// Keep timestamps monotonic when both pipe directions report concurrently.
+func (c *TrackedConn) markTraffic() {
+	now := time.Now().UnixNano()
+	for {
+		last := c.lastTrafficAt.Load()
+		if now <= last || c.lastTrafficAt.CompareAndSwap(last, now) {
+			return
+		}
 	}
 }
 
@@ -331,10 +361,30 @@ func deviceServiceSlice(source map[string]map[string]*UsageAggregate) []DeviceSe
 func (c *TrackedConn) Up() int64   { return c.up.Load() }
 func (c *TrackedConn) Down() int64 { return c.down.Load() }
 
+func (c *TrackedConn) setProxyEgress(endpoint string) {
+	c.routeMu.Lock()
+	c.viaProxy = true
+	c.proxyEndpoint = endpoint
+	c.routeMu.Unlock()
+}
 func (c *TrackedConn) info() ConnInfo {
+	c.routeMu.RLock()
+	defer c.routeMu.RUnlock()
+	var response *int64
+	var lastTraffic *time.Time
+	if value := c.lastTrafficAt.Load(); value > 0 {
+		at := time.Unix(0, value)
+		lastTraffic = &at
+	}
+	if value := c.responseMS.Load(); value > 0 {
+		ms := value - 1
+		response = &ms
+	}
 	return ConnInfo{
-		Ingress: c.ingress,
-		ID:      c.id, SrcIP: c.srcIP, DstHost: c.dstHost, DstPort: c.dstPort,
+		LastTrafficAt: lastTraffic,
+		ResponseMS:    response,
+		Ingress:       c.ingress,
+		ID:            c.id, SrcIP: c.srcIP, DstHost: c.dstHost, DstPort: c.dstPort,
 		Proto: c.proto, Service: c.service, Up: c.up.Load(), Down: c.down.Load(),
 		StartedAt: c.startedAt, ViaProxy: c.viaProxy, Fallback: c.fallback.Load(), ProxyEndpoint: c.proxyEndpoint,
 	}
@@ -353,6 +403,10 @@ func updateAggregate(target map[string]*UsageAggregate, name string, info ConnIn
 	a.Down += info.Down
 	a.Connections++
 	a.LastSeen = now
+	if info.LastTrafficAt != nil && (a.LastTrafficAt == nil || info.LastTrafficAt.After(*a.LastTrafficAt)) {
+		at := *info.LastTrafficAt
+		a.LastTrafficAt = &at
+	}
 }
 
 func aggregateSlice(source map[string]*UsageAggregate) []UsageAggregate {

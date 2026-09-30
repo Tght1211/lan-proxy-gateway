@@ -57,15 +57,26 @@ struct RoutingRulesEditor: View {
     @State private var text = ""
     @State private var parseNote: String?
     @State private var selectedGroupID: UUID?
+    @State private var perspective = "source"
+    @State private var source = "proxy"
+    @State private var baselineRules: [RoutingRule]
+    @State private var configurationConflict = false
 
-    init(rules: [RoutingRule]) {
+    private let embedded: Bool
+
+    init(rules: [RoutingRule], embedded: Bool = false) {
+        self.embedded = embedded
         _groups = State(initialValue: makeGroupDrafts(rules))
+        _baselineRules = State(initialValue: rules)
     }
 
     private var flatRules: [RoutingRule] { flattenGroups(groups) }
+    private var visibleIndices: [Int] {
+        groups.indices.filter { perspective == "assets" || groups[$0].rules.contains { $0.action == source } || groups[$0].rules.isEmpty }
+    }
     private var selectedIndex: Int {
-        guard let id = selectedGroupID, let idx = groups.firstIndex(where: { $0.id == id }) else {
-            return groups.isEmpty ? -1 : 0
+        guard let id = selectedGroupID, let idx = groups.firstIndex(where: { $0.id == id }), visibleIndices.contains(idx) else {
+            return visibleIndices.first ?? -1
         }
         return idx
     }
@@ -74,26 +85,17 @@ struct RoutingRulesEditor: View {
         VStack(spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("分流规则").font(.title3.weight(.semibold))
-                    Text("代理 Wi-Fi、手动网关和 HTTP 代理共用此规则；保存后即时应用。")
+                    Text("规则资产").font(.title3.weight(.semibold))
+                    Text("所有接入方式共用规则；保存后即时生效。")
                         .font(.caption).foregroundStyle(Theme.cyan)
-                    Text("自上而下匹配，命中第一条即生效；分组仅用于整理，组顺序即优先级块。")
+                    Text("资产按全局顺序匹配，首条命中生效。")
                         .font(.caption).foregroundStyle(Theme.muted)
                 }
                 Spacer()
-                Picker("", selection: $editorMode) {
-                    Text("列表").tag("list")
-                    Text("文本").tag("text")
-                }
-                .labelsHidden().pickerStyle(.segmented).frame(width: 130)
-                .onChange(of: editorMode) { mode in
-                    if mode == "text" {
-                        text = flatRules.isEmpty ? ruleTemplateText : serializeRuleLines(flatRules)
-                        parseNote = nil
-                    } else {
-                        syncTextToDraft()
-                    }
-                }
+                StudioTabs(title: "编辑方式", selection: Binding(get: { editorMode }, set: { mode in
+                    if mode == "text" { text = serializeRuleLines(flatRules); parseNote = nil; editorMode = mode }
+                    else if syncTextToDraft() { editorMode = mode }
+                }), items: [("list", "交互式", ""), ("text", "文本式", "")], compact:true)
                 if editorMode == "list" {
                     Menu {
                         Section("预设分组 · 走上游代理") {
@@ -115,6 +117,14 @@ struct RoutingRulesEditor: View {
             .background(Theme.panel)
             Divider().overlay(Theme.border)
 
+            HStack(spacing: 16) {
+                StudioTabs(title: "规则视角", selection:$perspective, items:[("source","代理源视角",""),("assets","资产视角","")], compact:true)
+                if perspective == "source" {
+                    StudioTabs(title: "网络出口", selection:$source, items:[("proxy","代理出口","cloud"),("direct","本机直连","globe"),("reject","拒绝","ban")], compact:true)
+                }
+                Spacer()
+                Text("每条规则指定一个出口").font(.caption).foregroundStyle(Theme.muted)
+            }.padding(.horizontal, 20).padding(.vertical, 10)
             if editorMode == "text" {
                 VStack(alignment: .leading, spacing: 8) {
 					Text("每行一条：类型,值,动作。支持 DOMAIN / DOMAIN-SUFFIX / IP-CIDR / SRC-IP；DIRECT / REJECT，其他目标视为代理。SRC-IP 是设备级前置规则，优先于域名规则。「# == 分组: 名称 ==」行开始一个分组，「# == 未分组 ==」结束分组；其他 # 行为注释。")
@@ -126,7 +136,7 @@ struct RoutingRulesEditor: View {
                         .scrollIndicators(.hidden)
                         .padding(8)
                         .background(Theme.panel)
-                        .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(Theme.border, lineWidth: Theme.borderWidth))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(Theme.border, lineWidth: 0.8))
                         .clipShape(RoundedRectangle(cornerRadius: Theme.radius))
                     if let parseNote {
                         Text(parseNote).font(.caption2).foregroundStyle(Theme.yellow)
@@ -136,13 +146,13 @@ struct RoutingRulesEditor: View {
             } else if groups.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "arrow.triangle.branch").font(.system(size: 28)).foregroundStyle(Theme.muted)
-                    Text("暂无规则，全部流量使用默认出口").font(.callout).foregroundStyle(Theme.muted)
+                    Text("暂无规则，未配置的域名先直连").font(.callout).foregroundStyle(Theme.muted)
                     HStack(spacing: 8) {
                         ForEach(ruleGroupPresets.prefix(3), id: \.name) { preset in
-                            Button("添加 \(preset.name)") { addPreset(preset) }.buttonStyle(.bordered)
+                            Button("添加 \(preset.name)") { addPreset(preset) }.buttonStyle(StudioButtonStyle())
                         }
                     }
-                    Button { addUngroupedRule() } label: { Label("添加单条规则", systemImage: "plus") }.buttonStyle(.bordered)
+                    Button { addUngroupedRule() } label: { Label("添加单条规则", systemImage: "plus") }.buttonStyle(StudioButtonStyle())
                     Button { editorMode = "text" } label: { Label("粘贴文本规则", systemImage: "doc.on.clipboard") }.buttonStyle(.plain).font(.caption).foregroundStyle(Theme.cyan)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -172,15 +182,15 @@ struct RoutingRulesEditor: View {
                         Divider().overlay(Theme.border)
                         ScrollView(.vertical, showsIndicators: true) {
                             VStack(spacing: 2) {
-                                ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
-                                    groupDirectoryRow(index: index, group: group, selected: index == selectedIndex)
+                                ForEach(visibleIndices, id: \.self) { index in
+                                    groupDirectoryRow(index: index, group: groups[index], selected: index == selectedIndex)
                                 }
                             }
                             .padding(.horizontal, 8).padding(.vertical, 6)
                         }
                         .background(Theme.panel)
                     }
-                    .frame(width: 200)
+                    .frame(width: 190)
                     Divider().overlay(Theme.border)
                     // 右侧规则窗格
                     VStack(spacing: 0) {
@@ -226,7 +236,11 @@ struct RoutingRulesEditor: View {
                     }
                 }
                 Spacer()
-                Button("取消") { dismiss() }.buttonStyle(.bordered).disabled(isSaving)
+                Button(embedded ? "撤销修改" : "取消") {
+                    if embedded {
+                        loadLatest(model.status?.routing ?? baselineRules)
+                    } else { dismiss() }
+                }.buttonStyle(StudioButtonStyle()).disabled(isSaving)
                 Button {
                     save()
                 } label: {
@@ -237,12 +251,23 @@ struct RoutingRulesEditor: View {
                     }
                 }
                 .buttonStyle(ActionButtonStyle(tint: Theme.cyan))
-                .disabled((editorMode == "list" && hasInvalidRule) || isSaving || model.isBusy)
+                .disabled((editorMode == "list" && hasInvalidRule) || isSaving || model.isBusy || configurationConflict)
             }
             .padding(.horizontal, 20).padding(.vertical, 14)
             .background(Theme.panel)
         }
-        .frame(width: 760, height: 520).background(Theme.canvasBackground)
+        .frame(minWidth: embedded ? 0 : 940, maxWidth: embedded ? .infinity : 940, minHeight: 600, maxHeight: embedded ? .infinity : 600).background(Theme.canvasBackground)
+        .onReceive(model.$status) { status in
+            guard !isSaving, let status else { return }
+            let changed = editorMode == "text" ? text != serializeRuleLines(baselineRules) : NetworkRuleRevision.signature(flatRules) != NetworkRuleRevision.signature(baselineRules)
+            switch NetworkRuleRevision.assess(baseline: baselineRules, latest: status.routing ?? [], draftChanged: changed) {
+            case .unchanged: break
+            case .reload: loadLatest(status.routing ?? [])
+            case .conflict:
+                configurationConflict = true
+                saveError = "规则已在其他位置更新。请先复制草稿，再撤销修改并重新编辑，避免覆盖新规则。"
+            }
+        }
     }
 
     // MARK: group header (sidebar + pane)
@@ -308,13 +333,7 @@ struct RoutingRulesEditor: View {
                 Spacer()
                 HStack(spacing: 6) {
                     Circle().fill(groupActionSummaryColor(group)).frame(width: 7, height: 7)
-                    Picker("组动作", selection: groupActionBinding(groupIndex)) {
-                        if groupActionSummary(group) == "mixed" { Text("混合").tag("mixed") }
-                        Text("上游代理").tag("proxy")
-                        Text("本机直连").tag("direct")
-                        Text("拒绝").tag("reject")
-                    }
-                    .labelsHidden()
+                    StudioSelect(title:"资产出口",selection:groupActionBinding(groupIndex),options:(groupActionSummary(group) == "mixed" ? [("mixed","混合")]:[])+[("proxy","上游代理"),("direct","本机直连"),("reject","拒绝")]).frame(width:130)
                 }
                 Button {
                     groups[groupIndex].rules.append(RoutingRule(type: "domain-suffix", value: "", action: dominantAction(groups[groupIndex])))
@@ -425,12 +444,7 @@ struct RoutingRulesEditor: View {
                 .frame(width: 22, height: 20)
                 .background(Theme.panelRaised)
                 .clipShape(RoundedRectangle(cornerRadius: 4))
-            Picker("类型", selection: rule.type) {
-                Text("完整域名").tag("domain")
-                Text("域名后缀").tag("domain-suffix")
-                Text("IP-CIDR").tag("ip-cidr")
-				Text("设备 IP").tag("src-ip")
-            }.labelsHidden().frame(width: 104)
+            StudioSelect(title:"匹配类型",selection:rule.type,options:[("domain","完整域名"),("domain-suffix","域名后缀"),("ip-cidr","IP-CIDR"),("src-ip","设备 IP")]).frame(width:120)
             TextField(placeholder(for: rule.wrappedValue.type), text: rule.value)
                 .textFieldStyle(DarkFieldStyle())
                 .font(.system(size: 12, design: .monospaced))
@@ -441,7 +455,7 @@ struct RoutingRulesEditor: View {
                     .padding(.horizontal, 5).padding(.vertical, 2)
                     .background(Theme.yellow.opacity(0.14))
                     .clipShape(Capsule())
-                    .help("代理拨号失败后回退直连多次成功，自动生成的规则；可随时删除")
+                    .help("根据收到的有效响应自动学习；明确规则优先，可随时删除")
             }
             actionPill(rule.action)
             Menu {
@@ -470,9 +484,9 @@ struct RoutingRulesEditor: View {
             .menuIndicator(.hidden)
             .help("更多操作：移动到分组或删除")
         }
-        .padding(.horizontal, 10).frame(height: 44)
+        .padding(.horizontal, 10).padding(.vertical, 8)
         .background(Theme.panel)
-        .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(Theme.border, lineWidth: Theme.borderWidth))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(Theme.border, lineWidth: 0.8))
         .clipShape(RoundedRectangle(cornerRadius: Theme.radius))
     }
 
@@ -480,17 +494,8 @@ struct RoutingRulesEditor: View {
     private func actionPill(_ action: Binding<String>) -> some View {
         let value = action.wrappedValue
         let color = actionColor(value)
-        Picker("动作", selection: action) {
-            Text("代理").tag("proxy")
-            Text("直连").tag("direct")
-            Text("拒绝").tag("reject")
-        }
-        .labelsHidden()
-        .frame(width: 88)
-        .padding(.horizontal, 8).padding(.vertical, 3)
-        .background(color.opacity(0.12))
-        .overlay(Capsule().stroke(color.opacity(0.35), lineWidth: 0.5))
-        .clipShape(Capsule())
+        StudioSelect(title:"规则出口",selection:action,options:[("proxy","代理"),("direct","直连"),("reject","拒绝")])
+            .frame(width:100).foregroundStyle(color)
         .help("选择该规则的出口动作")
     }
 
@@ -615,8 +620,23 @@ struct RoutingRulesEditor: View {
 
     // MARK: save / text sync
 
+    private func loadLatest(_ rules: [RoutingRule]) {
+        baselineRules = rules
+        groups = makeGroupDrafts(rules)
+        text = serializeRuleLines(rules)
+        configurationConflict = false; saveError = nil; parseNote = nil
+    }
+
     private func save() {
-        if editorMode == "text" { syncTextToDraft() }
+        guard let status = model.status else {
+            saveError = "当前配置不可用，请刷新后重试。"; return
+        }
+        let latest = status.routing ?? []
+        guard NetworkRuleRevision.signature(latest) == NetworkRuleRevision.signature(baselineRules) else {
+            configurationConflict = true
+            saveError = "规则已更新，请撤销修改后重新编辑。"; return
+        }
+        if editorMode == "text", !syncTextToDraft() { return }
         saveError = nil
         isSaving = true
         let rules = flattenGroups(groups)
@@ -624,7 +644,8 @@ struct RoutingRulesEditor: View {
             let ok = await model.applyRoutingRules(rules)
             isSaving = false
             if ok {
-                dismiss()
+                loadLatest(model.status?.routing ?? rules)
+                if !embedded { dismiss() }
             } else {
                 saveError = model.errorMessage ?? "保存失败，请检查规则"
             }
@@ -651,12 +672,17 @@ struct RoutingRulesEditor: View {
         """
     }
 
-    private func syncTextToDraft() {
+    @discardableResult
+    private func syncTextToDraft() -> Bool {
         let result = parseRuleLines(text)
+        guard result.skipped.isEmpty else {
+            parseNote = "无法识别 \(result.skipped.count) 行：\(result.skipped.prefix(3).joined(separator: "；"))。请修正后再应用。"
+            saveError = parseNote
+            return false
+        }
         groups = makeGroupDrafts(result.rules)
-        parseNote = result.skipped.isEmpty
-            ? nil
-            : "已跳过 \(result.skipped.count) 行不支持的规则：\(result.skipped.prefix(3).joined(separator: "；"))\(result.skipped.count > 3 ? " …" : "")"
+        parseNote = nil; saveError = nil
+        return true
     }
 
     private func placeholder(for type: String) -> String {

@@ -59,15 +59,22 @@ func (a *App) startServices(ctx context.Context, logger *slog.Logger, origDST re
 		return nil, err
 	}
 	rt.relay = relay.New(relay.Options{
-		ListenAddr: net.JoinHostPort("", strconv.Itoa(a.Cfg.Runtime.RedirPort)),
-		OrigDST:    origDST,
-		Tracker:    rt.tracker,
-		Dialer:     dialer,
-		ViaProxy:   a.Cfg.Egress.Mode == config.EgressProxy,
-		OnFallbackSuccess: func(host string) {
-			srv, _, _ := rt.services()
-			if srv != nil && !srv.EgressHealth().ProxyDown {
-				rt.learner.Record(host)
+		ResponsePolicy: rt.learner.ResponsePolicy,
+		ListenAddr:     net.JoinHostPort("", strconv.Itoa(a.Cfg.Runtime.RedirPort)),
+		OrigDST:        origDST,
+		Tracker:        rt.tracker,
+		Dialer:         dialer,
+		ViaProxy:       a.Cfg.Egress.Mode == config.EgressProxy,
+		OnProxyFallbackSuccess: func(host string) {
+			added, err := a.learnProxyResponse(rt.learner, host)
+			if err != nil {
+				rt.logger.Warn("保存自动代理规则失败", "host", host, "err", err)
+				return
+			}
+			if added {
+				rt.learner.mu.Lock()
+				rt.applyRouting(a.getCfg())
+				rt.learner.mu.Unlock()
 			}
 		},
 		Logger: logger,
@@ -235,15 +242,22 @@ func (rt *daemonRuntime) restartService(ctx context.Context, a *App, name string
 				return
 			}
 			newRelay := relay.New(relay.Options{
-				ListenAddr: net.JoinHostPort("", strconv.Itoa(a.Cfg.Runtime.RedirPort)),
-				OrigDST:    origDST,
-				Tracker:    rt.tracker,
-				Dialer:     dialer,
-				ViaProxy:   a.Cfg.Egress.Mode == config.EgressProxy,
-				OnFallbackSuccess: func(host string) {
-					srv, _, _ := rt.services()
-					if srv != nil && !srv.EgressHealth().ProxyDown {
-						rt.learner.Record(host)
+				ResponsePolicy: rt.learner.ResponsePolicy,
+				ListenAddr:     net.JoinHostPort("", strconv.Itoa(a.Cfg.Runtime.RedirPort)),
+				OrigDST:        origDST,
+				Tracker:        rt.tracker,
+				Dialer:         dialer,
+				ViaProxy:       a.Cfg.Egress.Mode == config.EgressProxy,
+				OnProxyFallbackSuccess: func(host string) {
+					added, err := a.learnProxyResponse(rt.learner, host)
+					if err != nil {
+						rt.logger.Warn("保存自动代理规则失败", "host", host, "err", err)
+						return
+					}
+					if added {
+						rt.learner.mu.Lock()
+						rt.applyRouting(a.getCfg())
+						rt.learner.mu.Unlock()
 					}
 				},
 				Logger: rt.logger,

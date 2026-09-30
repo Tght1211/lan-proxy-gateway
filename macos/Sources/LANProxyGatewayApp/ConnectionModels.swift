@@ -39,6 +39,8 @@ struct DeviceServiceAggregate: Decodable, Identifiable {
 }
 
 struct ConnectionInfo: Decodable, Identifiable {
+    let lastTrafficAt: Date?
+    let responseMS: Int64?
     let proxyEndpoint: String?
     let ingress: String
     var isHTTPProxy: Bool { ingress == "http-proxy" }
@@ -62,6 +64,8 @@ struct ConnectionInfo: Decodable, Identifiable {
     var isUDP: Bool { proto == "udp" }
 
     enum CodingKeys: String, CodingKey {
+        case lastTrafficAt = "last_traffic_at"
+        case responseMS = "response_ms"
         case proxyEndpoint = "proxy_endpoint"
         case ingress, id, up, down, proto
         case service
@@ -79,6 +83,8 @@ struct ConnectionInfo: Decodable, Identifiable {
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        lastTrafficAt = try values.decodeIfPresent(Date.self, forKey: .lastTrafficAt)
+        responseMS = try values.decodeIfPresent(Int64.self, forKey: .responseMS)
         proxyEndpoint = try values.decodeIfPresent(String.self, forKey: .proxyEndpoint)
         ingress = try values.decodeIfPresent(String.self, forKey: .ingress) ?? "gateway"
         id = try values.decode(UInt64.self, forKey: .id)
@@ -102,14 +108,16 @@ struct ConnectionInfo: Decodable, Identifiable {
     var outcome: ConnectionOutcome {
         if status == "rejected" || rejected { return .rejected }
         if status == "dial_failed" { return .failed(failure.nonEmptyValue ?? "连接失败") }
-        if endedAt == nil { return .active }
+        if endedAt == nil { return down > 0 ? .active : .waiting }
         if up + down == 0 { return .noData }
+        if down == 0 { return .failed("未收到响应") }
         return .success
     }
 }
 
 enum ConnectionOutcome: Equatable {
     case active
+    case waiting
     case success
     case noData
     case failed(String)
@@ -118,7 +126,8 @@ enum ConnectionOutcome: Equatable {
     var label: String {
         switch self {
         case .active: return "活跃"
-        case .success: return "成功"
+        case .waiting: return "等待响应"
+        case .success: return "已响应"
         case .noData: return "无数据"
         case .failed(let reason): return "失败·\(reason)"
         case .rejected: return "拒绝"
@@ -143,6 +152,7 @@ struct UsageAggregate: Decodable, Identifiable {
     let down: Int64
     let connections: Int64
     let lastSeen: Date
+    var lastTrafficAt: Date? = nil
     var id: String { name }
     var total: Int64 { up + down }
     var displayName: String { ["未识别流量", "IP 地址流量"].contains(name) ? "未解析域名" : name }
@@ -150,6 +160,7 @@ struct UsageAggregate: Decodable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case name, up, down, connections
         case lastSeen = "last_seen"
+        case lastTrafficAt = "last_traffic_at"
     }
 }
 

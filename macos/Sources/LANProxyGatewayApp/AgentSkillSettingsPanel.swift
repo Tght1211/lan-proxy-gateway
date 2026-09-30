@@ -35,10 +35,10 @@ struct AgentSkillSettingsPanel: View {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(installPrompt, forType: .string)
                         message = "安装说明已复制"
-                    }.buttonStyle(.bordered)
+                    }.buttonStyle(StudioButtonStyle())
                     if let exportedURL {
                         Button("显示文件") { NSWorkspace.shared.activateFileViewerSelecting([exportedURL]) }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(StudioButtonStyle())
                     }
                     Spacer()
                 }

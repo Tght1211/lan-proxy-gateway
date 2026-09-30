@@ -2,18 +2,22 @@ import Foundation
 
 enum AppSection: String, CaseIterable, Identifiable {
     case overview = "网络总览"
+    case exits = "网络出口"
+    case rules = "配置规则"
     case devices = "设备接入"
-    case connections = "访问记录"
+    case connections = "流量记录"
     case settings = "设置"
 
     var id: String { rawValue }
 
     var systemImage: String {
         switch self {
-        case .overview: return "command"
-        case .devices: return "desktopcomputer.and.macbook"
-        case .connections: return "list.bullet.rectangle.portrait"
-        case .settings: return "gearshape"
+        case .overview: return "point.3.connected.trianglepath.dotted"
+        case .exits: return "route"
+        case .rules: return "network"
+        case .devices: return "gamecontroller"
+        case .connections: return "activity"
+        case .settings: return "settings"
         }
     }
 }

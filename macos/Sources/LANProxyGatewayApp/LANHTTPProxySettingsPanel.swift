@@ -47,17 +47,17 @@ struct LANHTTPProxySettingsPanel: View {
                     Button("复制地址") {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(address, forType: .string)
-                    }.buttonStyle(.bordered)
+                    }.buttonStyle(StudioButtonStyle())
                 }
                 SettingsRow(title: "HTTP 代理端口", detail: "客户端的 HTTP 与 HTTPS 代理填写同一端口") {
-                    TextField("17894", text: $port).textFieldStyle(.roundedBorder).frame(width: 140)
+                    TextField("17894", text: $port).textFieldStyle(StudioFieldStyle()).frame(width: 140)
                 }
                 if let saved = model.status?.httpProxy, saved.enabled {
                     SettingsRow(title: "自动代理 PAC", detail: "使用已保存的端口；PAC 与手动代理共用服务") {
                         Button("复制 PAC 网址") {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString("http://\(address):\(saved.port)/proxy.pac", forType: .string)
-                        }.buttonStyle(.bordered)
+                        }.buttonStyle(StudioButtonStyle())
                     }
                 }
                 SettingsRow(title: "认证方式", detail: "这是局域网设备的接入凭据，与上游 VPN 代理账号独立") {
@@ -68,11 +68,11 @@ struct LANHTTPProxySettingsPanel: View {
                 }
                 if auth == "basic" {
                     SettingsRow(title: "用户名", detail: "客户端代理认证用户名") {
-                        TextField("用户名", text: $username).textFieldStyle(.roundedBorder).frame(width: 220)
+                        TextField("用户名", text: $username).textFieldStyle(StudioFieldStyle()).frame(width: 220)
                     }
                     SettingsRow(title: "密码", detail: passwordSet ? "已设置；留空保留原密码" : "请输入接入密码") {
                         SecureField(passwordSet ? "留空保留原密码" : "密码", text: $password)
-                            .textFieldStyle(.roundedBorder).frame(width: 220)
+                            .textFieldStyle(StudioFieldStyle()).frame(width: 220)
                     }
                 }
                 if model.status?.egress == "direct" {

@@ -3,6 +3,11 @@ import Foundation
 
 @MainActor
 final class AppModel: ObservableObject {
+    @Published var interfaceMode: InterfaceMode = InterfaceMode.restored(UserDefaults.standard.string(forKey: "interfaceMode")) {
+        didSet { UserDefaults.standard.set(interfaceMode.rawValue, forKey: "interfaceMode") }
+    }
+    @Published private(set) var hotspotRates: [HotspotRatePoint] = []
+    private var hotspotSampler = HotspotTrafficSampler()
     @Published var hotspot: HotspotStatus?
     @Published var hotspotError: String?
     @Published var hotspotOperation: String?
@@ -28,7 +33,24 @@ final class AppModel: ObservableObject {
         }
     }
     @Published var status: GatewayStatus?
-    @Published var stats: RuntimeStats?
+    @Published var stats: RuntimeStats? {
+        didSet {
+            if let stats { deviceActivity.ingest(stats.relay.devices, uptime: stats.uptimeSec, at: Date()) }
+        }
+    }
+    private var deviceActivity = NetworkDeviceActivity()
+
+    var visibleDevices: [UsageAggregate] {
+        (stats?.relay.devices ?? []).filter { deviceActivity.state(for: $0, at: Date()) != .hidden }
+            .sorted {
+                let a = deviceActivity.lastTraffic(for: $0) ?? .distantPast
+                let b = deviceActivity.lastTraffic(for: $1) ?? .distantPast
+                return a == b ? $0.name < $1.name : a > b
+            }
+    }
+    func isDeviceInactive(_ device: UsageAggregate) -> Bool {
+        deviceActivity.state(for: device, at: Date()) == .inactive
+    }
     @Published var selectedSection: AppSection? = .overview
     @Published var proxyType = "socks5"
     @Published var proxyHost = "127.0.0.1"
@@ -44,7 +66,7 @@ final class AppModel: ObservableObject {
     @Published var coreUpgradeRecommended = false
     @Published var natDiag: NATDiagResult?
     @Published var isNATDiagRunning = false
-    @Published var themeID: String = UserDefaults.standard.string(forKey: "appThemeID") ?? "cream" {
+    @Published var themeID: String = UserDefaults.standard.string(forKey: "appThemeID") ?? "graphite" {
         didSet { UserDefaults.standard.set(themeID, forKey: "appThemeID") }
     }
 
@@ -84,7 +106,7 @@ final class AppModel: ObservableObject {
     var isRunning: Bool { status?.running == true }
     var isConfigured: Bool { status?.configured == true }
     var activeDeviceCount: Int {
-        Set(stats?.relay.active.map(\.srcIP) ?? []).count
+        visibleDevices.filter { !isDeviceInactive($0) }.count
     }
 
     func refresh(silent: Bool = false) async {
@@ -99,13 +121,16 @@ final class AppModel: ObservableObject {
                 do {
                     let runtime = try await client.stats(apiPort: latest.ports.api, configFile: latest.configFile)
                     stats = runtime
+                    updateHotspotRates(runtime)
                     coreUpgradeRecommended = runtime.schemaVersion != 3
                 } catch {
                     stats = nil
+                    hotspotSampler.reset(); hotspotRates = []
                     coreUpgradeRecommended = true
                 }
             } else {
                 stats = nil
+                hotspotSampler.reset(); hotspotRates = []
                 coreUpgradeRecommended = false
             }
             recomputeAutoDeviceLabels()
@@ -115,8 +140,22 @@ final class AppModel: ObservableObject {
             }
             if !silent { showNotice("状态已刷新") }
         } catch {
+            stats = nil
+            hotspotSampler.reset(); hotspotRates = []
             if !silent { errorMessage = error.localizedDescription }
         }
+    }
+
+    private func updateHotspotRates(_ runtime: RuntimeStats) {
+        guard let network = runtime.hotspot, network.applied, let history = runtime.usageHistory else {
+            hotspotSampler.reset(); hotspotRates = []; return
+        }
+        let day = usageDate()
+        let rows = hotspotUsage(history, network: network, date: day)
+        hotspotSampler.record(key: "\(network.cidr)|\(day)", at: Date(),
+                              up: rows.reduce(0) { $0 + $1.up }, down: rows.reduce(0) { $0 + $1.down },
+                              uptime: Int64(runtime.uptimeSec))
+        hotspotRates = hotspotSampler.points
     }
 
     func refreshHotspot() async {
@@ -227,7 +266,7 @@ final class AppModel: ObservableObject {
     }
 
     func learningAction(_ action: String, host: String) async {
-        _ = await performAsync("规则建议已更新") { try await self.client.learningAction(action, host: host) }
+        _ = await performAsync("学习设置或记录已更新") { try await self.client.learningAction(action, host: host) }
     }
 
     @discardableResult
@@ -319,20 +358,10 @@ final class AppModel: ObservableObject {
             return
         }
         let now = Date()
+        let connections = (stats?.relay.active ?? []) + (stats?.relay.recent ?? [])
         var labels: [String: String] = [:]
         for group in deviceGroups {
-            guard let lastSeen = group.services.map(\.lastSeen).max(),
-                  now.timeIntervalSince(lastSeen) < 600 else { continue }
-            let names = Set(group.services.map(\.name))
-            if names.contains("Nintendo") {
-                labels[group.device] = "Switch"
-            } else if names.contains("PlayStation") {
-                labels[group.device] = "PlayStation"
-            } else if names.contains("Steam") {
-                labels[group.device] = "电脑"
-            } else if !names.isDisjoint(with: ["微信", "抖音", "小红书", "TikTok"]) {
-                labels[group.device] = "手机"
-            }
+            labels[group.device] = DeviceIdentification.label(connections: connections.filter { $0.srcIP == group.device }, services: group.services, at: now)
         }
         if labels != autoDeviceLabels { autoDeviceLabels = labels }
     }

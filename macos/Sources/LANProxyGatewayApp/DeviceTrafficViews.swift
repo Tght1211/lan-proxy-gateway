@@ -22,8 +22,14 @@ struct DeviceTrafficSheet: View {
     @State private var endpoint = ""
     @State private var search = ""
     @State private var tab = "域名用量"
+    @State private var deviceName = ""
+    private let showsPolicy: Bool
 
-    init(device: String) { _device = State(initialValue: device) }
+    init(device: String, initialRoute: String = "proxy", showsPolicy: Bool = false) {
+        _device = State(initialValue: device)
+        _route = State(initialValue: initialRoute)
+        self.showsPolicy = showsPolicy
+    }
 
     private var devices: [String] {
         Array(Set((model.stats?.usageHistory ?? []).map(\.device) +
@@ -77,6 +83,14 @@ struct DeviceTrafficSheet: View {
                 Spacer()
                 Button("完成") { dismiss() }
             }
+            if showsPolicy && !device.isEmpty {
+                HStack {
+                    TextField("设备名称（留空恢复自动识别）", text: $deviceName).textFieldStyle(StudioFieldStyle()).frame(width: 270)
+                    Button("保存名称") { model.setDeviceLabel(deviceName, for: device) }
+                    Spacer()
+                    DevicePolicyRow(ip: device).frame(width: 280)
+                }
+            }
             HStack {
                 Picker("设备", selection: $device) {
                     Text("全部设备").tag("")
@@ -110,7 +124,7 @@ struct DeviceTrafficSheet: View {
                 Picker("出口", selection: $route) {
                     Text("代理").tag("proxy"); Text("直连").tag("direct"); Text("全部").tag("all")
                 }.pickerStyle(.segmented).frame(width: 210)
-                TextField("搜索服务或域名", text: $search).textFieldStyle(.roundedBorder)
+                TextField("搜索服务或域名", text: $search).textFieldStyle(StudioFieldStyle())
             }
             if tab == "域名用量" {
                 Table(destinations) {
@@ -132,7 +146,7 @@ struct DeviceTrafficSheet: View {
                 Table(recent) {
                     TableColumn("时间") { Text($0.startedAt.formatted(date: .omitted, time: .standard)) }.width(80)
                     TableColumn("设备") { Text($0.srcIP) }.width(105)
-                    TableColumn("服务 / 目标") { Text("\($0.service) · \($0.dstHost):\($0.dstPort)").help($0.dstHost) }.width(min: 230, ideal: 350)
+                    TableColumn("服务 / 目标") { Text("\($0.service) · \($0.dstHost):\(String($0.dstPort))").help($0.dstHost) }.width(min: 230, ideal: 350)
                     TableColumn("实际出口") { item in
                         Text(item.rejected ? "拒绝" : (item.viaProxy ? (item.proxyEndpoint ?? "上游代理") : (item.fallback ? "回退直连" : "本机直连")))
                     }.width(min: 110, ideal: 140)
@@ -148,6 +162,7 @@ struct DeviceTrafficSheet: View {
         }
         .padding(22).frame(width: 1000, height: 700)
         .task {
+            deviceName = model.deviceLabel(for: device)
             if let current = model.status?.proxy?.split(separator: " ").last.map(String.init), endpoints.contains(current) { endpoint = current }
         }
     }
@@ -189,7 +204,7 @@ struct ProxyUsageOverview: View {
                     Text(shortBytes(direct)).font(.title3.monospacedDigit())
                     Text("旧版未分类用量不计入以上两项").font(.caption2).foregroundStyle(Theme.muted)
                 }
-                Button("查看设备与域名明细") { showDetails = true }.buttonStyle(.bordered)
+                Button("查看设备与域名明细") { showDetails = true }.buttonStyle(StudioButtonStyle())
             }
         }.sheet(isPresented: $showDetails) { DeviceTrafficSheet(device: "").environmentObject(model) }
     }

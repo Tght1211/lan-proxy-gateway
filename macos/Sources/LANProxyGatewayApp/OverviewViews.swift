@@ -146,7 +146,7 @@ struct FallbackLearningBadge: View {
                 Image(systemName: "wand.and.stars")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(isActive ? Theme.yellow : Theme.muted)
-                Text("规则建议")
+                Text("自动学习")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(isActive ? Color.primary : Theme.muted)
                 if !candidates.isEmpty {
@@ -179,7 +179,7 @@ struct FallbackLearningBadge: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .help("查看回退直连的证据，确认后才保存规则")
+        .help("查看自动保存的代理域名，或暂停某个域名的学习")
         .sheet(isPresented: $showDetail) {
             FallbackLearningPopover(onEditRules: {
                 showDetail = false
@@ -198,11 +198,13 @@ struct FallbackLearningPopover: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     let onEditRules: () -> Void
-    @State private var tab = "待处理"
+    var embedded = false
+    @State private var showSettings = false
+    @State private var tab = "已保存"
     private var candidates: [FallbackCandidate] { model.stats?.fallback?.candidates ?? [] }
     private var learned: [RoutingRule] { model.stats?.fallback?.learned ?? [] }
     private var ignored: [String] { model.stats?.fallback?.ignored ?? [] }
-    private var threshold: Int { model.stats?.fallback?.threshold ?? 3 }
+    private var threshold: Int { model.stats?.fallback?.threshold ?? 1 }
     private func service(_ host: String) -> String {
         let records = (model.stats?.relay.active ?? []) + (model.stats?.relay.recent ?? [])
         return records.first { $0.dstHost == host }?.service ?? host
@@ -210,33 +212,34 @@ struct FallbackLearningPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("规则建议").font(.title2.bold())
+                if !embedded { Text("自动学习").font(.title2.bold()) }
                 Spacer()
                 Button("管理规则", action: onEditRules)
-                Button("完成") { dismiss() }
+                if !embedded { Button("完成") { dismiss() } }
             }
-            Text("依据代理失败后的直连响应生成建议；不会自动保存永久规则，也不会覆盖已有规则。").font(.caption).foregroundStyle(Theme.muted)
-            Picker("状态", selection: $tab) {
-                Text("待处理 \(candidates.count)").tag("待处理")
-                Text("已保存 \(learned.count)").tag("已保存")
-                Text("已忽略 \(ignored.count)").tag("已忽略")
-            }.pickerStyle(.segmented)
+            if !embedded { Button("学习方案与设置") { showSettings = true } }
+            Text("未匹配规则的网站先直连；直连失败且代理收到响应后，按你设定的次数和保存方式学习。已有明确规则优先。").font(.caption).foregroundStyle(Theme.muted)
+            if model.stats?.fallback?.strategy != "direct-first" || model.stats?.fallback?.settings == nil {
+                Text("当前核心尚未支持新版自动学习，请更新并重启核心后管理学习记录。")
+                    .font(.caption).foregroundStyle(Theme.yellow)
+            }
+            StudioTabs(title:"学习记录状态",selection:$tab,items:[("待处理","待确认 \(candidates.count)",""),("已保存","已保存 \(learned.count)",""),("已忽略","暂停学习 \(ignored.count)","")],compact:true)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     if tab == "待处理" {
-                        if candidates.isEmpty { Text("暂无建议，正常使用网络即可。").foregroundStyle(Theme.muted) }
+                        if candidates.isEmpty { Text("没有待确认记录。").foregroundStyle(Theme.muted) }
                         ForEach(Array(Dictionary(grouping: candidates, by: { service($0.host) }).keys.sorted()), id: \.self) { name in
                             Text(name).font(.headline).foregroundStyle(Theme.cyan)
                             ForEach(candidates.filter { service($0.host) == name }) { candidate in
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text(candidate.host).textSelection(.enabled)
-                                    Text("最近 24 小时有 \(candidate.count) 次回退直连收到响应 · \(relativeTime(candidate.lastAt))")
+                                    Text("最近 24 小时有 \(candidate.count) 次直连失败后代理收到响应 · \(relativeTime(candidate.lastAt))")
                                         .font(.caption).foregroundStyle(Theme.muted)
                                     HStack {
-                                        Text(candidate.count >= threshold ? "建议此域名直连" : "证据不足，继续观察").font(.caption)
+                                        Text(candidate.count >= threshold ? "已达到保存条件" : "等待有效代理响应").font(.caption)
                                         Spacer()
-                                        Button("忽略") { Task { await model.learningAction("ignore", host: candidate.host) } }
-                                        Button("保存直连规则") { Task { await model.learningAction("accept", host: candidate.host) } }
+                                        Button("暂停学习") { Task { await model.learningAction("ignore", host: candidate.host) } }
+                                        Button("保存代理规则") { Task { await model.learningAction("accept", host: candidate.host) } }
                                             .disabled(candidate.count < threshold)
                                     }
                                 }.padding(12).background(Theme.panelRaised).cornerRadius(8)
@@ -248,26 +251,28 @@ struct FallbackLearningPopover: View {
                             HStack {
                                 VStack(alignment: .leading) {
                                     Text(rule.value).textSelection(.enabled)
-                                    Text(rule.type == "domain" ? "仅此域名 · 直连" : "域名及子域名 · 历史学习规则").font(.caption).foregroundStyle(Theme.muted)
+                                    Text((rule.type == "domain" ? "仅此域名" : "域名及子域名") + (rule.action == "proxy" ? " · 代理" : " · 直连（旧版保留）")).font(.caption).foregroundStyle(Theme.muted)
                                 }
                                 Spacer()
-                                Button("撤销") { Task { await model.learningAction("undo", host: rule.value) } }
+                                Button("撤销并暂停学习") { Task { await model.learningAction("undo", host: rule.value) } }
                             }.padding(12).background(Theme.panelRaised).cornerRadius(8)
                         }
                     } else {
-                        if ignored.isEmpty { Text("暂无已忽略的域名").foregroundStyle(Theme.muted) }
+                        if ignored.isEmpty { Text("暂无暂停学习的域名").foregroundStyle(Theme.muted) }
                         ForEach(ignored, id: \.self) { host in
                             HStack {
                                 Text(host).textSelection(.enabled)
                                 Spacer()
-                                Button("恢复观察") { Task { await model.learningAction("restore", host: host) } }
+                                Button("恢复学习") { Task { await model.learningAction("restore", host: host) } }
                             }.padding(12).background(Theme.panelRaised).cornerRadius(8)
                         }
                     }
                 }
-            }
-            Text("收到响应只证明连接有数据，不保证视频等业务可用；保存后仍可撤销。").font(.caption).foregroundStyle(Theme.muted)
-        }.padding(24).frame(width: 680, height: 540).disabled(model.isBusy)
+            }.disabled(model.stats?.fallback?.strategy != "direct-first")
+            Text("收到响应只证明连接有数据，不保证业务成功。撤销会同时暂停学习；恢复后需重新观察，不会立即添加规则。").font(.caption).foregroundStyle(Theme.muted)
+        }.padding(embedded ? 0:24).frame(maxWidth:embedded ? .infinity:680).frame(height:embedded ? 380:540)
+        .disabled(model.isBusy)
+        .sheet(isPresented:$showSettings) { SheetFrame(title:"自学习设置") { LearningSettingsView() } }
     }
 }
 

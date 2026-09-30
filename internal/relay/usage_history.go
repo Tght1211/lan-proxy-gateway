@@ -77,12 +77,14 @@ func (t *Tracker) recordUsage(c *TrackedConn, up, down, connections int64, now t
 		return
 	}
 	day := now.Local().Format("2006-01-02")
+	c.routeMu.RLock()
 	egress := "direct"
 	if c.viaProxy {
 		egress = "proxy"
 	}
 	entry := DailyUsage{Date: day, Device: c.srcIP, Ingress: c.ingress, Egress: egress,
 		ProxyEndpoint: c.proxyEndpoint, Destination: strings.TrimSuffix(strings.ToLower(c.dstHost), "."), Service: c.service}
+	c.routeMu.RUnlock()
 	key := entry.key()
 	h.mu.Lock()
 	defer h.mu.Unlock()
