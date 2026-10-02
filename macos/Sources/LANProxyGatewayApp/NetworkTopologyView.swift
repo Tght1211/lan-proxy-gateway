@@ -84,25 +84,25 @@ struct NetworkTopologyView: View {
         return NetworkTopologyLayout.orderedDevices(visible, inactive: Set(visible.filter { model.isDeviceInactive($0) }.map(\.name)))
     }
     private var nodes: [NetworkNode] {
-        var list = devices.enumerated().map { index, d in
+        var list: [NetworkNode] = devices.enumerated().map { index, d in
             NetworkNode(id: "device:" + d.name, title: model.effectiveDeviceLabel(for: d.name).nonEmpty ?? d.name,
                         icon: deviceIcon(label: model.effectiveDeviceLabel(for: d.name)), detail: shortBytes(d.total), column: 0, row: devices.count > 1 ? Double(index) * 3 / Double(devices.count - 1) : 1.5, destination: .device(d.name), inactive: model.isDeviceInactive(d))
         }
-        list += [
-            .init(id: "wifi", title: "Wi-Fi 热点", icon: "wifi", detail: network?.applied == true ? "已接管" : "未接管", column: 1, row: 0, destination: .access("wifi")),
-            .init(id: "gateway", title: "静态网关", icon: "cable.connector", detail: "手动网关", column: 1, row: 1.5, destination: .access("gateway")),
-            .init(id: "http", title: "HTTP / PAC", icon: "network", detail: model.status?.httpProxy?.enabled == true ? "已启用" : "未启用", column: 1, row: 3, destination: .access("http")),
-            .init(id: "hotspot", title: "热点网关", icon: "wifi.router", detail: network?.ip.nonEmpty ?? "尚未发现", column: 2, row: 0.5, destination: .gateway(network?.ip.nonEmpty ?? "尚未发现")),
-            .init(id: "lan", title: "局域网入口", icon: "server.rack", detail: model.status?.gateway.localIP.nonEmpty ?? "尚未发现", column: 2, row: 2.5, destination: .gateway(model.status?.gateway.localIP ?? "—")),
-            .init(id: "policy", title: "设备策略", icon: "slider.horizontal.3", detail: "设备优先", column: 3, row: 1.5, destination: .policy),
-            .init(id: "rules", title: "流量规则", icon: "arrow.triangle.branch", detail: "首条命中", column: 4, row: 1.5, destination: .rules),
-            .init(id: "learning", title: "自学习", icon: "sparkles", detail: "补充域名策略", column: 4, row: 3, destination: .learning),
-            .init(id: "direct", title: "本机直连", icon: "globe", detail: "DIRECT", column: 5, row: 1.5, destination: .direct),
-            .init(id: "reject", title: "拒绝", icon: "nosign", detail: "本机终止", column: 5, row: 3, destination: .reject),
-            .init(id: "internet", title: "互联网", icon: "globe.americas", detail: "目标服务", column: 6, row: 1.5, destination: .internet)
-        ]
+        let hotspotAddress = network?.ip.nonEmpty ?? "尚未发现"
+        let localAddress = model.status?.gateway.localIP
+        list.append(NetworkNode(id: "wifi", title: "Wi-Fi 热点", icon: "wifi", detail: network?.applied == true ? "已接管" : "未接管", column: 1, row: 0, destination: .access("wifi")))
+        list.append(NetworkNode(id: "gateway", title: "静态网关", icon: "cable.connector", detail: "手动网关", column: 1, row: 1.5, destination: .access("gateway")))
+        list.append(NetworkNode(id: "http", title: "HTTP / PAC", icon: "network", detail: model.status?.httpProxy?.enabled == true ? "已启用" : "未启用", column: 1, row: 3, destination: .access("http")))
+        list.append(NetworkNode(id: "hotspot", title: "热点网关", icon: "wifi.router", detail: hotspotAddress, column: 2, row: 0.5, destination: .gateway(hotspotAddress)))
+        list.append(NetworkNode(id: "lan", title: "局域网入口", icon: "server.rack", detail: localAddress?.nonEmpty ?? "尚未发现", column: 2, row: 2.5, destination: .gateway(localAddress ?? "—")))
+        list.append(NetworkNode(id: "policy", title: "设备策略", icon: "slider.horizontal.3", detail: "设备优先", column: 3, row: 1.5, destination: .policy))
+        list.append(NetworkNode(id: "rules", title: "流量规则", icon: "arrow.triangle.branch", detail: "首条命中", column: 4, row: 1.5, destination: .rules))
+        list.append(NetworkNode(id: "learning", title: "自学习", icon: "sparkles", detail: "补充域名策略", column: 4, row: 3, destination: .learning))
+        list.append(NetworkNode(id: "direct", title: "本机直连", icon: "globe", detail: "DIRECT", column: 5, row: 1.5, destination: .direct))
+        list.append(NetworkNode(id: "reject", title: "拒绝", icon: "nosign", detail: "本机终止", column: 5, row: 3, destination: .reject))
+        list.append(NetworkNode(id: "internet", title: "互联网", icon: "globe.americas", detail: "目标服务", column: 6, row: 1.5, destination: .internet))
         if model.status?.proxy?.isEmpty == false {
-            list.append(.init(id: "proxy", title: "代理出口", icon: "cloud", detail: model.status?.proxy ?? "", column: 5, row: 0, destination: .proxy))
+            list.append(NetworkNode(id: "proxy", title: "代理出口", icon: "cloud", detail: model.status?.proxy ?? "", column: 5, row: 0, destination: .proxy))
         }
         return list
     }

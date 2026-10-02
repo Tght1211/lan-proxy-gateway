@@ -98,13 +98,13 @@ The app and CLI share the same core/configuration. macOS uses `pf`; Linux uses `
 make build
 make test
 make build-app
-make dmg VERSION=v4.5.0
-make skill VERSION=v4.5.0
+make dmg VERSION=v4.5.1
+make skill VERSION=v4.5.1
 ```
 
 Full Xcode or the GitHub macOS runner produces a universal app; Command Line Tools-only builds use the host architecture for the SwiftUI shell.
 
-[App documentation](docs/app.md) · [Architecture](docs/architecture.md) · [Troubleshooting](docs/faq.md) · [Changelog](CHANGELOG.md) · [v4.5.0 release notes](docs/releases/v4.5.0.md)
+[App documentation](docs/app.md) · [Architecture](docs/architecture.md) · [Troubleshooting](docs/faq.md) · [Changelog](CHANGELOG.md) · [v4.5.1 release notes](docs/releases/v4.5.1.md)
 
 ## License
 

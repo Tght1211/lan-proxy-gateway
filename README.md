@@ -98,13 +98,13 @@ SwiftUI App 与 CLI 使用同一个核心和配置。macOS 使用 `pf`，Linux �
 make build
 make test
 make build-app
-make dmg VERSION=v4.5.0
-make skill VERSION=v4.5.0
+make dmg VERSION=v4.5.1
+make skill VERSION=v4.5.1
 ```
 
 完整 Xcode 或 GitHub macOS Runner 打包 universal App；只有 Command Line Tools 时，SwiftUI 外壳为本机架构。
 
-[App 文档](docs/app.md) · [架构说明](docs/architecture.md) · [故障排查](docs/faq.md) · [Changelog](CHANGELOG.md) · [v4.5.0 更新说明](docs/releases/v4.5.0.md)
+[App 文档](docs/app.md) · [架构说明](docs/architecture.md) · [故障排查](docs/faq.md) · [Changelog](CHANGELOG.md) · [v4.5.1 更新说明](docs/releases/v4.5.1.md)
 
 ## License
 
