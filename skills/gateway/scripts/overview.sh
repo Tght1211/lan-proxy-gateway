@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # 网络概览：出口状态、活跃连接、流量和代理健康
 set -euo pipefail
-BASE="${GATEWAY_API:-http://127.0.0.1:19090}"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/api-base.sh"
 
-curl -sf "$BASE/api/stats" | python3 -c "
+gateway_stats | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 r, h = d['relay'], d['health']
@@ -36,6 +36,6 @@ da = d.get('device_adaptive', {})
 protected = [x for x in da.get('devices', []) if x['mode'] == 'direct']
 if protected:
     print()
-    for x in protected:
+    for x in protected[:20]:
         print(f'⚠ 设备 {x[\"device\"]} 保护直连中 (失败{x[\"failure_count\"]}次)')
 "

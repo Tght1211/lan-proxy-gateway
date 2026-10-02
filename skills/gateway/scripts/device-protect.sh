@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # 设备断路器状态：显示触发保护直连的设备及其失败详情
 set -euo pipefail
-BASE="${GATEWAY_API:-http://127.0.0.1:19090}"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/api-base.sh"
 
-curl -sf "$BASE/api/stats" | python3 -c "
+gateway_stats | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 da = data.get('device_adaptive', {})
@@ -20,7 +20,7 @@ observing = [d for d in devices if d['mode'] == 'observing' and d.get('failure_c
 
 if protected:
     print(f'⚠ 保护直连中 ({len(protected)}):')
-    for d in protected:
+    for d in protected[:20]:
         until = d.get('until', '')[:19].replace('T', ' ') if d.get('until') else '未知'
         print(f'  {d[\"device\"]:>15}  失败 {d[\"failure_count\"]} 次  恢复时间: {until}')
         if d.get('hosts'):
@@ -29,7 +29,7 @@ if protected:
 
 if observing:
     print(f'👀 观察中 ({len(observing)}):')
-    for d in observing:
+    for d in observing[:20]:
         print(f'  {d[\"device\"]:>15}  失败 {d[\"failure_count\"]}/{threshold}')
     print()
 
@@ -41,6 +41,6 @@ eh = data.get('egress_health', {})
 df = eh.get('direct_failures', [])
 if df:
     print(f'📌 直连后仍失败 ({len(df)}):')
-    for f in df:
+    for f in df[:20]:
         print(f'  {f[\"device\"]:>15} → {f[\"host\"]}  [{f[\"reason\"]}]')
 "

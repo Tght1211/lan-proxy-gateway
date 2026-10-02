@@ -1,7 +1,26 @@
 import Foundation
 
 @main struct ModelDecodingTests {
-    static func main() throws { try ModelDecodingTests().testUsageCompatibility(); try ModelDecodingTests().testIngressCompatibility(); try ModelDecodingTests().testHotspotCompatibility(); try ModelDecodingTests().testHotspotControlStates(); try ModelDecodingTests().testPlayBridgeMetrics(); ModelDecodingTests().testThroughputWindows(); try ModelDecodingTests().testResponseOutcomes(); print("Model decoding tests passed") }
+    static func main() throws { try ModelDecodingTests().testUsageCompatibility(); try ModelDecodingTests().testIngressCompatibility(); try ModelDecodingTests().testHotspotCompatibility(); try ModelDecodingTests().testHotspotControlStates(); try ModelDecodingTests().testPlayBridgeMetrics(); ModelDecodingTests().testThroughputWindows(); ModelDecodingTests().testUsageDates(); try ModelDecodingTests().testResponseOutcomes(); print("Model decoding tests passed") }
+    func testUsageDates() {
+        let date = ISO8601DateFormatter().date(from: "2026-01-01T00:30:00Z")!
+        precondition(usageDate(date, timeZone: TimeZone(identifier: "Asia/Shanghai")!) == "2026-01-01")
+        precondition(usageDate(date, timeZone: TimeZone(identifier: "America/Los_Angeles")!) == "2025-12-31")
+        let leapDay = ISO8601DateFormatter().date(from: "2024-02-29T12:30:00Z")!
+        precondition(usageDate(leapDay, timeZone: TimeZone(secondsFromGMT: 0)!) == "2024-02-29")
+        for zone in ["Asia/Shanghai", "America/Los_Angeles", "UTC"] {
+            let timeZone = TimeZone(identifier: zone)!
+            let original = DateFormatter()
+            original.locale = Locale(identifier: "en_US_POSIX")
+            original.timeZone = timeZone
+            original.dateFormat = "yyyy-MM-dd"
+            let offsets: [TimeInterval] = [-86400, 0, 86400, 86400 * 31, 86400 * 365]
+            for offset in offsets {
+                let sample = date.addingTimeInterval(offset)
+                precondition(usageDate(sample, timeZone: timeZone) == original.string(from: sample))
+            }
+        }
+    }
     func testResponseOutcomes() throws {
         func row(_ fields: String) throws -> ConnectionInfo {
             try JSONDecoder().decode(ConnectionInfo.self, from: Data(("{\"id\":1,\"started_at\":0," + fields + "}").utf8))

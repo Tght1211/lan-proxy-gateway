@@ -4,8 +4,20 @@ import (
 	"archive/zip"
 	"bytes"
 	"io"
+	"os/exec"
 	"testing"
 )
+
+func TestInspectHelper(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("Python 3 is required to validate the optional read-only helper")
+	}
+	output, err := exec.Command(python, "-B", "inspect_test.py").CombinedOutput()
+	if err != nil {
+		t.Fatalf("inspect helper tests failed: %v\n%s", err, output)
+	}
+}
 
 func TestExportIsSelfContainedStaticSkill(t *testing.T) {
 	var buf bytes.Buffer
@@ -17,8 +29,9 @@ func TestExportIsSelfContainedStaticSkill(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected := map[string]string{
-		"lan-proxy-gateway/SKILL.md":               "content/lan-proxy-gateway/SKILL.md",
-		"lan-proxy-gateway/references/commands.md": "content/lan-proxy-gateway/references/commands.md",
+		"lan-proxy-gateway/SKILL.md":                   "content/lan-proxy-gateway/SKILL.md",
+		"lan-proxy-gateway/references/commands.md":     "content/lan-proxy-gateway/references/commands.md",
+		"lan-proxy-gateway/scripts/gateway_inspect.py": "content/lan-proxy-gateway/scripts/gateway_inspect.py",
 	}
 	if len(z.File) != len(expected) {
 		t.Fatalf("unexpected archive files: %d", len(z.File))

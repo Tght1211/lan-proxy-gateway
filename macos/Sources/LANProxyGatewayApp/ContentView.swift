@@ -1,8 +1,21 @@
 import AppKit
 import SwiftUI
 
+private struct NetworkPageActiveKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    var networkPageActive: Bool {
+        get { self[NetworkPageActiveKey.self] }
+        set { self[NetworkPageActiveKey.self] = newValue }
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reducedMotion
+    @State private var pageCache = AppSectionCache()
 
     var body: some View {
         // Swap the palette before subviews evaluate; .id forces a full rebuild
@@ -53,7 +66,9 @@ struct ContentView: View {
                 .tracking(-0.4).padding(.horizontal, 8).padding(.top, 30).padding(.bottom, 28)
             VStack(spacing: 5) {
                 ForEach(AppSection.allCases) { section in
-                    Button { model.selectedSection = section } label: {
+                    Button {
+                        if model.selectedSection != section { model.selectedSection = section }
+                    } label: {
                         HStack(spacing: 10) {
                             StudioIcon(section.systemImage).frame(width: 18, height: 18)
                             Text(section.rawValue).font(.system(size: 13, weight: model.selectedSection == section ? .semibold : .regular))
@@ -78,18 +93,38 @@ struct ContentView: View {
             .navigationSplitViewColumnWidth(min: 170, ideal: 180, max: 210)
     }
 
-    @ViewBuilder private var detail: some View {
-        Group {
-            switch model.selectedSection ?? .overview {
-            case .overview: NetworkOverviewView()
-            case .exits: NetworkExitsView()
-            case .rules: NetworkRulesView()
-            case .devices: NetworkDevicesView()
-            case .connections: ConnectionsView()
-            case .settings: SettingsView()
+    private var detail: some View {
+        let selected = model.selectedSection ?? .overview
+        return ZStack(alignment: .top) {
+            ForEach(pageCache.sections(including: selected)) { section in
+                NetworkSectionPage(section: section)
+                    .environment(\.networkPageActive, section == selected)
+                    .transaction { $0.animation = nil }
+                    .opacity(section == selected ? 1 : 0)
+                    .zIndex(section == selected ? 1 : 0)
+                    .allowsHitTesting(section == selected)
+                    .accessibilityHidden(section != selected)
+                    .animation(reducedMotion ? nil : .easeOut(duration: 0.12), value: selected)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .clipped()
+        .onAppear { pageCache.visit(selected) }
+        .onChange(of: selected) { pageCache.visit($0) }
+    }
+}
+
+private struct NetworkSectionPage: View {
+    let section: AppSection
+
+    @ViewBuilder var body: some View {
+        switch section {
+        case .overview: NetworkOverviewView()
+        case .rules: NetworkRulesView()
+        case .devices: NetworkDevicesView()
+        case .connections: ConnectionsView()
+        case .settings: SettingsView()
+        }
     }
 }
 

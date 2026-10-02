@@ -11,6 +11,10 @@ swiftc -sdk "$SDK" -parse-as-library \
  "$ROOT/Tests/ModelDecodingTests.swift" -o "$TEMP/test-models"
 "$TEMP/test-models"
 swiftc -sdk "$SDK" -parse-as-library \
- "$SOURCE/Models.swift" "$SOURCE/ConnectionModels.swift" "$SOURCE/NetworkPresentation.swift" "$SOURCE/DeviceIdentification.swift" \
+ "$SOURCE/Models.swift" "$SOURCE/ConnectionModels.swift" "$SOURCE/NetworkPresentation.swift" "$SOURCE/LearningRecordModels.swift" "$SOURCE/DeviceIdentification.swift" "$SOURCE/AppNavigationModels.swift" \
  "$ROOT/Tests/NetworkPresentationTests.swift" -o "$TEMP/test-network"
 "$TEMP/test-network"
+swiftc -sdk "$SDK" -parse-as-library \
+ "$SOURCE/Models.swift" "$SOURCE/ConnectionModels.swift" "$SOURCE/LearningRecordModels.swift" \
+ "$ROOT/Tests/LearningRecordTests.swift" -o "$TEMP/test-learning"
+"$TEMP/test-learning"

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# 连接失败诊断：最近 10 分钟内拨号失败和被拒绝的连接
+# 连接失败诊断
 set -euo pipefail
-BASE="${GATEWAY_API:-http://127.0.0.1:19090}"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/api-base.sh"
 
-curl -sf "$BASE/api/stats" | python3 -c "
+gateway_stats | python3 -c "
 import sys, json
 recent = json.load(sys.stdin)['relay']['recent']
 

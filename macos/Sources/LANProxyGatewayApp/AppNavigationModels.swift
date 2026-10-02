@@ -2,7 +2,6 @@ import Foundation
 
 enum AppSection: String, CaseIterable, Identifiable {
     case overview = "网络总览"
-    case exits = "网络出口"
     case rules = "配置规则"
     case devices = "设备接入"
     case connections = "流量记录"
@@ -13,12 +12,24 @@ enum AppSection: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .overview: return "point.3.connected.trianglepath.dotted"
-        case .exits: return "route"
         case .rules: return "network"
         case .devices: return "gamecontroller"
         case .connections: return "activity"
         case .settings: return "settings"
         }
+    }
+}
+
+struct AppSectionCache {
+    private(set) var visited: Set<AppSection> = []
+
+    mutating func visit(_ section: AppSection?) {
+        visited.insert(section ?? .overview)
+    }
+
+    func sections(including section: AppSection?) -> [AppSection] {
+        let current = section ?? .overview
+        return AppSection.allCases.filter { visited.contains($0) || $0 == current }
     }
 }
 

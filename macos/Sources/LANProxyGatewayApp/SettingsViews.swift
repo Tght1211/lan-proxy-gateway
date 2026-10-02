@@ -9,7 +9,6 @@ struct SettingsView: View {
     @State private var logFilter = ""
     @State private var paused = false
     @State private var frozenLog = ""
-    @AppStorage("networkMotion") private var motion = "subtle"
 
     private var displayedLog: String {
         let source = paused ? frozenLog : model.logText
@@ -48,8 +47,8 @@ struct SettingsView: View {
                                 .labelsHidden().toggleStyle(.switch).disabled(model.isBusy)
                         }
                         Divider()
-                        SettingsRow(title: "拓扑动画", detail: "系统开启减少动态效果时自动停用") {
-                            Picker("动画", selection: $motion) { Text("轻柔").tag("subtle"); Text("关闭").tag("off") }.labelsHidden().frame(width: 180)
+                        SettingsRow(title: "流光色系", detail: "流光随真实连接自动播放；系统减少动态效果时显示静态结果。慢响应为黄色，错误为红色。") {
+                            NetworkFlowPalettePicker()
                         }
                         Divider()
                         SettingsRow(title: "配置文件", detail: model.status?.configFile ?? "尚未初始化") {

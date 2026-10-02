@@ -5,71 +5,25 @@ import UniformTypeIdentifiers
 
 struct ConnectionsView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.networkPageActive) private var isActive
     @State private var search = ""
     @State private var outcomeFilter = "全部"
     @State private var deviceFilter = "全部设备"
     @State private var routeFilter = "全部出口"
     @State private var unresolvedOnly = false
+    @State private var projection = ConnectionListProjection(records: [])
 
-    // All records passing search/device/route filters; outcome chips filter on
-    // top of this so their counts stay stable while one chip is selected.
-    private var baseConnections: [ConnectionInfo] {
-        let all = (model.stats?.relay.active ?? []) + (model.stats?.relay.recent ?? [])
-        return all.filter { item in
-            let label = model.effectiveDeviceLabel(for: item.srcIP)
-            let matchesSearch = search.isEmpty || item.srcIP.localizedCaseInsensitiveContains(search) ||
-                label.localizedCaseInsensitiveContains(search) || item.dstHost.localizedCaseInsensitiveContains(search) ||
-                item.service.localizedCaseInsensitiveContains(search)
-            let matchesDevice = deviceFilter == "全部设备" || item.srcIP == deviceFilter
-            let matchesRoute: Bool
-            switch routeFilter {
-            case "代理": matchesRoute = item.viaProxy && !item.rejected
-            case "直连": matchesRoute = !item.viaProxy && !item.rejected
-            case "拒绝": matchesRoute = item.rejected
-            default: matchesRoute = true
-            }
-            let matchesResolution = !unresolvedOnly || item.service == "未解析域名"
-            return matchesSearch && matchesDevice && matchesRoute && matchesResolution
-        }
+    private var filter: ConnectionListFilter {
+        ConnectionListFilter(search: search, outcome: outcomeFilter, device: deviceFilter,
+                             route: routeFilter, unresolvedOnly: unresolvedOnly)
     }
-
-    private var connections: [ConnectionInfo] {
-        baseConnections.filter { matchesOutcome($0) }
-    }
-
-    private func outcomeName(_ item: ConnectionInfo) -> String {
-        switch item.outcome {
-        case .active: return "活跃"
-        case .waiting: return "等待响应"
-        case .success: return "成功"
-        case .noData: return "无数据"
-        case .failed: return "失败"
-        case .rejected: return "拒绝"
-        }
-    }
-
-    private func matchesOutcome(_ item: ConnectionInfo) -> Bool {
-        switch outcomeFilter {
-        case "全部": return true
-        case "出口回退": return item.fallback
-        default: return outcomeName(item) == outcomeFilter
-        }
-    }
-
-    private func outcomeCount(_ name: String) -> Int {
-        if name == "出口回退" { return baseConnections.filter(\.fallback).count }
-        return baseConnections.filter { outcomeName($0) == name }.count
-    }
-
-    private var successRateText: String {
-        let total = baseConnections.count
-        guard total > 0 else { return "--" }
-        let good = baseConnections.filter { !$0.rejected && $0.down > 0 }.count
-        return "\(good * 100 / total)%"
-    }
-
-    private var devices: [String] {
-        Array(Set(((model.stats?.relay.active ?? []) + (model.stats?.relay.recent ?? [])).map(\.srcIP))).sorted()
+    private func refreshProjection(_ stats: RuntimeStats?) {
+        guard isActive else { return }
+        let records = (stats?.relay.active ?? []) + (stats?.relay.recent ?? [])
+        let labels = Dictionary(uniqueKeysWithValues: Set(records.map(\.srcIP)).map {
+            ($0, model.effectiveDeviceLabel(for: $0))
+        })
+        projection = ConnectionListProjection(records: records, filter: filter, labels: labels)
     }
 
     var body: some View {
@@ -79,47 +33,51 @@ struct ConnectionsView: View {
                 TextField("搜索设备、服务或域名", text: $search).textFieldStyle(.plain)
                     .frame(minWidth: 180)
                 Divider().frame(height: 22)
-                StudioSelect(title:"设备筛选",selection:$deviceFilter,options:[("全部设备","全部设备")]+devices.map{($0,model.effectiveDeviceLabel(for:$0).nonEmpty ?? $0)}).frame(width:150)
+                StudioSelect(title:"设备筛选",selection:$deviceFilter,options:[("全部设备","全部设备")]+projection.devices.map{($0,model.effectiveDeviceLabel(for:$0).nonEmpty ?? $0)}).frame(width:150)
                 StudioSelect(title:"出口筛选",selection:$routeFilter,options:["全部出口","代理","直连","拒绝"].map{($0,$0)}).frame(width:120)
                 Toggle("仅未解析域名", isOn: $unresolvedOnly).toggleStyle(.checkbox).font(.caption)
                 Image(systemName: "info.circle").foregroundStyle(Theme.muted)
                     .help("设备直接连接 IP，或 DNS 映射不可用时无法还原域名。仍会记录目标 IP、端口、流量、时间和出口；HTTPS 加密下无法识别具体操作内容。")
                 Spacer(minLength: 8)
-                Text("\(connections.count) 条记录").font(.caption).foregroundStyle(Theme.muted)
+                Text("\(projection.connections.count) 条记录").font(.caption).foregroundStyle(Theme.muted)
             }
             .padding(.horizontal, 16).frame(height: 44).background(Theme.panel)
             Divider().overlay(Theme.border)
 
             VStack(spacing: 12) {
                 HStack(spacing: 8) {
-                    OutcomeChip(label: "全部", count: baseConnections.count, color: Theme.muted,
-                                selected: outcomeFilter == "全部") { outcomeFilter = "全部" }
-                    OutcomeChip(label: "等待响应", count: outcomeCount("等待响应"), color: Theme.muted,
-                                selected: outcomeFilter == "等待响应") { outcomeFilter = "等待响应" }
-                    OutcomeChip(label: "活跃", count: outcomeCount("活跃"), color: Theme.cyan,
-                                selected: outcomeFilter == "活跃") { outcomeFilter = "活跃" }
-                    OutcomeChip(label: "已响应", count: outcomeCount("成功"), color: Theme.lime,
-                                selected: outcomeFilter == "成功") { outcomeFilter = "成功" }
-                    OutcomeChip(label: "无数据", count: outcomeCount("无数据"), color: Theme.muted,
-                                selected: outcomeFilter == "无数据") { outcomeFilter = "无数据" }
-                    OutcomeChip(label: "失败", count: outcomeCount("失败"), color: Theme.yellow,
-                                selected: outcomeFilter == "失败") { outcomeFilter = "失败" }
-                    OutcomeChip(label: "拒绝", count: outcomeCount("拒绝"), color: Theme.coral,
-                                selected: outcomeFilter == "拒绝") { outcomeFilter = "拒绝" }
-                    OutcomeChip(label: "出口回退", count: outcomeCount("出口回退"), color: Theme.yellow,
-                                selected: outcomeFilter == "出口回退") { outcomeFilter = "出口回退" }
-                    Spacer(minLength: 8)
-                    FallbackLearningBadge()
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        HStack(spacing: 8) {
+                            OutcomeChip(label: "全部", count: projection.total, color: Theme.muted,
+                                        selected: outcomeFilter == "全部") { outcomeFilter = "全部" }
+                            OutcomeChip(label: "等待响应", count: projection.counts["等待响应", default: 0], color: Theme.muted,
+                                        selected: outcomeFilter == "等待响应") { outcomeFilter = "等待响应" }
+                            OutcomeChip(label: "活跃", count: projection.counts["活跃", default: 0], color: Theme.cyan,
+                                        selected: outcomeFilter == "活跃") { outcomeFilter = "活跃" }
+                            OutcomeChip(label: "已响应", count: projection.counts["成功", default: 0], color: Theme.lime,
+                                        selected: outcomeFilter == "成功") { outcomeFilter = "成功" }
+                            OutcomeChip(label: "无数据", count: projection.counts["无数据", default: 0], color: Theme.muted,
+                                        selected: outcomeFilter == "无数据") { outcomeFilter = "无数据" }
+                            OutcomeChip(label: "失败", count: projection.counts["失败", default: 0], color: Theme.yellow,
+                                        selected: outcomeFilter == "失败") { outcomeFilter = "失败" }
+                            OutcomeChip(label: "拒绝", count: projection.counts["拒绝", default: 0], color: Theme.coral,
+                                        selected: outcomeFilter == "拒绝") { outcomeFilter = "拒绝" }
+                            OutcomeChip(label: "出口回退", count: projection.counts["出口回退", default: 0], color: Theme.yellow,
+                                        selected: outcomeFilter == "出口回退") { outcomeFilter = "出口回退" }
+                        }
+                    }.frame(height: 34)
+                    FallbackLearningBadge().fixedSize(horizontal: true, vertical: false)
                     HStack(spacing: 5) {
                         Text("响应率").font(.caption2).foregroundStyle(Theme.muted)
-                        Text(successRateText)
+                        Text(projection.responseRate)
                             .font(.system(size: 13, weight: .bold, design: .monospaced))
                             .foregroundStyle(Theme.lime)
                     }
+                    .fixedSize(horizontal: true, vertical: false)
                     .help("响应率 = 收到目标端数据的连接 / 当前筛选范围内全部记录；等待响应不计入，HTTPS 下无法判断业务是否成功")
                 }
 
-                Table(connections) {
+                Table(projection.connections) {
                     TableColumn("设备") { item in
                         VStack(alignment: .leading, spacing: 1) {
                             if let label = model.effectiveDeviceLabel(for: item.srcIP).nonEmpty {
@@ -180,6 +138,14 @@ struct ConnectionsView: View {
             .padding(16)
         }
         .background(Theme.canvasBackground)
+        .onAppear { refreshProjection(model.stats) }
+        .onReceive(model.$stats.dropFirst()) { refreshProjection($0) }
+        .onChange(of: filter) { _ in refreshProjection(model.stats) }
+        .onChange(of: model.deviceLabels) { _ in refreshProjection(model.stats) }
+        .onChange(of: model.autoDeviceLabels) { _ in refreshProjection(model.stats) }
+        .onChange(of: isActive) { active in
+            if active { refreshProjection(model.stats) }
+        }
     }
 
     private func outcomeColor(_ outcome: ConnectionOutcome) -> Color {
@@ -221,6 +187,7 @@ struct OutcomeChip: View {
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundStyle(color)
             }
+            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 10).padding(.vertical, 5)
             .background(selected ? color.opacity(0.14) : Theme.panel)
             .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(selected ? color.opacity(0.55) : Theme.border, lineWidth: 0.8))

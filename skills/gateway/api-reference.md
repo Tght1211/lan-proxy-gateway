@@ -2,6 +2,10 @@
 
 [← 返回 SKILL.md](SKILL.md)
 
+外部 Agent 的操作、安全边界和只读分类分页工具以[官方命令参考](../../internal/agentskill/content/lan-proxy-gateway/references/commands.md)为准。API 地址使用 `gateway status --json` 的 `ports.api`，禁用环境代理，不要固定端口。以下是字段示例，不是当前用户数据；缺失遥测不可当作空记录。
+
+管理 API 需要独立 Bearer 令牌；CLI 自动从当前配置目录的 `api-token` 读取。脚本通过 HTTP 库在内存中使用令牌，不输出令牌或放入进程参数。没有认证的 401 不代表核心离线；局域网代理密码不能替代管理令牌。
+
 `GET /api/stats` 返回的完整 JSON 结构。
 
 ---
@@ -33,7 +37,7 @@
   "up_total": 102400,               // 累计上传字节
   "down_total": 5242880,            // 累计下载字节
   "active": [/* ConnectionInfo */], // 当前活跃连接
-  "recent": [/* ConnectionInfo */], // 最近 10 分钟已关闭连接
+  "recent": [/* ConnectionInfo */], // 内存中最近 72 小时、最多 2000 条已关闭连接
   "traffic": [{                     // 5 秒采样吞吐序列
     "at": "2026-08-09T12:00:00Z",
     "up": 1024, "down": 8192
@@ -61,7 +65,7 @@
 | `rejected` | bool | 是否被规则拒绝 |
 | `status` | string | `""` / `"rejected"` / `"dial_failed"` |
 | `failure` | string | 失败原因（仅 dial_failed） |
-| `fallback` | bool | 代理失败后回退直连 |
+| `fallback` | bool | 连接经历了备用路径切换；需结合路由、状态、失败与响应信息判断 |
 
 ### UsageAggregate
 
@@ -135,17 +139,29 @@
 
 ```jsonc
 {
-  "threshold": 3,                        // 升级为直连规则的阈值
+  "strategy": "direct-first",
+  "settings": {
+    "enabled": true,
+    "confirmations": 1,
+    "auto_save": true,
+    "direct_wait_seconds": 5,
+    "proxy_wait_seconds": 5,
+    "max_direct_wait_seconds": 30,
+    "cooldown_seconds": 30,
+    "memory_minutes": 10
+  },
+  "ignored": [],
+  "threshold": 1,
   "window_hours": 24,                    // 滑动窗口
   "candidates": [{                       // 学习中的候选域名
     "host": "cdn.example.com",
-    "count": 2,                          // 当前窗口内回退成功次数
+    "count": 2,
     "last_at": "2026-08-09T12:00:00Z"
   }],
-  "learned": [{                          // 已生成的直连规则
-    "type": "domain-suffix",
-    "value": "googlevideo.com",
-    "action": "direct",
+  "learned": [{
+    "type": "domain",
+    "value": "cdn.googlevideo.com",
+    "action": "proxy",
     "group": "自动学习 · YouTube",        // 按服务自动分组
     "learned": true
   }]
@@ -155,6 +171,8 @@
 学习到的规则按域名所属服务自动分组：
 - 已知服务 → `"自动学习 · YouTube"`、`"自动学习 · Google"` 等
 - 未识别域名 → `"自动学习"`（通用分组）
+
+当前仅对未匹配规则的域名先尝试直连；直连失败或满足无响应重试条件后，代理收到响应数据才计入证据。默认 1 次，阈值可配置为 1–10 次，观察窗口为 24 小时。显式规则和禁止直连策略优先。新保存的是精确域名代理规则；`learned` 数组可能同时保留旧版直连/后缀规则，必须按 `action` 和 `type` 区分。`ignored` 仅表示暂停学习，不是拒绝访问。数千条记录先在本地聚合分类，再分页输出，不能把分页列表用于替换全量路由。
 
 ---
 

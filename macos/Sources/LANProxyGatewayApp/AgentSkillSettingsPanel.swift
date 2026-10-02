@@ -12,9 +12,9 @@ struct AgentSkillSettingsPanel: View {
         let archive = exportedURL?.path ?? "我提供的 lan-proxy-gateway-skill.zip"
         let executable = model.client.bundledEngineURL?.path ?? "gateway"
         return """
-        请把 \(archive) 中的 lan-proxy-gateway 目录安装为你可使用的 Skill，保留 SKILL.md 和 references 目录。
+        请把 \(archive) 中的 lan-proxy-gateway 目录安装或更新为你可使用的 Skill，保留 SKILL.md、references 和 scripts 目录。
         网关运行在这台电脑上，CLI 路径是：\(executable)
-        安装后阅读 Skill，先检查版本并运行 agent snapshot，向我说明当前代理、连接和运行状态。先不要更改配置；后续按我的具体要求控制网关。
+        安装后阅读新版 Skill，先检查版本，再通过 scripts/gateway_inspect.py 获取 agent snapshot 的摘要（没有 Python 3 时在本地解析快照）。学习记录可能有数千条，请按状态、服务、路由和规则范围分类并分页，不要整份输出。先不要更改配置；后续按我的具体要求控制网关。
         """
     }
 
@@ -22,11 +22,11 @@ struct AgentSkillSettingsPanel: View {
         Panel {
             VStack(alignment: .leading, spacing: 14) {
                 Text("外部 Agent Skill").sectionLabel()
-                Text("让你自己的 AI Agent 查询网关状态、诊断连接并按需调整配置。应用无需配置模型或 API Key。")
+                Text("让你自己的 AI Agent 查询网关、诊断连接，并按需管理分流、自学习、网络接入与代理配置。应用无需配置模型或 API Key。")
                     .font(.caption).foregroundStyle(Theme.muted)
                 Text("1. 导出 Skill ZIP\n2. 将 ZIP 和安装说明交给支持 SKILL.md 的 Agent\n3. 安装后，通过对话管理本机网关")
                     .font(.callout).fixedSize(horizontal: false, vertical: true)
-                Text("Agent 需要能够在网关所在电脑执行命令。Skill 包不包含本机配置或密码，管理接口保持仅本机可访问。")
+                Text("Agent 需要能够在网关所在电脑执行命令。Skill 含只读摘要与分类分页工具，不包含本机配置或密码。软件更新后请重新导出并同步更新 Agent 的 Skill。")
                     .font(.caption).foregroundStyle(Theme.muted)
                 HStack {
                     Button(exporting ? "导出中…" : "导出 Skill ZIP") { export() }

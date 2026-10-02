@@ -4,11 +4,13 @@
 
 配置文件位于 `~/.config/lan-proxy-gateway/gateway.yaml`。
 通常通过 CLI 命令或 macOS App 修改。守护进程监听文件变更自动热加载，
-也可 `POST http://127.0.0.1:19090/api/reload` 手动触发。
+也可在诊断确有需要时通过实际 loopback API 端口手动 reload。涉及接入方式和监听器变更时需核实是否重启才生效。
+
+外部 Agent 应优先使用[官方 Skill 命令参考](../../internal/agentskill/content/lan-proxy-gateway/references/commands.md)，不要整份读取或打印可能含密码的配置文件。HTTP/PAC、热点和学习设置以 CLI/API 当前返回为准。
 
 ---
 
-## 完整字段
+## 字段示例
 
 ```yaml
 version: 4
@@ -102,5 +104,7 @@ runtime:
 |------|------|
 | `fake_ip` 强制 true | 代理模式保留原始域名给上游解析，无法关闭 |
 | `quic_block` 强制 true | 拒绝 QUIC 迫使浏览器回退 TCP |
-| 自动学习 | 代理失败→直连成功→24h 内 3 次→生成直连规则 |
-| 设备断路器 | 2 分钟内 5 个不同目标代理失败→临时直连 15 分钟 |
+| 自动学习 | 未匹配域名先直连，直连失败后代理收到响应才记录；24h 内达到用户阈值（默认 1 次）后按 auto_save 保存精确域名代理规则或等待确认 |
+| 设备断路器 | 以运行遥测 device_adaptive 的 threshold、window_seconds、direct_seconds 为准；不可覆盖显式策略或禁止直连要求 |
+
+学习设置不在上述路由数组中；通过 `gateway learning configure` 传入当前完整设置 JSON，保留其他字段。撤销学习规则会同时暂停学习，恢复只恢复观察。网络出口配置只有一个代理上游；出口卡片不是多个代理配置。完整字段定义见源码 `internal/config/schema.go`，不要把示例当作用户的实际设置。

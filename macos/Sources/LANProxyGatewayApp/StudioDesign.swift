@@ -89,6 +89,9 @@ struct StudioIcon: View {
     let name: String
     var active = false
     init(_ name: String, active: Bool = false) { self.name = name; self.active = active }
+    func outline(in rect: CGRect) -> Path {
+        StudioSymbol(name: name, active: active).path(in: rect)
+    }
     var body: some View {
         StudioSymbol(name: name, active: active)
             .stroke(style: StrokeStyle(lineWidth: 1.55, lineCap: .round, lineJoin: .round))

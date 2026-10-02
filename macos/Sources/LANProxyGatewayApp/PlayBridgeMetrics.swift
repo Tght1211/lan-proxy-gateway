@@ -38,11 +38,11 @@ func hotspotUsage(_ rows: [DailyUsage], network: HotspotStatus, date: String? = 
     rows.filter { $0.ingress == "gateway" && network.containsClient($0.device) && (date == nil || $0.date == date) }
 }
 
-func usageDate(_ now: Date = Date()) -> String {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.dateFormat = "yyyy-MM-dd"
-    return formatter.string(from: now)
+func usageDate(_ now: Date = Date(), timeZone: TimeZone = .autoupdatingCurrent) -> String {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = timeZone
+    let components = calendar.dateComponents([.year, .month, .day], from: now)
+    return String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
 }
 
 /// The selected duration controls the axis even when only a few samples exist.

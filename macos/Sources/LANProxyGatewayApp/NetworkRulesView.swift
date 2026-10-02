@@ -7,7 +7,7 @@ struct NetworkRulesView: View {
     var body: some View {
         VStack(alignment:.leading,spacing:18) {
             StudioTabs(title: "规则配置分类", selection: $tab, items: [
-                ("rules", "代理规则", "list.bullet.rectangle"), ("learning", "自学习", "sparkles"), ("exits", "网络出口", "route")
+                ("rules", "代理规则", "list.bullet.rectangle"), ("learning", "自学习", "sparkles")
             ]).padding(.horizontal,22).padding(.top,16)
             ZStack {
                 // Keep the editor alive when switching tabs, preserving unsaved text/list drafts.
@@ -15,7 +15,6 @@ struct NetworkRulesView: View {
                     .opacity(tab == "rules" ? 1:0).allowsHitTesting(tab == "rules").accessibilityHidden(tab != "rules").clipShape(RoundedRectangle(cornerRadius:12)).overlay(RoundedRectangle(cornerRadius:12).stroke(Theme.border,lineWidth:0.8)).padding(.horizontal,22).padding(.bottom,22)
                 } else { ProgressView("读取规则…") }
                 if tab == "learning" { ScrollPage { NetworkLearningView() }.background(Theme.canvas) }
-                if tab == "exits" { NetworkExitsView().background(Theme.canvas) }
             }
         }.onReceive(model.$status) { status in
             if initialRules == nil, let status { initialRules = status.routing ?? [] }

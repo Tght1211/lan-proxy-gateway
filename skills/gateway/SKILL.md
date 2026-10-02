@@ -5,4 +5,4 @@
 - [安装与使用](../../docs/agent-skill.md)
 - [维护中的 Skill 源码](../../internal/agentskill/content/lan-proxy-gateway/SKILL.md)
 
-本目录中的 API、配置参考和诊断脚本仍可按需查阅；完整 Skill 安装请使用导出的 ZIP。
+完整 Skill 安装请使用导出的 ZIP 并保留 `references/`、`scripts/`；软件更新后重新导出并更新 Agent 中的副本。新版包含自学习分类、分页摘要、出口与热点接入控制，设置入口为“CLI 与 Agent”。本目录仅为源码中的参考入口，不是另一套可安装 Skill。
