@@ -66,7 +66,7 @@ private struct NetworkTopologyNodeLabel: View, Equatable {
                     Text(probeText).font(.system(size: 10))
                 }.foregroundStyle(probeOK ? Theme.lime : Theme.coral)
             }
-        }.frame(width: width, height: 86).opacity(inactive ? 0.45 : 1)
+        }.frame(width: width, height: 86).contentShape(Rectangle()).opacity(inactive ? 0.45 : 1)
     }
 }
 
@@ -142,7 +142,7 @@ struct NetworkTopologyView: View {
                             Text(title).font(.system(size: 11)).foregroundStyle(Theme.muted).frame(width: geo.size.width/7).position(x: geo.size.width*(Double(column)+0.5)/7,y:8)
                         }
                         ForEach(topologyNodes) { node in
-                            let probe = node.id == "proxy" && model.stats?.egress == "proxy" ? model.stats?.health.history.last : nil
+                            let probe = recentProbe(for: node.id)
                             Button { onSelect(node.destination) } label: {
                                 NetworkTopologyNodeLabel(id: node.id, title: node.title, detail: node.detail,
                                                          icon: node.icon, inactive: node.inactive,
@@ -270,6 +270,11 @@ struct NetworkTopologyView: View {
     private func drawFloatingText(id: String, at center: CGPoint, context: inout GraphicsContext) {
         guard let symbol = context.resolveSymbol(id: id) else { return }
         context.draw(symbol, at: center)
+    }
+    private func recentProbe(for exit: String) -> ProbePoint? {
+        guard exit == "proxy" || exit == "direct", let health = model.stats?.health(for: exit) else { return nil }
+        let now = Date()
+        return health.history.last { (0..<30).contains(now.timeIntervalSince($0.at)) }
     }
     private func position(_ n: NetworkNode, width: Double, height: Double) -> CGPoint {
         CGPoint(x: width * (Double(n.column) + 0.5) / 7,

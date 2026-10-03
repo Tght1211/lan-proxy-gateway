@@ -38,6 +38,7 @@ type StatsResponse struct {
 	UDPRelay       *relay.UDPRelayStats         `json:"udp_relay,omitempty"`
 	DNS            *dns.Stats                   `json:"dns,omitempty"`
 	Health         HealthSnapshot               `json:"health"`
+	ExitHealth     map[string]HealthSnapshot    `json:"exit_health,omitempty"`
 	Fallback       *FallbackStats               `json:"fallback,omitempty"`
 	EgressHealth   *egressHealthJSON            `json:"egress_health,omitempty"`
 	DeviceAdaptive relay.DeviceAdaptiveSnapshot `json:"device_adaptive"`
@@ -150,6 +151,7 @@ func (s *apiServer) handleStats(w http.ResponseWriter, r *http.Request) {
 		UptimeSec:      int64(time.Since(s.started).Seconds()),
 		Relay:          s.rt.tracker.Snapshot(),
 		Health:         s.app.Health(),
+		ExitHealth:     s.app.ExitHealth(),
 		DeviceAdaptive: relaySrv.DeviceAdaptiveHealth(),
 	}
 	if cfg.Gateway.AccessMode == "hotspot" {

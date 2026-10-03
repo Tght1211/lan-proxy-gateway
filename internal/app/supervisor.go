@@ -8,12 +8,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tght/lan-proxy-gateway/internal/config"
 	"github.com/tght/lan-proxy-gateway/internal/relay"
 )
 
 // HealthSnapshot is the advisory egress health view (no auto-flipping — v4
 // leaves routing decisions to the upstream proxy and the user).
 type HealthSnapshot struct {
+	Target         string          `json:"target,omitempty"`
 	Healthy        bool            `json:"healthy"`
 	LastError      string          `json:"last_error,omitempty"`
 	CheckedAt      time.Time       `json:"checked_at,omitempty"`
@@ -144,10 +146,32 @@ func (h *healthState) recordIdentity(identity *EgressIdentity, key string) {
 // Health returns the current advisory health snapshot. Before the supervisor
 // has run (e.g. in a fresh console process) it reports healthy-by-default.
 func (a *App) Health() HealthSnapshot {
-	if a.health == nil {
+	mode := a.getCfg().Egress.Mode
+	state := a.health
+	if mode != config.EgressProxy {
+		state = a.directHealth
+	}
+	if state == nil {
 		return HealthSnapshot{Healthy: true}
 	}
-	return a.health.snapshot()
+	result := state.snapshot()
+	result.Target = egressProbeTarget(mode)
+	return result
+}
+
+func (a *App) ExitHealth() map[string]HealthSnapshot {
+	result := make(map[string]HealthSnapshot)
+	if a.directHealth != nil {
+		snapshot := a.directHealth.snapshot()
+		snapshot.Target = directProbeTarget
+		result[config.EgressDirect] = snapshot
+	}
+	if a.getCfg().Egress.Mode == config.EgressProxy && a.health != nil {
+		snapshot := a.health.snapshot()
+		snapshot.Target = probeTarget
+		result[config.EgressProxy] = snapshot
+	}
+	return result
 }
 
 // StartSupervisor lazily starts the egress probe loop.
@@ -156,51 +180,77 @@ func (a *App) StartSupervisor(ctx context.Context) {
 		if a.health == nil {
 			a.health = &healthState{healthy: true}
 		}
-		go a.supervise(ctx)
+		if a.directHealth == nil {
+			a.directHealth = &healthState{healthy: true}
+		}
+		go a.supervise(ctx, a.probeOnce)
+		go a.supervise(ctx, a.probeDirectOnce)
 	})
 }
 
-func (a *App) supervise(ctx context.Context) {
+func (a *App) supervise(ctx context.Context, probe func(context.Context)) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
-	a.probeOnce(ctx)
+	probe(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			a.probeOnce(ctx)
+			probe(ctx)
 		}
 	}
 }
 
 func (a *App) probeOnce(ctx context.Context) {
 	egress := a.getCfg().Egress
+	if egress.Mode != config.EgressProxy {
+		return
+	}
 	dialer, err := buildDialer(egress)
 	if err != nil {
 		a.health.record(err, 0)
 		return
 	}
+	if !probeHealth(ctx, dialer, probeTarget, a.health) {
+		return
+	}
+	a.probeIdentity(ctx, dialer, egress, a.health)
+}
+
+func (a *App) probeDirectOnce(ctx context.Context) {
+	dialer := relay.NewDirectDialer(8 * time.Second)
+	if !probeHealth(ctx, dialer, directProbeTarget, a.directHealth) {
+		return
+	}
+	egress := a.getCfg().Egress
+	if egress.Mode != config.EgressProxy {
+		a.probeIdentity(ctx, dialer, egress, a.directHealth)
+	}
+}
+
+func probeHealth(ctx context.Context, dialer relay.Dialer, target string, state *healthState) bool {
 	probeCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	started := time.Now()
-	err = relay.Probe(probeCtx, dialer, probeTarget)
-	a.health.record(err, time.Since(started))
-	if err != nil {
-		return
-	}
+	err := relay.Probe(probeCtx, dialer, target)
+	state.record(err, time.Since(started))
+	return err == nil
+}
+
+func (a *App) probeIdentity(ctx context.Context, dialer relay.Dialer, egress config.EgressConfig, state *healthState) {
 	key := fmt.Sprintf("%s|%s|%s|%d", egress.Mode, egress.Proxy.Type, egress.Proxy.Host, egress.Proxy.Port)
-	if !a.health.identityDue(time.Now(), key) {
+	if !state.identityDue(time.Now(), key) {
 		return
 	}
 	identityCtx, identityCancel := context.WithTimeout(ctx, 8*time.Second)
 	defer identityCancel()
 	identity, identityErr := lookupEgressIdentity(identityCtx, dialer)
 	if identityErr != nil {
-		a.health.recordIdentity(nil, key)
+		state.recordIdentity(nil, key)
 		return
 	}
-	a.health.recordIdentity(identity, key)
+	state.recordIdentity(identity, key)
 }
 
 func lookupEgressIdentity(ctx context.Context, dialer relay.Dialer) (*EgressIdentity, error) {

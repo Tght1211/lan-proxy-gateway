@@ -157,7 +157,7 @@ private struct NetworkGlobalHealthSummary: View {
                                       isRunning: model.isRunning, at: now)
         history = (0..<30).map { slot in
             NetworkGlobalHealth(stats: stats, proxyConfigured: proxyConfigured, isRunning: model.isRunning,
-                                at: now.addingTimeInterval(Double(slot - 29) * 10), includeProbe: false)
+                                at: now.addingTimeInterval(Double(slot - 29) * 10))
         }
     }
     var body: some View {
@@ -170,10 +170,10 @@ private struct NetworkGlobalHealthSummary: View {
             HStack(spacing: 2) {
                 ForEach(Array(history.enumerated()), id: \.offset) { _, sample in
                     RoundedRectangle(cornerRadius: 2).fill(color(sample)).frame(height: 10)
-                        .help("近期连接响应 · \(sample.title) · 正常 \(sample.healthyCount)/\(sample.conditions.count)")
+                        .help("近期探测与连接响应 · \(sample.title) · 正常 \(sample.healthyCount)/\(sample.conditions.count)")
                 }
             }.frame(height: 20, alignment: .center)
-        }.help("汇总已配置的代理与直连出口，拒绝规则不计入。正常数来自近期探测或真实连接响应；无记录显示待检测。时间条回看近 5 分钟的连接响应，不把单个出口延迟当作全局延迟。")
+        }.help("汇总已配置的代理与直连出口，拒绝规则不计入。正常数来自各出口的独立探测或真实连接响应；直连探测百度，无记录显示待检测。时间条回看近 5 分钟的探测与连接响应，不把单个出口延迟当作全局延迟。")
             .onAppear { refresh(model.stats) }
             .onReceive(model.$stats.dropFirst()) { refresh($0) }
             .onChange(of: model.isRunning) { _ in refresh(model.stats) }

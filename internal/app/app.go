@@ -40,6 +40,7 @@ type App struct {
 	// processes are effectively single-threaded but use the accessors too.
 	cfgMu          sync.RWMutex
 	health         *healthState
+	directHealth   *healthState
 	supervisorOnce sync.Once
 }
 
@@ -69,11 +70,12 @@ func New() (*App, error) {
 	gw := gateway.New()
 	gw.SetStatePath(paths.StateFile)
 	return &App{
-		Cfg:     cfg,
-		Paths:   paths,
-		Gateway: gw,
-		Plat:    platform.Current(),
-		health:  &healthState{healthy: true},
+		Cfg:          cfg,
+		Paths:        paths,
+		Gateway:      gw,
+		Plat:         platform.Current(),
+		health:       &healthState{healthy: true},
+		directHealth: &healthState{healthy: true},
 	}, nil
 }
 
@@ -302,7 +304,7 @@ func (a *App) TestEgressConfig(ctx context.Context, e config.EgressConfig) error
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	return relay.Probe(probeCtx, d, probeTarget)
+	return relay.Probe(probeCtx, d, egressProbeTarget(e.Mode))
 }
 
 // pokeReload asks a running daemon to re-read the config; best-effort.
@@ -317,6 +319,15 @@ func (a *App) pokeReload() {
 
 // probeTarget is the connectivity probe endpoint (HTTP) used for egress checks.
 const probeTarget = "www.apple.com:80"
+
+const directProbeTarget = "www.baidu.com:80"
+
+func egressProbeTarget(mode string) string {
+	if mode == config.EgressProxy {
+		return probeTarget
+	}
+	return directProbeTarget
+}
 
 // buildDialer constructs the egress dialer for a config.
 func buildDialer(e config.EgressConfig) (relay.Dialer, error) {

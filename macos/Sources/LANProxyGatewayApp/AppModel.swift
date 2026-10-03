@@ -409,7 +409,11 @@ final class AppModel: ObservableObject {
     }
 
     var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+        buildVersion.value ?? "dev"
+    }
+
+    var buildVersion: AppBuildVersion {
+        AppBuildVersion(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
     }
 
     @Published var updateStatus: String?
@@ -430,6 +434,11 @@ final class AppModel: ObservableObject {
                 let (data, _) = try await URLSession.shared.data(for: request)
                 struct Release: Decodable { let tag_name: String }
                 let latest = try JSONDecoder().decode(Release.self, from: data).tag_name
+                guard buildVersion.value != nil else {
+                    updateStatus = "开发预览 · 最新正式版本 \(latest)"
+                    updateAvailable = true
+                    return
+                }
                 let current = appVersion.hasPrefix("v") ? appVersion : "v\(appVersion)"
                 if latest == current || latest == appVersion {
                     updateStatus = "已是最新版本（\(latest)）"

@@ -33,6 +33,10 @@ Read [references/commands.md](references/commands.md) for exact commands, mutati
 
 The network overview scrolls through summary, topology and exit cards; exits no longer have a separate sidebar menu. Global stability summarizes observed exit health, not every route of every client. The core has one configured proxy upstream, not an arbitrary pool of proxy exits. Proxy/direct quarterly totals are recorded gateway traffic, not all device traffic. Learning records have status tabs, service/route/scope filters, search and 50-row pages. External Skill export is under **设置 → CLI 与 Agent**. Use the CLI/API for control instead of depending on old menu positions.
 
+When available, `runtime.exit_health` contains independent probe summaries by exit: direct probes `www.baidu.com:80` through the host network every 10 seconds even in proxy mode, while the selected proxy probes its own target. `runtime.health` remains the selected/default exit's legacy summary. Never treat proxy results as direct results, or a response from one probe site as proof that every website or device works. Older cores may omit `exit_health`; mark independent results unavailable instead of assuming failure.
+
+The revised rule editor uses a single all/proxy/direct/reject filter instead of source/asset perspectives. Each rule has one action; a group may contain mixed actions and is organizational metadata, not a reusable multi-exit asset. Filters affect presentation only: preserve hidden rules, per-rule actions and full global order when editing through the CLI.
+
 ## Example requests
 
 - “Why does this phone fail through the LAN HTTP proxy while the local VPN works?”

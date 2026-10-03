@@ -17,6 +17,19 @@ spec.loader.exec_module(inspection)
 
 
 class InspectTests(unittest.TestCase):
+    def test_exit_health_summaries_remain_independent_and_bounded(self):
+        runtime = {"egress": "proxy", "health": {"healthy": False},
+                   "exit_health": {"direct": {"target": "www.baidu.com:80", "healthy": True, "latency_ms": 12,
+                                              "history": [{}] * 180},
+                                   "proxy": {"healthy": False, "fail_count": 2}, "unexpected": {"secret": "omit"}}}
+        result = inspection.bounded_snapshot({"runtime": runtime})["runtime"]
+        self.assertFalse(result["health"]["healthy"])
+        self.assertTrue(result["exit_health"]["direct"]["healthy"])
+        self.assertEqual(result["exit_health"]["direct"]["target"], "www.baidu.com:80")
+        self.assertNotIn("history", result["exit_health"]["direct"])
+        self.assertEqual(set(result["exit_health"]), {"proxy", "direct"})
+        self.assertNotIn("exit_health", inspection.bounded_snapshot({"runtime": {}})["runtime"])
+
     def test_ten_thousand_rules_are_bounded_without_losing_records(self):
         rules = [{"type": "domain", "value": f"domain-{number:05d}.test", "action": "proxy",
                   "group": "自动学习 · Google", "learned": True} for number in range(10_000)]

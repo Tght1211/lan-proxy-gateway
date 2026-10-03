@@ -78,11 +78,16 @@ def bounded_snapshot(snapshot, *, view="summary", state="saved", service="", act
     relay = runtime.get("relay") or {}
     output["runtime"] = {**pick_fields(runtime, ("schema_version", "uptime_sec", "egress", "proxy")),
                          "http_proxy": pick_fields(runtime.get("http_proxy") or {}, ("enabled", "port", "auth", "password_set")),
-                         "health": pick_fields(runtime.get("health") or {}, ("healthy", "latency_ms", "jitter_ms", "availability", "fail_count")),
+                         "health": pick_fields(runtime.get("health") or {}, ("target", "checked_at", "healthy", "latency_ms", "jitter_ms", "availability", "fail_count")),
                          "relay": {**pick_fields(relay, ("up_total", "down_total")),
                                    "active_sample_count": len(relay.get("active") or []),
                                    "recent_sample_count": len(relay.get("recent") or [])},
                          "usage_day_count": len(runtime.get("usage_history") or [])}
+    if isinstance(runtime.get("exit_health"), dict):
+        output["runtime"]["exit_health"] = {
+            exit_name: pick_fields(runtime["exit_health"][exit_name], ("target", "checked_at", "healthy", "latency_ms", "jitter_ms", "availability", "fail_count"))
+            for exit_name in ("proxy", "direct") if isinstance(runtime["exit_health"].get(exit_name), dict)
+        }
     records = learning_records(runtime)
     output["learning"] = learning_summary(runtime, records)
     if view != "learning" or records is None:

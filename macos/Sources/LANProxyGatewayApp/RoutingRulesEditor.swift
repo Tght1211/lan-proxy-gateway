@@ -57,8 +57,7 @@ struct RoutingRulesEditor: View {
     @State private var text = ""
     @State private var parseNote: String?
     @State private var selectedGroupID: UUID?
-    @State private var perspective = "source"
-    @State private var source = "proxy"
+    @State private var source = "all"
     @State private var baselineRules: [RoutingRule]
     @State private var configurationConflict = false
 
@@ -72,7 +71,7 @@ struct RoutingRulesEditor: View {
 
     private var flatRules: [RoutingRule] { flattenGroups(groups) }
     private var visibleIndices: [Int] {
-        groups.indices.filter { perspective == "assets" || groups[$0].rules.contains { $0.action == source } || groups[$0].rules.isEmpty }
+        groups.indices.filter { source == "all" || groups[$0].rules.contains { $0.action == source } || groups[$0].rules.isEmpty }
     }
     private var selectedIndex: Int {
         guard let id = selectedGroupID, let idx = groups.firstIndex(where: { $0.id == id }), visibleIndices.contains(idx) else {
@@ -85,10 +84,10 @@ struct RoutingRulesEditor: View {
         VStack(spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("规则资产").font(.title3.weight(.semibold))
+                    Text("分流规则").font(.title3.weight(.semibold))
                     Text("所有接入方式共用规则；保存后即时生效。")
                         .font(.caption).foregroundStyle(Theme.cyan)
-                    Text("资产按全局顺序匹配，首条命中生效。")
+                    Text("设备策略优先；其他规则按全局顺序首条命中。")
                         .font(.caption).foregroundStyle(Theme.muted)
                 }
                 Spacer()
@@ -118,12 +117,10 @@ struct RoutingRulesEditor: View {
             Divider().overlay(Theme.border)
 
             HStack(spacing: 16) {
-                StudioTabs(title: "规则视角", selection:$perspective, items:[("source","代理源视角",""),("assets","资产视角","")], compact:true)
-                if perspective == "source" {
-                    StudioTabs(title: "网络出口", selection:$source, items:[("proxy","代理出口","cloud"),("direct","本机直连","globe"),("reject","拒绝","ban")], compact:true)
-                }
+                StudioTabs(title: "规则动作筛选", selection:$source, items:[("all","全部规则",""),("proxy","代理出口","cloud"),("direct","本机直连","globe"),("reject","拒绝","ban")], compact:true)
+                    .help("按规则动作筛选分组；混合分组保留其他动作的规则。筛选不改变全局顺序，保存时保留未显示的规则。")
                 Spacer()
-                Text("每条规则指定一个出口").font(.caption).foregroundStyle(Theme.muted)
+                Text("每条规则只指定一种动作").font(.caption).foregroundStyle(Theme.muted)
             }.padding(.horizontal, 20).padding(.vertical, 10)
             if editorMode == "text" {
                 VStack(alignment: .leading, spacing: 8) {
@@ -333,7 +330,7 @@ struct RoutingRulesEditor: View {
                 Spacer()
                 HStack(spacing: 6) {
                     Circle().fill(groupActionSummaryColor(group)).frame(width: 7, height: 7)
-                    StudioSelect(title:"资产出口",selection:groupActionBinding(groupIndex),options:(groupActionSummary(group) == "mixed" ? [("mixed","混合")]:[])+[("proxy","上游代理"),("direct","本机直连"),("reject","拒绝")]).frame(width:130)
+                    StudioSelect(title:"分组动作",selection:groupActionBinding(groupIndex),options:(groupActionSummary(group) == "mixed" ? [("mixed","混合")]:[])+[("proxy","上游代理"),("direct","本机直连"),("reject","拒绝")]).frame(width:130)
                 }
                 Button {
                     groups[groupIndex].rules.append(RoutingRule(type: "domain-suffix", value: "", action: dominantAction(groups[groupIndex])))

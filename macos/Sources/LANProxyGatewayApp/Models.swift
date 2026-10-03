@@ -118,6 +118,7 @@ struct RuntimeStats: Decodable {
     let udpRelay: UDPRelayStats?
     let dns: DNSStats?
     let health: HealthStats
+    let exitHealth: [String: HealthStats]?
     let fallback: FallbackStats?
     let egressHealth: EgressHealthStats?
 	let deviceAdaptive: DeviceAdaptiveStats?
@@ -130,9 +131,17 @@ struct RuntimeStats: Decodable {
         case egress, proxy, relay, dns, health, fallback, components
         case schemaVersion = "schema_version"
         case uptimeSec = "uptime_sec"
+        case exitHealth = "exit_health"
         case udpRelay = "udp_relay"
 		case egressHealth = "egress_health"
 		case deviceAdaptive = "device_adaptive"
+    }
+}
+
+extension RuntimeStats {
+    func health(for exit: String) -> HealthStats? {
+        if let exitHealth { return exitHealth[exit] }
+        return egress == exit ? health : nil
     }
 }
 

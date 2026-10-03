@@ -1,5 +1,20 @@
 import Foundation
 
+struct AppBuildVersion {
+    let value: String?
+
+    init(_ bundleVersion: String?) {
+        let trimmed = bundleVersion?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let normalized = trimmed.hasPrefix("v") ? String(trimmed.dropFirst()) : trimmed
+        value = ["", "0.0.0", "dev"].contains(normalized) ? nil : normalized
+    }
+
+    var detail: String {
+        guard let value else { return "开发预览 · 未标记版本" }
+        return value.contains("-") ? "开发预览 v\(value)" : "当前版本 v\(value)"
+    }
+}
+
 enum AppSection: String, CaseIterable, Identifiable {
     case overview = "网络总览"
     case rules = "配置规则"

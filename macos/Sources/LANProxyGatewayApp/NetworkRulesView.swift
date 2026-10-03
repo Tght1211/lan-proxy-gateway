@@ -7,7 +7,7 @@ struct NetworkRulesView: View {
     var body: some View {
         VStack(alignment:.leading,spacing:18) {
             StudioTabs(title: "规则配置分类", selection: $tab, items: [
-                ("rules", "代理规则", "list.bullet.rectangle"), ("learning", "自学习", "sparkles")
+                ("rules", "分流规则", "list.bullet.rectangle"), ("learning", "自学习", "sparkles")
             ]).padding(.horizontal,22).padding(.top,16)
             ZStack {
                 // Keep the editor alive when switching tabs, preserving unsaved text/list drafts.

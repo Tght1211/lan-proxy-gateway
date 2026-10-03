@@ -130,16 +130,34 @@ import Foundation
         let largeUsage = NetworkExitUsageSummary(rows: manyRows, date: "2026-10-02")
         precondition(largeUsage.usage(for: "direct").total == 160_000 && largeUsage.usage(for: "direct").connections == 2000)
 
-        func healthStats(probes: String = "[]", connections: String = "[]", exit: String = "proxy") throws -> RuntimeStats {
+        func healthStats(probes: String = "[]", connections: String = "[]", exit: String = "proxy", exits: String = "null") throws -> RuntimeStats {
             try JSONDecoder().decode(RuntimeStats.self, from: Data("""
-            {"egress":"\(exit)","uptime_sec":1,"relay":{"recent":\(connections)},"health":{"history":\(probes)}}
+            {"egress":"\(exit)","uptime_sec":1,"relay":{"recent":\(connections)},"health":{"history":\(probes)},"exit_health":\(exits)}
             """.utf8))
         }
         let freshProbe = "[{\"at\":100000,\"latency_ms\":12,\"ok\":true}]"
+        precondition(AppBuildVersion("4.5.1").detail == "当前版本 v4.5.1")
+        precondition(AppBuildVersion(" v4.5.1 ").value == "4.5.1")
+        precondition(AppBuildVersion("4.5.1-dev").detail == "开发预览 v4.5.1-dev")
+        for placeholder in [nil, "", "dev", "0.0.0", "v0.0.0"] as [String?] {
+            precondition(AppBuildVersion(placeholder).value == nil)
+            precondition(AppBuildVersion(placeholder).detail == "开发预览 · 未标记版本")
+        }
         let successfulDirect = "[{\"id\":1,\"started_at\":99999,\"ended_at\":100000,\"down\":10}]"
         let proxyOnly = NetworkGlobalHealth(stats: try healthStats(probes: freshProbe), proxyConfigured: true, isRunning: true, at: now)
         precondition(proxyOnly.healthyCount == 1 && proxyOnly.conditions == [.healthy, .unknown])
         precondition(proxyOnly.title == "检测未齐", "one healthy proxy cannot stand in for global health")
+        let failedProxy = "[{\"at\":100000,\"latency_ms\":8000,\"ok\":false}]"
+        let independentStats = try healthStats(probes: failedProxy, exits: "{\"direct\":{\"history\":\(freshProbe)},\"proxy\":{\"history\":\(failedProxy)}}")
+        let independent = NetworkGlobalHealth(stats: independentStats, proxyConfigured: true, isRunning: true, at: now)
+        precondition(independent.conditions == [.unavailable, .healthy] && independent.title == "部分异常")
+        precondition(independentStats.health(for: "direct")?.history.last?.latencyMS == 12)
+        let bothProbed = try healthStats(exits: "{\"direct\":{\"history\":\(freshProbe)},\"proxy\":{\"history\":\(freshProbe)}}")
+        precondition(NetworkGlobalHealth(stats: bothProbed, proxyConfigured: true, isRunning: true, at: now).title == "全部正常")
+        let emptyExits = try healthStats(probes: freshProbe, exits: "{}")
+        precondition(NetworkGlobalHealth(stats: emptyExits, proxyConfigured: true, isRunning: true, at: now).healthyCount == 0, "explicit per-exit telemetry must not borrow legacy samples")
+        let staleDirect = try healthStats(probes: freshProbe, exits: "{\"direct\":{\"history\":[{\"at\":99960,\"latency_ms\":12,\"ok\":true}]}}")
+        precondition(NetworkGlobalHealth.condition(for: "direct", stats: staleDirect, isRunning: true, at: now) == .unknown)
         let allHealthyStats = try healthStats(probes: freshProbe, connections: successfulDirect)
         let allHealthy = NetworkGlobalHealth(stats: allHealthyStats, proxyConfigured: true, isRunning: true, at: now)
         precondition(allHealthy.title == "全部正常" && allHealthy.healthyCount == 2)

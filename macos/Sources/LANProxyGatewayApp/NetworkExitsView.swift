@@ -159,11 +159,11 @@ struct NetworkExitsView: View {
     }
     private func probeStrip(for exit: String) -> some View {
         let now = Date()
-        let points = model.stats?.egress == exit && model.isRunning ? model.stats?.health.history ?? [] : []
+        let points = model.isRunning ? model.stats?.health(for: exit)?.history ?? [] : []
         let latest = points.last { (0..<30).contains(now.timeIntervalSince($0.at)) }
         return VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Text("独立探测 · 近 5 分钟")
+                Text(exit == "direct" ? "百度直连探测 · 近 5 分钟" : "独立探测 · 近 5 分钟")
                 Spacer()
                 Text(latest.map { $0.ok ? formatMS($0.latencyMS) : "探测失败" } ?? "暂无探测")
             }.font(.system(size: 9)).foregroundStyle(Theme.muted)
@@ -177,6 +177,6 @@ struct NetworkExitsView: View {
                         .help(point.map { $0.ok ? formatMS($0.latencyMS) : "探测失败" } ?? "无探测记录")
                 }
             }
-        }.help("核心当前只对正在探测的出口提供独立探测记录；未探测的出口不借用其他出口的数据。")
+        }.help(exit == "direct" ? "每 10 秒通过本机直连请求百度，最多等待 8 秒；收到 HTTP 响应表示此探测路径可达，不代表所有网站或设备网络正常。旧核心没有独立直连数据时不会借用代理结果。" : "通过代理独立探测；不借用直连结果，也不代表所有网站可用。")
     }
 }

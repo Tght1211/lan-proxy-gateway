@@ -61,7 +61,7 @@ struct SettingsView: View {
                     }
                 case "updates":
                     Panel {
-                        SettingsRow(title: "LAN Proxy Gateway", detail: model.updateStatus ?? "当前版本 v\(model.appVersion)") {
+                        SettingsRow(title: "LAN Proxy Gateway", detail: model.updateStatus ?? model.buildVersion.detail) {
                             Button(model.isCheckingUpdate ? "检查中…" : "检查更新") { model.checkForUpdates() }.disabled(model.isCheckingUpdate)
                             if model.updateAvailable { Link("下载新版本 ↗", destination: URL(string: "https://github.com/Tght1211/lan-proxy-gateway/releases/latest")!) }
                         }

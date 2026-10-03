@@ -184,8 +184,8 @@ struct NetworkGlobalHealth {
             case .waiting, .noData, .rejected: continue
             }
         }
-        if includeProbe, stats.egress == exit,
-           let probe = stats.health.history.last(where: { (0..<30).contains(at.timeIntervalSince($0.at)) }),
+        if includeProbe,
+           let probe = stats.health(for: exit)?.history.last(where: { (0..<30).contains(at.timeIntervalSince($0.at)) }),
            latest.map({ probe.at >= $0.at }) ?? true {
             return probe.ok ? .healthy : .unavailable
         }
