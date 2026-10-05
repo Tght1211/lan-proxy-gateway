@@ -153,6 +153,16 @@ struct GatewayClient {
         return try await output(arguments: ["routing", "set", "--rules-json", json], privileged: false)
     }
 
+    func setConnectionRoutingRule(_ shortcut: ConnectionRoutingShortcut, action: ConnectionRouteAction) async throws -> String {
+        try await shortcut.save(action: action, readRules: {
+            guard let rules = try await self.status().routing else { throw ConnectionRoutingError.unavailable }
+            return rules
+        }, writeRules: { rules in
+            _ = try await self.setRoutingRules(rules)
+        })
+        return "已保存精确域名规则"
+    }
+
     func setLANHTTPProxy(enabled: Bool, port: Int, auth: String, username: String, password: String?) async throws -> String {
         guard let engineURL else { throw GatewayClientError.engineNotFound }
         var config: [String: Any] = ["enabled": enabled, "port": port, "auth": auth, "username": username]

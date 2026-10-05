@@ -4,7 +4,7 @@ private struct NetworkNode: Identifiable {
     let id: String, title: String, icon: String, detail: String
     let column: Int
     let row: Double
-    let destination: NetworkSheet
+    let destination: NetworkSheet?
     var inactive = false
 }
 private struct NetworkFlight: Identifiable {
@@ -77,16 +77,25 @@ struct NetworkTopologyView: View {
     @AppStorage("networkFlowPalette") private var palette: NetworkFlowPalette = .status
     @State private var feed = NetworkEventFeed()
     @State private var flights: [NetworkFlight] = []
+    @State private var inactiveDevicesExpanded = false
     let onSelect: (NetworkSheet) -> Void
     private var network: HotspotStatus? { model.stats?.hotspot ?? model.hotspot }
-    private var devices: [UsageAggregate] {
+    private var topologyDevices: NetworkTopologyDevices {
         let visible = model.visibleDevices
-        return NetworkTopologyLayout.orderedDevices(visible, inactive: Set(visible.filter { model.isDeviceInactive($0) }.map(\.name)))
+        return NetworkTopologyDevices(visible, inactive: Set(visible.filter { model.isDeviceInactive($0) }.map(\.name)), expanded: inactiveDevicesExpanded)
     }
     private var nodes: [NetworkNode] {
+        let projection = topologyDevices
+        let devices = projection.devices
+        let count = projection.nodeCount
         var list: [NetworkNode] = devices.enumerated().map { index, d in
             NetworkNode(id: "device:" + d.name, title: model.effectiveDeviceLabel(for: d.name).nonEmpty ?? d.name,
-                        icon: deviceIcon(label: model.effectiveDeviceLabel(for: d.name)), detail: shortBytes(d.total), column: 0, row: devices.count > 1 ? Double(index) * 3 / Double(devices.count - 1) : 1.5, destination: .device(d.name), inactive: model.isDeviceInactive(d))
+                        icon: deviceIcon(label: model.effectiveDeviceLabel(for: d.name)), detail: shortBytes(d.total), column: 0, row: count > 1 ? Double(index) * 3 / Double(count - 1) : 1.5, destination: .device(d.name), inactive: model.isDeviceInactive(d))
+        }
+        if projection.hasInactiveGroup {
+            list.append(NetworkNode(id: "inactive-devices", title: "闲置设备 · \(projection.inactiveDevices.count) 台",
+                                    icon: "network", detail: inactiveDevicesExpanded ? "点击收起 ▴" : "点击展开 ▾",
+                                    column: 0, row: count > 1 ? 3 : 1.5, destination: nil, inactive: true))
         }
         let hotspotAddress = network?.ip.nonEmpty ?? "尚未发现"
         let localAddress = model.status?.gateway.localIP
@@ -110,9 +119,19 @@ struct NetworkTopologyView: View {
         var links = [("wifi","hotspot"),("gateway","lan"),("http","lan"),("hotspot","policy"),("lan","policy"),("policy","rules"),("rules","direct"),("rules","reject"),("direct","internet"),("learning","rules")]
         if nodes.contains(where: { $0.id == "proxy" }) { links += [("rules","proxy"),("proxy","internet")] }
         let connections = (model.stats?.relay.active ?? []) + (model.stats?.relay.recent ?? [])
-        for d in devices {
+        let projection = topologyDevices
+        var inactiveEntries = Set<String>()
+        for d in projection.devices {
             let entries = Set(connections.filter { $0.srcIP == d.name }.map { NetworkIngress.resolve($0, hotspot: network).rawValue })
             for entry in entries where entry != "unknown" { links.append(("device:" + d.name,entry)) }
+        }
+        if projection.hasInactiveGroup && !inactiveDevicesExpanded {
+            let addresses = Set(projection.inactiveDevices.map(\.name))
+            for connection in connections where addresses.contains(connection.srcIP) {
+                let entry = NetworkIngress.resolve(connection, hotspot: network).rawValue
+                if entry != "unknown" { inactiveEntries.insert(entry) }
+            }
+            for entry in inactiveEntries.sorted() { links.append(("inactive-devices", entry)) }
         }
         return links
     }
@@ -143,7 +162,10 @@ struct NetworkTopologyView: View {
                         }
                         ForEach(topologyNodes) { node in
                             let probe = recentProbe(for: node.id)
-                            Button { onSelect(node.destination) } label: {
+                            Button {
+                                if node.id == "inactive-devices" { inactiveDevicesExpanded.toggle() }
+                                else if let destination = node.destination { onSelect(destination) }
+                            } label: {
                                 NetworkTopologyNodeLabel(id: node.id, title: node.title, detail: node.detail,
                                                          icon: node.icon, inactive: node.inactive,
                                                          probeText: probe.map { $0.ok ? formatMS($0.latencyMS) : "未响应" },
@@ -160,9 +182,9 @@ struct NetworkTopologyView: View {
                                           labelWidth: geo.size.width / 7 - 8)
                         }.allowsHitTesting(false)
                     }
-                }.frame(height: NetworkTopologyLayout.minimumHeight(deviceCount: devices.count))
+                }.frame(height: NetworkTopologyLayout.minimumHeight(deviceCount: topologyDevices.nodeCount))
                 HStack {
-                    Text(devices.isEmpty ? "等待设备接入" : "真实连接采样 · 点击图标配置").font(.caption2).foregroundStyle(Theme.muted)
+                    Text(topologyDevices.nodeCount == 0 ? "等待设备接入" : "真实连接采样 · 点击图标配置").font(.caption2).foregroundStyle(Theme.muted)
                     Spacer()
                     HStack(spacing: 10) {
                         legend(palette == .status ? "正常" : "同域名同色", color: palette.hues[0].color)
@@ -172,6 +194,9 @@ struct NetworkTopologyView: View {
                 }
             }
         }.onChange(of: model.stats?.uptimeSec) { _ in sample() }.onAppear { sample() }
+            .onChange(of: topologyDevices.hasInactiveGroup) { hasGroup in
+                if !hasGroup { inactiveDevicesExpanded = false }
+            }
             .onChange(of: isActive) { active in
                 if active { sample() }
                 else { flights = []; feed.reset() }

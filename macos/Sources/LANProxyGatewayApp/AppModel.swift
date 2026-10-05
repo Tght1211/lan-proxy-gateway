@@ -274,6 +274,17 @@ final class AppModel: ObservableObject {
         await performAsync("分流规则已更新") { try await self.client.setRoutingRules(rules) }
     }
 
+    func setConnectionRoute(_ connection: ConnectionInfo, action: ConnectionRouteAction) async {
+        guard let shortcut = ConnectionRoutingShortcut(host: connection.dstHost) else { return }
+        var message = "\(shortcut.host) 已设为\(action.title)，规则适用于所有设备的新连接；已有连接不变。"
+        if !deviceOverride(for: connection.srcIP).isEmpty {
+            message += "当前设备另有设备策略，设备策略仍优先。"
+        }
+        _ = await performAsync(message) {
+            try await self.client.setConnectionRoutingRule(shortcut, action: action)
+        }
+    }
+
     private func performAsync(_ success: String, operation: @escaping () async throws -> String) async -> Bool {
         guard !isBusy else { return false }
         isBusy = true

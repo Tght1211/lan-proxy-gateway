@@ -18,3 +18,11 @@ swiftc -sdk "$SDK" -parse-as-library \
  "$SOURCE/Models.swift" "$SOURCE/ConnectionModels.swift" "$SOURCE/LearningRecordModels.swift" \
  "$ROOT/Tests/LearningRecordTests.swift" -o "$TEMP/test-learning"
 "$TEMP/test-learning"
+swiftc -sdk "$SDK" -parse-as-library \
+ "$SOURCE/Models.swift" "$SOURCE/ConnectionModels.swift" "$SOURCE/ConnectionRoutingModels.swift" \
+ "$ROOT/Tests/ConnectionRoutingTests.swift" -o "$TEMP/test-connection-routing"
+"$TEMP/test-connection-routing"
+swiftc -sdk "$SDK" -parse-as-library \
+ "$SOURCE/Models.swift" "$SOURCE/ConnectionModels.swift" "$SOURCE/RoutingEditorModels.swift" \
+ "$ROOT/Tests/RoutingEditorTests.swift" -o "$TEMP/test-routing-editor"
+"$TEMP/test-routing-editor"

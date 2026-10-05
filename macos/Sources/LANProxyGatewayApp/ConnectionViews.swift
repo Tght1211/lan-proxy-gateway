@@ -107,16 +107,25 @@ struct ConnectionsView: View {
                                 .font(.system(.body, design: .monospaced))
                                 .help("\(item.isUDP ? "UDP " : "")\(item.dstHost):\(item.dstPort)")
                         }
+                        .contextMenu { routingActions(for: item) }
                     }.width(min: 220, ideal: 320)
                     TableColumn("出口") { item in
-                        if item.fallback && !item.rejected {
-                            Text(item.viaProxy ? "回退代理" : "回退直连")
-                                .foregroundStyle(Theme.yellow)
-                                .help(item.viaProxy ? "直连拨号失败后切换代理；收到响应数据后自动记住该域名使用代理" : "代理拨号失败后回退直连")
-                        } else {
-                            Text(item.rejected ? "REJECT" : (item.viaProxy ? "PROXY" : "DIRECT"))
-                                .foregroundStyle(item.rejected ? Theme.coral : (item.viaProxy ? Theme.cyan : Theme.yellow))
+                        Menu {
+                            routingActions(for: item)
+                        } label: {
+                            if item.fallback && !item.rejected {
+                                Text(item.viaProxy ? "回退代理" : "回退直连")
+                                    .foregroundStyle(Theme.yellow)
+                            } else {
+                                Text(item.rejected ? "REJECT" : (item.viaProxy ? "PROXY" : "DIRECT"))
+                                    .foregroundStyle(item.rejected ? Theme.coral : (item.viaProxy ? Theme.cyan : Theme.yellow))
+                            }
                         }
+                        .menuStyle(.borderlessButton)
+                        .tint(item.rejected ? Theme.coral : (item.fallback || !item.viaProxy ? Theme.yellow : Theme.cyan))
+                        .fixedSize()
+                        .disabled(model.isBusy || ConnectionRoutingShortcut(host: item.dstHost) == nil)
+                        .help(routingHelp(for: item))
                     }.width(72)
                     TableColumn("结果") { item in
                         HStack(spacing: 6) {
@@ -146,6 +155,32 @@ struct ConnectionsView: View {
         .onChange(of: isActive) { active in
             if active { refreshProjection(model.stats) }
         }
+    }
+
+    @ViewBuilder
+    private func routingActions(for connection: ConnectionInfo) -> some View {
+        if let shortcut = ConnectionRoutingShortcut(host: connection.dstHost) {
+            ForEach(ConnectionRouteAction.allCases, id: \.rawValue) { action in
+                Button {
+                    Task { await model.setConnectionRoute(connection, action: action) }
+                } label: {
+                    Label("设为\(action.title)", systemImage: shortcut.action(in: model.status?.routing ?? []) == action
+                          ? "checkmark" : (action == .direct ? "arrow.right" : "arrow.triangle.branch"))
+                }
+                .disabled(model.isBusy)
+            }
+        } else {
+            Text("未解析出域名，请在配置规则中管理 IP 分流")
+        }
+    }
+
+    private func routingHelp(for connection: ConnectionInfo) -> String {
+        guard let shortcut = ConnectionRoutingShortcut(host: connection.dstHost) else {
+            return "当前记录没有可保存的域名，不会把 IP 地址误存为域名规则。"
+        }
+        let fallbackDetail = connection.fallback && !connection.rejected
+            ? (connection.viaProxy ? "此连接由直连回退到代理。" : "此连接由代理回退到直连。") : ""
+        return "\(fallbackDetail)点击切换并为 \(shortcut.host) 保存精确域名规则，不包含端口或子域名。适用于所有设备的新连接；设备策略仍优先，已有连接不变。"
     }
 
     private func outcomeColor(_ outcome: ConnectionOutcome) -> Color {

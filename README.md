@@ -16,7 +16,9 @@
 
 首页支持上下滚动：顶部查看关键指标，中间查看连接拓扑，下方查看出口卡片（最多三列）。出口不再是独立菜单。季度流量区分已记录的代理与直连；出口健康是全局摘要，具体异常查看各出口卡片。
 
-v4.5.2：本机直连独立探测百度并记录历史，不借用代理结果；拓扑图标和文字都可点击。配置规则按全部 / 代理 / 直连 / 拒绝筛选，不再区分资产视角。升级后需重启核心，才能启用新版直连探测。
+v4.5.3：多台灰色闲置设备默认折叠，可点击展开；流量记录支持域名快捷直连 / 代理，规则编辑器支持搜索、来源筛选、分页及可拖动分隔条，详情弹窗按内容适配尺寸。已运行 v4.5.2 核心时，这些界面改动无需重启核心。
+
+v4.5.2 起，本机直连独立探测百度并记录历史，不借用代理结果；拓扑图标和文字都可点击。配置规则按全部 / 代理 / 直连 / 拒绝筛选，不再区分资产视角。从更早版本升级后需重启核心，才能启用新版直连探测。
 
 <details>
 <summary>更多运行截图：出口卡片、流量记录与分类自学习</summary>
@@ -100,13 +102,13 @@ SwiftUI App 与 CLI 使用同一个核心和配置。macOS 使用 `pf`，Linux �
 make build
 make test
 make build-app
-make dmg VERSION=v4.5.2
-make skill VERSION=v4.5.2
+make dmg VERSION=v4.5.3
+make skill VERSION=v4.5.3
 ```
 
 完整 Xcode 或 GitHub macOS Runner 打包 universal App；只有 Command Line Tools 时，SwiftUI 外壳为本机架构。
 
-[App 文档](docs/app.md) · [架构说明](docs/architecture.md) · [故障排查](docs/faq.md) · [Changelog](CHANGELOG.md) · [v4.5.2 更新说明](docs/releases/v4.5.2.md)
+[App 文档](docs/app.md) · [架构说明](docs/architecture.md) · [故障排查](docs/faq.md) · [Changelog](CHANGELOG.md) · [v4.5.3 更新说明](docs/releases/v4.5.3.md)
 
 ## License
 

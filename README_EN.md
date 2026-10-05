@@ -16,7 +16,9 @@
 
 Scroll from key metrics to the topology and compact exit cards (up to three columns). Exits no longer have a separate menu. Quarterly traffic separates recorded proxy/direct usage; global health summarizes observed exits, with per-exit details below.
 
-v4.5.2 independently probes Baidu over the host's direct connection and records its own history. Topology icons and text are both clickable. Rules use one all / proxy / direct / reject filter instead of asset perspectives. Restart the core after upgrading to enable independent direct probes.
+v4.5.3 collapses multiple idle devices into an expandable topology node, adds exact-domain direct/proxy shortcuts to traffic records, and improves the rule editor with search, origin filters, pagination and a draggable divider. Detail sheets fit their content. These UI changes do not require restarting an existing v4.5.2 core.
+
+Since v4.5.2, the core independently probes Baidu over the host's direct connection and records its own history. Topology icons and text are both clickable. Rules use one all / proxy / direct / reject filter instead of asset perspectives. Restart the core when upgrading from an older version to enable independent direct probes.
 
 <details>
 <summary>More running screenshots: exit cards, traffic and classified learning</summary>
@@ -100,13 +102,13 @@ The app and CLI share the same core/configuration. macOS uses `pf`; Linux uses `
 make build
 make test
 make build-app
-make dmg VERSION=v4.5.2
-make skill VERSION=v4.5.2
+make dmg VERSION=v4.5.3
+make skill VERSION=v4.5.3
 ```
 
 Full Xcode or the GitHub macOS runner produces a universal app; Command Line Tools-only builds use the host architecture for the SwiftUI shell.
 
-[App documentation](docs/app.md) · [Architecture](docs/architecture.md) · [Troubleshooting](docs/faq.md) · [Changelog](CHANGELOG.md) · [v4.5.2 release notes](docs/releases/v4.5.2.md)
+[App documentation](docs/app.md) · [Architecture](docs/architecture.md) · [Troubleshooting](docs/faq.md) · [Changelog](CHANGELOG.md) · [v4.5.3 release notes](docs/releases/v4.5.3.md)
 
 ## License
 

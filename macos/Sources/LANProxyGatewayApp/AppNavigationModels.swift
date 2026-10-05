@@ -48,6 +48,27 @@ struct AppSectionCache {
     }
 }
 
+struct ContentSheetSizing {
+    let width: Double
+    let maximumHeight: Double
+
+    static let information = ContentSheetSizing(width: 480, maximumHeight: 420)
+    static let policy = ContentSheetSizing(width: 420, maximumHeight: 560)
+    static let access = ContentSheetSizing(width: 600, maximumHeight: 680)
+    static let services = ContentSheetSizing(width: 680, maximumHeight: 620)
+    static let records = ContentSheetSizing(width: 620, maximumHeight: 620)
+    static let workspace = ContentSheetSizing(width: 900, maximumHeight: 720)
+    static let settings = ContentSheetSizing(width: 740, maximumHeight: 680)
+    static let probe = ContentSheetSizing(width: 360, maximumHeight: 300)
+
+    func fittedSize(contentHeight: Double, headerHeight: Double, availableWidth: Double, availableHeight: Double) -> CGSize {
+        let fittedWidth = max(1, min(width, availableWidth))
+        let heightLimit = max(1, min(maximumHeight, availableHeight))
+        let fittedHeight = min(heightLimit, max(120, contentHeight + headerHeight + 1))
+        return CGSize(width: fittedWidth, height: fittedHeight)
+    }
+}
+
 // MARK: - NAT Diagnosis
 
 struct NATDiagResult: Decodable {

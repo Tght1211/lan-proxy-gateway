@@ -343,7 +343,7 @@ struct FallbackLearningPopover: View {
         .onChange(of: route) { _ in showPage(0) }
         .onChange(of: scope) { _ in showPage(0) }
         .onChange(of: isActive) { active in if active { refresh(model.stats) } }
-        .sheet(isPresented:$showSettings) { SheetFrame(title:"自学习设置") { LearningSettingsView() } }
+        .sheet(isPresented:$showSettings) { SheetFrame(title:"自学习设置", sizing: .settings) { LearningSettingsView() } }
     }
 }
 

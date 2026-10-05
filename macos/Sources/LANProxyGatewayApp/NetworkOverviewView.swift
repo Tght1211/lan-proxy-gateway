@@ -201,7 +201,7 @@ struct NetworkStabilityCard: View {
             if summary { summaryContent }
             else if compact { content }
             else { Panel { content.frame(height: 270) } }
-        }.sheet(item: $probe) { p in SheetFrame(title: "探测记录") { Text(p.at.formatted()); Text(p.ok ? formatMS(p.latencyMS) : "未收到探测响应") } }
+        }.sheet(item: $probe) { p in SheetFrame(title: "探测记录", sizing: .probe) { Text(p.at.formatted()); Text(p.ok ? formatMS(p.latencyMS) : "未收到探测响应") } }
     }
     private var summaryContent: some View {
         VStack(alignment: .leading, spacing: 8) {
