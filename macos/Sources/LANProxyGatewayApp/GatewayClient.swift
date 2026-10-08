@@ -210,17 +210,26 @@ struct GatewayClient {
         try await output(arguments: ["service", "status"], privileged: false)
     }
 
-    func installCLI() async throws -> String {
+    func updateBundledCore(restart: Bool) async throws -> String {
+        if restart {
+            let service = try await serviceStatus()
+            if service == "运行中" || service == "已加载" { return try await restartInstalledCore() }
+        }
+        return try await installCLI(restart: restart)
+    }
+
+    func installCLI(restart: Bool = false) async throws -> String {
         guard let source = bundledEngineURL,
               FileManager.default.isExecutableFile(atPath: source.path) else {
             throw GatewayClientError.engineNotFound
         }
-        let command = [
+        var commands = [
             "/bin/mkdir -p /usr/local/bin",
             "/bin/cp \(shellQuote(source.path)) /usr/local/bin/gateway",
             "/bin/chmod 755 /usr/local/bin/gateway"
-        ].joined(separator: " && ")
-        return try await runPrivilegedShell(command).text
+        ]
+        if restart { commands.append("/usr/bin/env \(privilegedEnvironment()) /usr/local/bin/gateway restart") }
+        return try await runPrivilegedShell(commands.joined(separator: " && ")).text
     }
 
     func natDiag(apiPort: Int, configFile: String) async throws -> NATDiagResult {
@@ -252,7 +261,7 @@ struct GatewayClient {
         return try await runProcess(executable: engineURL, arguments: arguments)
     }
 
-    private func runPrivilegedShell(_ command: String) async throws -> CommandResult {
+    func runPrivilegedShell(_ command: String) async throws -> CommandResult {
         let escaped = command
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
@@ -289,7 +298,7 @@ struct GatewayClient {
             guard process.terminationStatus == 0 else {
                 let message = String(decoding: errorData.isEmpty ? outputData : errorData, as: UTF8.self)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                throw GatewayClientError.commandFailed(message.isEmpty ? "gateway 命令执行失败。" : message)
+                throw GatewayClientError.commandFailed(message.isEmpty ? "\(executable.lastPathComponent) 执行失败（退出码 \(process.terminationStatus)）。" : message)
             }
             return CommandResult(data: outputData)
         }.value

@@ -430,35 +430,117 @@ final class AppModel: ObservableObject {
     @Published var updateStatus: String?
     @Published var updateAvailable = false
     @Published var isCheckingUpdate = false
+    @Published var isUpdatingApp = false
+    @Published var isInstallingAppUpdate = false
+    @Published var updateProgress: Double?
+    @Published var coreUpdatePending = UserDefaults.standard.bool(forKey: "coreUpdatePending")
+    private var availableRelease: AppUpdateRelease?
+    private var appUpdateTask: Task<Void, Never>?
+    private var updateOperationID: UUID?
+
+    var appUpdateHelp: String {
+        AppUpdater.installationProblem ?? "直接下载、校验并安装更新，完成后自动重新打开 App。"
+    }
+    var canInstallAppUpdate: Bool { AppUpdater.installationProblem == nil }
 
     func checkForUpdates() {
-        guard !isCheckingUpdate else { return }
+        guard !isCheckingUpdate, !isUpdatingApp else { return }
         isCheckingUpdate = true
-        updateStatus = "正在检查..."
+        updateStatus = "正在检查…"
         updateAvailable = false
+        availableRelease = nil
         Task {
             defer { isCheckingUpdate = false }
             do {
-                var request = URLRequest(url: URL(string: "https://api.github.com/repos/Tght1211/lan-proxy-gateway/releases/latest")!)
-                request.setValue("lan-proxy-gateway-app", forHTTPHeaderField: "User-Agent")
-                request.timeoutInterval = 15
-                let (data, _) = try await URLSession.shared.data(for: request)
-                struct Release: Decodable { let tag_name: String }
-                let latest = try JSONDecoder().decode(Release.self, from: data).tag_name
-                guard buildVersion.value != nil else {
-                    updateStatus = "开发预览 · 最新正式版本 \(latest)"
+                let latest = try await AppUpdater().latestRelease()
+                if latest.isNewer(than: buildVersion.value) {
+                    availableRelease = latest
                     updateAvailable = true
-                    return
-                }
-                let current = appVersion.hasPrefix("v") ? appVersion : "v\(appVersion)"
-                if latest == current || latest == appVersion {
-                    updateStatus = "已是最新版本（\(latest)）"
+                    updateStatus = "发现新版本 \(latest.tag_name)，\(buildVersion.detail)"
+                    // Missing assets should be visible before the user starts a download.
+                    _ = try latest.installationAssets()
                 } else {
-                    updateStatus = "发现新版本 \(latest)，当前 \(current)"
-                    updateAvailable = true
+                    updateStatus = "已是最新版本（\(appVersion)）"
                 }
             } catch {
+                availableRelease = nil
+                updateAvailable = false
                 updateStatus = "检查失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    func installAppUpdate() {
+        guard let release = availableRelease, canInstallAppUpdate,
+              !isUpdatingApp, !isCheckingUpdate, !isBusy else { return }
+        let operationID = UUID()
+        updateOperationID = operationID
+        isUpdatingApp = true
+        isBusy = true
+        updateProgress = nil
+        appUpdateTask = Task {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("lan-proxy-app-update-\(UUID().uuidString)")
+            var relaunchScheduled = false
+            defer {
+                if !relaunchScheduled { try? FileManager.default.removeItem(at: directory) }
+                isUpdatingApp = false
+                isBusy = false
+                isInstallingAppUpdate = false
+                updateProgress = nil
+                updateOperationID = nil
+                appUpdateTask = nil
+            }
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
+                                                        attributes: [.posixPermissions: 0o700])
+                let updater = AppUpdater()
+                let staged = try await updater.prepare(release, directory: directory, progress: { value in
+                    Task { @MainActor in
+                        guard self.updateOperationID == operationID, !self.isInstallingAppUpdate else { return }
+                        self.updateProgress = value
+                    }
+                }, phase: { text in
+                    Task { @MainActor in
+                        guard self.updateOperationID == operationID, !self.isInstallingAppUpdate else { return }
+                        self.updateStatus = text
+                    }
+                })
+                try Task.checkCancellation()
+                isInstallingAppUpdate = true
+                updateStatus = "正在安装，完成后将重新打开 App…"
+                let destination = Bundle.main.bundleURL.resolvingSymlinksInPath()
+                try AppUpdater.launchRelaunchHelper(directory: directory, destination: destination)
+                try await updater.install(staged, at: destination)
+                // The existing daemon can continue until the user chooses to switch cores.
+                UserDefaults.standard.set(true, forKey: "coreUpdatePending")
+                try Data().write(to: directory.appendingPathComponent("relaunch"), options: .atomic)
+                relaunchScheduled = true
+                NSApplication.shared.terminate(nil)
+            } catch {
+                if Task.isCancelled || (error as? URLError)?.code == .cancelled {
+                    updateStatus = "已取消更新，可以重新下载。"
+                } else {
+                    updateStatus = "更新失败：\(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func cancelAppUpdate() {
+        guard !isInstallingAppUpdate else { return }
+        appUpdateTask?.cancel()
+    }
+
+    func applyUpdatedCore() {
+        Task {
+            let wasRunning = isRunning
+            let ok = await performAsync(wasRunning ? "新版核心已启用" : "新版核心已安装") {
+                try await self.client.updateBundledCore(restart: wasRunning)
+            }
+            if ok {
+                coreUpdatePending = false
+                cliNeedsCoreRestart = false
+                UserDefaults.standard.removeObject(forKey: "coreUpdatePending")
             }
         }
     }

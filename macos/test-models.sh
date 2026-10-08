@@ -1,5 +1,5 @@
 #!/bin/bash
-# Foundation-only regression checks; does not require the Xcode XCTest bundle.
+# Native model and updater regression checks; does not require the Xcode XCTest bundle.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 TEMP="$(mktemp -d)"
@@ -26,3 +26,8 @@ swiftc -sdk "$SDK" -parse-as-library \
  "$SOURCE/Models.swift" "$SOURCE/ConnectionModels.swift" "$SOURCE/RoutingEditorModels.swift" \
  "$ROOT/Tests/RoutingEditorTests.swift" -o "$TEMP/test-routing-editor"
 "$TEMP/test-routing-editor"
+swiftc -sdk "$SDK" -parse-as-library \
+ "$SOURCE/Models.swift" "$SOURCE/ConnectionModels.swift" "$SOURCE/ConnectionRoutingModels.swift" \
+ "$SOURCE/AppNavigationModels.swift" "$SOURCE/GatewayClient.swift" "$SOURCE/AppUpdateRelease.swift" "$SOURCE/AppUpdater.swift" \
+ "$ROOT/Tests/AppUpdaterTests.swift" -o "$TEMP/test-updater"
+"$TEMP/test-updater"
