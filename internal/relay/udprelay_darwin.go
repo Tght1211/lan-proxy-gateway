@@ -34,8 +34,7 @@ func (r *UDPRelay) readFromRedirectedPlatform(buf []byte) (int, netip.AddrPort, 
 }
 
 // pfNatlookUDP queries pf's NAT state to recover the original UDP destination.
-// Opens /dev/pf per call — acceptable because this only runs on new session
-// creation (once per unique client:port + fake_ip:port tuple, not per packet).
+// The destination must be the concrete post-rdr address, never 0.0.0.0.
 func pfNatlookUDP(src, dst netip.AddrPort) (netip.AddrPort, error) {
 	fd, err := unix.Open(pfDevicePath, unix.O_RDWR, 0)
 	if err != nil {

@@ -287,6 +287,27 @@ func queryMsg(name string, qtype uint16) *dns.Msg {
 
 func lanRemote() net.Addr { return &net.UDPAddr{IP: net.ParseIP("192.168.1.50"), Port: 53000} }
 
+func TestPlayStationSTUNUsesRealAddressWithFakeIPEnabled(t *testing.T) {
+	const host = "hk.np.stun.playstation.net."
+	upstream := startFakeUpstream(t, map[string]string{host: "203.0.113.17"})
+	s := New(Options{Upstreams: []string{upstream}, FakeIPEnabled: true})
+	rw := &fakeRW{remote: lanRemote()}
+	s.serveDNS(rw, queryMsg(host, dns.TypeA))
+	if rw.msg == nil || len(rw.msg.Answer) != 1 {
+		t.Fatal("missing STUN answer")
+	}
+	a, ok := rw.msg.Answer[0].(*dns.A)
+	if !ok || a.A.String() != "203.0.113.17" {
+		t.Fatalf("STUN must use the real upstream address: %v", rw.msg)
+	}
+	rw = &fakeRW{remote: lanRemote()}
+	s.serveDNS(rw, queryMsg("www.youtube.com", dns.TypeA))
+	a, ok = rw.msg.Answer[0].(*dns.A)
+	if !ok || !s.FakeIPRange().Contains(netip.MustParseAddr(a.A.String())) {
+		t.Fatal("YouTube should retain fake-IP proxy routing")
+	}
+}
+
 func TestHandlerFakeIPAndLookup(t *testing.T) {
 	upstream := startFakeUpstream(t, map[string]string{"real.example.": "93.184.216.34"})
 	s := New(Options{Upstreams: []string{upstream}, FakeIPEnabled: true})

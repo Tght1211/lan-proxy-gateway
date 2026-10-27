@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -79,7 +80,7 @@ func NewUDPRelay(opts UDPRelayOptions) *UDPRelay {
 	}
 	addr := opts.ListenAddr
 	if addr == "" {
-		addr = ":17893"
+		addr = FormatUDPListenAddr(UDPRedirPort)
 	}
 	return &UDPRelay{
 		listenAddr:   addr,
@@ -428,7 +429,12 @@ func (r *UDPRelay) Stats() UDPRelayStats {
 // UDPRedirPort is the default port for the UDP relay listener.
 const UDPRedirPort = 17893
 
-// FormatListenAddr formats a UDP relay listen address from a port number.
+// FormatUDPListenAddr matches the address used by platform redirect rules.
 func FormatUDPListenAddr(port int) string {
+	if runtime.GOOS == "darwin" {
+		// PF redirects to loopback. Binding there supplies the concrete address
+		// for DIOCNATLOOK and makes replies match PF's reverse translation.
+		return net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	}
 	return ":" + strconv.Itoa(port)
 }

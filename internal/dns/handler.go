@@ -25,6 +25,9 @@ const (
 var builtinFakeIPFilter = []string{
 	"lan.", "local.", "localhost.", "internal.", "home.arpa.",
 	"in-addr.arpa.", "ip6.arpa.",
+	// STUN must observe the console's own UDP mapping, not a new socket opened
+	// by the fake-IP relay, so Remote Play can reuse it for peer hole punching.
+	"stun.playstation.net.",
 	// captive-portal / connectivity checks
 	"connectivitycheck.gstatic.com.",
 	"clients3.google.com.",
