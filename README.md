@@ -16,7 +16,7 @@
 
 首页支持上下滚动：顶部查看关键指标，中间查看连接拓扑，下方查看出口卡片（最多三列）。出口不再是独立菜单。季度流量区分已记录的代理与直连；出口健康是全局摘要，具体异常查看各出口卡片。
 
-v4.5.4：支持在 App 内直接下载、校验并安装更新，显示进度、允许取消，安装完成后自动重新打开。新版核心随 App 下载，可按需一键更新并重启，保留现有配置与规则。旧版首次升级需安装本次 DMG，之后无需再手动下载。
+v4.5.5：缩短代理端口故障检测间隔，修复并发与代理切换问题，复用 TCP 转发缓冲区，并修正 macOS UDP 转发地址与 PlayStation STUN 的 fake-IP 行为。支持从 v4.5.4 在 App 内更新，启用新版核心时会短暂断开连接。
 
 v4.5.2 起，本机直连独立探测百度并记录历史，不借用代理结果；拓扑图标和文字都可点击。配置规则按全部 / 代理 / 直连 / 拒绝筛选，不再区分资产视角。从更早版本升级后需重启核心，才能启用新版直连探测。
 
@@ -102,13 +102,13 @@ SwiftUI App 与 CLI 使用同一个核心和配置。macOS 使用 `pf`，Linux �
 make build
 make test
 make build-app
-make dmg VERSION=v4.5.4
-make skill VERSION=v4.5.4
+make dmg VERSION=v4.5.5
+make skill VERSION=v4.5.5
 ```
 
 完整 Xcode 或 GitHub macOS Runner 打包 universal App；只有 Command Line Tools 时，SwiftUI 外壳为本机架构。
 
-[App 文档](docs/app.md) · [架构说明](docs/architecture.md) · [故障排查](docs/faq.md) · [Changelog](CHANGELOG.md) · [v4.5.4 更新说明](docs/releases/v4.5.4.md)
+[App 文档](docs/app.md) · [架构说明](docs/architecture.md) · [故障排查](docs/faq.md) · [Changelog](CHANGELOG.md) · [v4.5.5 更新说明](docs/releases/v4.5.5.md)
 
 ## License
 
