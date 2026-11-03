@@ -12,12 +12,14 @@ import (
 
 // A nil password preserves an existing credential; an explicit empty password
 // is validated normally. Status responses never include the password.
+// A nil bypass list preserves the policy; an explicit empty list clears it.
 type HTTPProxyUpdate struct {
-	Enabled  bool    `json:"enabled"`
-	Port     int     `json:"port"`
-	Auth     string  `json:"auth"`
-	Username string  `json:"username"`
-	Password *string `json:"password"`
+	Enabled       bool      `json:"enabled"`
+	Port          int       `json:"port"`
+	Auth          string    `json:"auth"`
+	Username      string    `json:"username"`
+	Password      *string   `json:"password"`
+	AuthBypassIPs *[]string `json:"auth_bypass_ips"`
 }
 
 func (a *App) SetHTTPProxy(update HTTPProxyUpdate) error {
@@ -28,6 +30,9 @@ func (a *App) SetHTTPProxy(update HTTPProxyUpdate) error {
 	next.HTTPProxy.Username = update.Username
 	if update.Password != nil {
 		next.HTTPProxy.Password = *update.Password
+	}
+	if update.AuthBypassIPs != nil {
+		next.HTTPProxy.AuthBypassIPs = append([]string(nil), (*update.AuthBypassIPs)...)
 	}
 	config.Normalize(&next)
 	if err := config.Validate(&next); err != nil {
@@ -56,7 +61,7 @@ func (rt *daemonRuntime) syncHTTPProxy(cfg *config.Config) error {
 		}
 		return nil
 	}
-	credentials := httpproxy.Credentials{Username: p.Username, Password: p.Password}
+	credentials := httpproxy.Credentials{Username: p.Username, Password: p.Password, AuthBypassIPs: p.AuthBypassIPs}
 	if p.Auth == "none" {
 		credentials = httpproxy.Credentials{}
 	}

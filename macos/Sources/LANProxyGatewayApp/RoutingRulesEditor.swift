@@ -3,13 +3,6 @@ import Charts
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct RuleGroupDraft: Identifiable, Equatable {
-    var id = UUID()
-    var name: String // "" = ungrouped
-    var rules: [RoutingRule]
-    var collapsed = false
-}
-
 struct RuleGroupPreset {
     let name: String
     let rules: [RoutingRule]
@@ -22,30 +15,6 @@ let ruleGroupPresets: [RuleGroupPreset] = {
           let rules = try? JSONDecoder().decode([RoutingRule].self, from: data) else { return [] }
     return makeGroupDrafts(rules).map { RuleGroupPreset(name: $0.name, rules: $0.rules) }
 }()
-
-func makeGroupDrafts(_ rules: [RoutingRule]) -> [RuleGroupDraft] {
-    var order: [String] = []
-    var bucket: [String: [RoutingRule]] = [:]
-    for rule in rules {
-        if bucket[rule.group] == nil {
-            order.append(rule.group)
-            bucket[rule.group] = []
-        }
-        bucket[rule.group]?.append(rule)
-    }
-    return order.map { RuleGroupDraft(name: $0, rules: bucket[$0] ?? []) }
-}
-
-func flattenGroups(_ groups: [RuleGroupDraft]) -> [RoutingRule] {
-    groups.flatMap { group -> [RoutingRule] in
-        let name = group.name.trimmingCharacters(in: .whitespaces)
-        return group.rules.map { rule in
-            var copy = rule
-            copy.group = name
-            return copy
-        }
-    }
-}
 
 struct RoutingRulesEditor: View {
     @EnvironmentObject private var model: AppModel
@@ -64,6 +33,10 @@ struct RoutingRulesEditor: View {
     @State private var pageSize = 50
     @State private var baselineRules: [RoutingRule]
     @State private var configurationConflict = false
+    @State private var ruleOrder: [UUID]
+    @State private var externalChanges: [RoutingRuleChange] = []
+    @State private var syncNotice: String?
+    @State private var review: RoutingReview?
 
     private let embedded: Bool
 
@@ -71,9 +44,14 @@ struct RoutingRulesEditor: View {
         self.embedded = embedded
         _groups = State(initialValue: makeGroupDrafts(rules))
         _baselineRules = State(initialValue: rules)
+        _ruleOrder = State(initialValue: rules.map(\.id))
     }
 
-    private var flatRules: [RoutingRule] { flattenGroups(groups) }
+    private var flatRules: [RoutingRule] { RoutingDraftOrder.rules(flattenGroups(groups), order: ruleOrder) }
+    private var localChangeCount: Int {
+        guard let draft = currentDraft() else { return 0 }
+        return RoutingRuleComparison.changes(from: baselineRules, to: draft).count
+    }
     private var filter: RoutingEditorFilter {
         RoutingEditorFilter(query: ruleSearch, action: source, origin: originFilter)
     }
@@ -181,54 +159,53 @@ struct RoutingRulesEditor: View {
             }
 
             Divider().overlay(Theme.border)
-            HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
                 if let saveError {
                     Label(saveError, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(Theme.coral).lineLimit(2)
-                } else {
-                    RuleCountChip(label: "代理", count: count("proxy"), color: Theme.cyan)
-                    RuleCountChip(label: "直连", count: count("direct"), color: Theme.lime)
-                    RuleCountChip(label: "拒绝", count: count("reject"), color: Theme.coral)
-                    if let duplicateRuleNotice {
-                        Label(duplicateRuleNotice, systemImage: "exclamationmark.triangle")
-                            .font(.caption2).foregroundStyle(Theme.yellow)
-                            .lineLimit(1)
-                            .help(duplicateRuleNotice + "。同一规则出现在多个位置时，只有排在最前面的一条生效，建议删除多余的。")
-                    }
+                        .font(.caption).foregroundStyle(Theme.coral).textSelection(.enabled)
                 }
-                Spacer()
-                Button(embedded ? "撤销修改" : "取消") {
-                    if embedded {
-                        loadLatest(model.status?.routing ?? baselineRules)
-                    } else { dismiss() }
-                }.buttonStyle(StudioButtonStyle()).disabled(isSaving)
-                Button {
-                    save()
-                } label: {
-                    if isSaving {
-                        ProgressView().controlSize(.small).frame(width: 56)
-                    } else {
-                        Text("应用规则")
-                    }
+                if let syncNotice {
+                    Label(syncNotice, systemImage: configurationConflict ? "exclamationmark.arrow.triangle.2.circlepath" : "arrow.triangle.2.circlepath")
+                        .font(.caption).foregroundStyle(configurationConflict ? Theme.yellow : Theme.muted)
                 }
-                .buttonStyle(ActionButtonStyle(tint: Theme.cyan))
-                .disabled((editorMode == "list" && hasInvalidRule) || isSaving || model.isBusy || configurationConflict)
+                HStack(spacing: 8) {
+                    Text(localChangeCount == 0 ? "没有未应用的修改" : "\(localChangeCount) 条未应用变更")
+                        .font(.caption).foregroundStyle(Theme.muted)
+                    Button(configurationConflict ? "查看差异并处理" : "查看变更") { openReview() }
+                        .buttonStyle(StudioButtonStyle()).disabled(isSaving)
+                    Spacer()
+                    Button(embedded ? "撤销我的修改" : "取消") {
+                        if embedded { loadLatest(model.status?.routing ?? baselineRules) }
+                        else { dismiss() }
+                    }.buttonStyle(StudioButtonStyle()).disabled(isSaving)
+                    Button { save() } label: {
+                        if isSaving { ProgressView().controlSize(.small).frame(width: 56) }
+                        else { Text("应用规则") }
+                    }
+                    .buttonStyle(ActionButtonStyle(tint: Theme.cyan))
+                    .disabled((editorMode == "list" && hasInvalidRule) || isSaving || model.isBusy || configurationConflict || localChangeCount == 0)
+                }
+                if let duplicateRuleNotice {
+                    Text(duplicateRuleNotice).font(.caption2).foregroundStyle(Theme.yellow).lineLimit(1).help(duplicateRuleNotice)
+                }
             }
             .padding(.horizontal, 20).padding(.vertical, 14)
             .background(Theme.panel)
         }
         .frame(minWidth: embedded ? 0 : 940, maxWidth: embedded ? .infinity : 940, minHeight: 600, maxHeight: embedded ? .infinity : 600).background(Theme.canvasBackground)
+        .disabled(isSaving)
         .onChange(of: pageSize) { _ in rulePage = 0 }
-        .onReceive(model.$status) { status in
-            guard !isSaving, let status else { return }
-            let changed = editorMode == "text" ? text != serializeRuleLines(baselineRules) : NetworkRuleRevision.signature(flatRules) != NetworkRuleRevision.signature(baselineRules)
-            switch NetworkRuleRevision.assess(baseline: baselineRules, latest: status.routing ?? [], draftChanged: changed) {
-            case .unchanged: break
-            case .reload: loadLatest(status.routing ?? [])
-            case .conflict:
-                configurationConflict = true
-                saveError = "规则已在其他位置更新。请先复制草稿，再撤销修改并重新编辑，避免覆盖新规则。"
+        .sheet(item: $review) { snapshot in
+            RoutingChangesSheet(review: snapshot) { merged, latest in
+                baselineRules = latest
+                replaceDraft(merged)
+                configurationConflict = false; saveError = nil
+                syncNotice = "已合并到草稿，请检查变更后应用。"
             }
+        }
+        .onReceive(model.$status) { status in
+            guard !isSaving, let latest = status?.routing else { return }
+            receiveLatest(latest)
         }
     }
 
@@ -336,7 +313,9 @@ struct RoutingRulesEditor: View {
                     }
                     .onMove { indices, offset in
                         guard page.canDragReorder else { return }
+                        let order = flatRules.map(\.id)
                         groups[groupIndex].rules.move(fromOffsets: indices, toOffset: offset)
+                        ruleOrder = RoutingDraftOrder.replacingSlots(order, with: groups[groupIndex].rules.map(\.id))
                     }
                 }
                 .listStyle(.plain).scrollContentBackground(.hidden)
@@ -403,7 +382,7 @@ struct RoutingRulesEditor: View {
             .clipShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
-        .help("\(group.name.isEmpty ? "未分组" : group.name) · \(group.rules.count) 条规则。优先级 \(index + 1)：组顺序即匹配优先级块")
+        .help("\(group.name.isEmpty ? "未分组" : group.name) · \(group.rules.count) 条规则。按分组显示，实际优先级以规则的全局序号为准")
     }
 
     private func groupActionLabel(_ group: RuleGroupDraft) -> String {
@@ -416,7 +395,8 @@ struct RoutingRulesEditor: View {
         let group = groups[groupIndex]
         let count = group.rules.count
         let first = ruleNumber(groupIndex: groupIndex, ruleIndex: 0)
-        let globalRange = count > 0 ? "全局 #\(first)\(count > 1 ? "–\(first + count - 1)" : "")" : ""
+        let last = count > 0 ? ruleNumber(groupIndex: groupIndex, ruleIndex: count - 1) : first
+        let globalRange = count > 0 ? "全局 #\(first)\(count > 1 ? "–\(last)" : "")\(last - first + 1 != count ? "（交错）" : "")" : ""
         return AnyView(
             HStack(spacing: 10) {
                 TextField("分组名", text: $groups[groupIndex].name)
@@ -426,7 +406,7 @@ struct RoutingRulesEditor: View {
                 Text("\(count) 条").font(.caption).foregroundStyle(Theme.muted)
                 if !globalRange.isEmpty {
                     Text(globalRange).font(.caption2).foregroundStyle(Theme.muted.opacity(0.8))
-                        .help("该分组在全局匹配顺序中的位置；组顺序即优先级块")
+                        .help("分组仅用于展示，交错规则保留原有全局顺序。手动移动分组才会调整优先级。")
                 }
                 Spacer()
                 HStack(spacing: 6) {
@@ -437,12 +417,12 @@ struct RoutingRulesEditor: View {
                     addRule(to: groupIndex)
                 } label: { Image(systemName: "plus").font(.system(size: 11, weight: .bold)) }
                 .buttonStyle(.plain).foregroundStyle(Theme.cyan).help("向此分组添加规则")
-                Button { guard groupIndex > 0 else { return }; groups.swapAt(groupIndex, groupIndex - 1) } label: {
+                Button { guard groupIndex > 0 else { return }; moveGroupPriority(groupIndex, offset: -1) } label: {
                     Image(systemName: "arrow.up").font(.system(size: 10))
                         .foregroundStyle(groupIndex > 0 ? Theme.muted : Theme.muted.opacity(0.3))
                 }
                 .buttonStyle(.plain).disabled(groupIndex == 0).help("上移分组（提高优先级）")
-                Button { guard groupIndex < groups.count - 1 else { return }; groups.swapAt(groupIndex, groupIndex + 1) } label: {
+                Button { guard groupIndex < groups.count - 1 else { return }; moveGroupPriority(groupIndex, offset: 1) } label: {
                     Image(systemName: "arrow.down").font(.system(size: 10))
                         .foregroundStyle(groupIndex < groups.count - 1 ? Theme.muted : Theme.muted.opacity(0.3))
                 }
@@ -509,14 +489,14 @@ struct RoutingRulesEditor: View {
             .buttonStyle(.plain).help("向此分组添加规则")
             Button {
                 guard groupIndex > 0 else { return }
-                groups.swapAt(groupIndex, groupIndex - 1)
+                moveGroupPriority(groupIndex, offset: -1)
             } label: {
                 Image(systemName: "arrow.up").font(.system(size: 10)).foregroundStyle(groupIndex > 0 ? Theme.muted : Theme.muted.opacity(0.3))
             }
             .buttonStyle(.plain).disabled(groupIndex == 0).help("上移分组（提高优先级）")
             Button {
                 guard groupIndex < groups.count - 1 else { return }
-                groups.swapAt(groupIndex, groupIndex + 1)
+                moveGroupPriority(groupIndex, offset: 1)
             } label: {
                 Image(systemName: "arrow.down").font(.system(size: 10)).foregroundStyle(groupIndex < groups.count - 1 ? Theme.muted : Theme.muted.opacity(0.3))
             }
@@ -611,14 +591,18 @@ struct RoutingRulesEditor: View {
         guard groups.indices.contains(groupIndex),
               let index = groups[groupIndex].rules.firstIndex(where: { $0.id == id }),
               groups[groupIndex].rules.indices.contains(index + offset) else { return }
+        let order = flatRules.map(\.id)
         groups[groupIndex].rules.swapAt(index, index + offset)
+        ruleOrder = RoutingDraftOrder.replacingSlots(order, with: groups[groupIndex].rules.map(\.id))
         if let position = projection.ruleIndices[groupIndex].firstIndex(of: index + offset) {
             rulePage = position / pageSize
         }
     }
 
     private func ruleNumber(groupIndex: Int, ruleIndex: Int) -> Int {
-        groups.prefix(groupIndex).reduce(0) { $0 + $1.rules.count } + ruleIndex + 1
+        guard groups.indices.contains(groupIndex), groups[groupIndex].rules.indices.contains(ruleIndex) else { return 0 }
+        let id = groups[groupIndex].rules[ruleIndex].id
+        return (flatRules.firstIndex(where: { $0.id == id }) ?? 0) + 1
     }
 
     private func groupActionSummary(_ group: RuleGroupDraft) -> String {
@@ -652,8 +636,7 @@ struct RoutingRulesEditor: View {
     }
 
     private func addPreset(_ preset: RuleGroupPreset) {
-        let existing = Set(flatRules.map { "\($0.type)|\($0.value.lowercased())" })
-        let newRules = preset.rules.filter { !existing.contains("\($0.type)|\($0.value.lowercased())") }
+        let newRules = RoutingPresetInsertion.rules(preset.rules, excluding: flatRules)
         guard !newRules.isEmpty else { return }
         if let index = groups.firstIndex(where: { $0.name == preset.name }) {
             groups[index].rules.append(contentsOf: newRules)
@@ -685,9 +668,12 @@ struct RoutingRulesEditor: View {
     private func moveRule(_ id: UUID, from sourceIndex: Int, to targetIndex: Int) {
         guard groups.indices.contains(sourceIndex), groups.indices.contains(targetIndex),
               let ruleIndex = groups[sourceIndex].rules.firstIndex(where: { $0.id == id }) else { return }
+        let order = flatRules.map(\.id)
         let rule = groups[sourceIndex].rules.remove(at: ruleIndex)
         groups[targetIndex].rules.append(rule)
         groups[targetIndex].collapsed = false
+        ruleOrder = order
+        groups[targetIndex].rules = RoutingDraftOrder.rules(groups[targetIndex].rules, order: order)
         if groups[sourceIndex].rules.isEmpty && groups[sourceIndex].name.isEmpty {
             groups.remove(at: sourceIndex)
         }
@@ -696,6 +682,7 @@ struct RoutingRulesEditor: View {
     private func moveRuleToNewGroup(_ id: UUID, from sourceIndex: Int) {
         guard groups.indices.contains(sourceIndex),
               let ruleIndex = groups[sourceIndex].rules.firstIndex(where: { $0.id == id }) else { return }
+        let order = flatRules.map(\.id)
         let rule = groups[sourceIndex].rules.remove(at: ruleIndex)
         var name = "新分组"
         var counter = 2
@@ -704,6 +691,7 @@ struct RoutingRulesEditor: View {
             counter += 1
         }
         groups.append(RuleGroupDraft(name: name, rules: [rule]))
+        ruleOrder = order
         if groups[sourceIndex].rules.isEmpty && groups[sourceIndex].name.isEmpty {
             groups.remove(at: sourceIndex)
         }
@@ -736,37 +724,106 @@ struct RoutingRulesEditor: View {
 
     // MARK: save / text sync
 
-    private func loadLatest(_ rules: [RoutingRule]) {
+    private func replaceDraft(_ rules: [RoutingRule]) {
         let selectedName = selectedIndex >= 0 ? groups[selectedIndex].name : nil
-        baselineRules = rules
-        groups = makeGroupDrafts(rules)
+        let existing = groups
+        groups = makeGroupDrafts(rules).map { group in
+            var copy = group
+            if let old = existing.first(where: { $0.name == group.name }) { copy.id = old.id }
+            return copy
+        }
+        ruleOrder = rules.map(\.id)
         if let selectedName { selectedGroupID = groups.first(where: { $0.name == selectedName })?.id }
         text = serializeRuleLines(rules)
-        configurationConflict = false; saveError = nil; parseNote = nil
+    }
+
+    private func loadLatest(_ rules: [RoutingRule]) {
+        baselineRules = rules
+        replaceDraft(rules)
+        configurationConflict = false; saveError = nil; parseNote = nil; syncNotice = nil
+        externalChanges = []
+    }
+
+    private func currentDraft() -> [RoutingRule]? {
+        if editorMode != "text" { return flatRules }
+        let parsed = parseRuleLines(text)
+        guard parsed.skipped.isEmpty else { return nil }
+        return RoutingRuleComparison.aligned(parsed.rules, to: flatRules)
+    }
+
+    private func receiveLatest(_ latest: [RoutingRule]) {
+        guard !RoutingRuleComparison.same(baselineRules, latest) else { return }
+        externalChanges = RoutingRuleComparison.changes(from: baselineRules, to: latest)
+        guard let draft = currentDraft() else {
+            syncNotice = "检测到外部更新。请先修正文本格式，再查看差异；草稿已保留。"
+            return
+        }
+        let merge = RoutingRuleMerge(baseline: baselineRules, local: draft, latest: latest)
+        configurationConflict = merge.needsResolution
+        if merge.needsResolution {
+            syncNotice = "有 \(merge.conflicts.count + (merge.orderConflict ? 1 : 0)) 处冲突。点击“查看差异并处理”选择版本，草稿已保留。"
+        } else if editorMode == "text" {
+            syncNotice = "检测到 \(externalChanges.count) 条外部变更，可查看差异；应用时会合并并保留你的修改。"
+        } else if let merged = merge.resolved() {
+            baselineRules = merge.latest
+            replaceDraft(merged)
+            syncNotice = "已同步 \(externalChanges.count) 条外部变更，你的未应用修改已保留。"
+        }
+    }
+
+    private func openReview() {
+        guard let draft = currentDraft() else { _ = syncTextToDraft(); return }
+        let latest = model.status?.routing ?? baselineRules
+        let hasExternal = !RoutingRuleComparison.same(baselineRules, latest)
+        review = RoutingReview(localChanges: RoutingRuleComparison.changes(from: baselineRules, to: draft),
+            externalChanges: hasExternal ? RoutingRuleComparison.changes(from: baselineRules, to: latest) : externalChanges,
+            merge: hasExternal ? RoutingRuleMerge(baseline: baselineRules, local: draft, latest: latest) : nil)
+    }
+
+    private func moveGroupPriority(_ index: Int, offset: Int) {
+        let target = index + offset
+        guard groups.indices.contains(index), groups.indices.contains(target) else { return }
+        let current = flatRules.map(\.id)
+        let moved = groups[index].rules.map(\.id)
+        let members = Set(moved), anchors = Set(groups[target].rules.map(\.id))
+        var order = current.filter { !members.contains($0) }
+        let position = offset < 0 ? order.firstIndex(where: { anchors.contains($0) }) : order.lastIndex(where: { anchors.contains($0) }).map { $0 + 1 }
+        order.insert(contentsOf: moved, at: position ?? order.count)
+        ruleOrder = order
+        groups.swapAt(index, target)
     }
 
     private func save() {
-        guard let status = model.status else {
-            saveError = "当前配置不可用，请刷新后重试。"; return
-        }
-        let latest = status.routing ?? []
-        guard NetworkRuleRevision.signature(latest) == NetworkRuleRevision.signature(baselineRules) else {
-            configurationConflict = true
-            saveError = "规则已更新，请撤销修改后重新编辑。"; return
-        }
         if editorMode == "text", !syncTextToDraft() { return }
-        saveError = nil
-        isSaving = true
-        let rules = flattenGroups(groups)
+        let draft = flatRules
+        saveError = nil; isSaving = true
         Task {
-            let ok = await model.applyRoutingRules(rules)
-            isSaving = false
-            if ok {
-                loadLatest(model.status?.routing ?? rules)
-                if !embedded { dismiss() }
-            } else {
-                saveError = model.errorMessage ?? "保存失败，请检查规则"
-            }
+            defer { isSaving = false }
+            do {
+                // Re-read immediately before writing, including learning updates
+                // that arrived since the last UI refresh.
+                let fresh = try await model.client.status()
+                guard let latest = fresh.routing else { throw GatewayClientError.invalidOutput("无法读取最新规则") }
+                let merge = RoutingRuleMerge(baseline: baselineRules, local: draft, latest: latest)
+                guard let rules = merge.resolved() else {
+                    configurationConflict = true
+                    syncNotice = "保存前发现新的冲突，请选择要保留的版本。"
+                    review = RoutingReview(localChanges: RoutingRuleComparison.changes(from: baselineRules, to: draft),
+                        externalChanges: RoutingRuleComparison.changes(from: baselineRules, to: latest), merge: merge)
+                    return
+                }
+                baselineRules = merge.latest
+                replaceDraft(rules)
+                let ok = await model.applyRoutingRules(rules, expected: merge.latest)
+                if ok {
+                    loadLatest(model.status?.routing ?? rules)
+                    if !embedded { dismiss() }
+                } else {
+                    saveError = model.errorMessage ?? "保存失败，请检查规则"
+                    await model.refresh(silent: true)
+                    if let current = model.status?.routing { receiveLatest(current) }
+                }
+            } catch { saveError = "保存失败：\(error.localizedDescription)" }
         }
     }
 
@@ -798,7 +855,9 @@ struct RoutingRulesEditor: View {
             saveError = parseNote
             return false
         }
-        groups = makeGroupDrafts(result.rules)
+        let rules = RoutingRuleComparison.aligned(result.rules, to: flatRules)
+        groups = makeGroupDrafts(rules)
+        ruleOrder = rules.map(\.id)
         parseNote = nil; saveError = nil
         return true
     }

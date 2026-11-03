@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -121,60 +122,69 @@ func (a *App) SetEgress(ctx context.Context, e config.EgressConfig, probe bool) 
 	return nil
 }
 
-// SetRoutingRules validates and hot-applies ordered domain routing rules.
+// SetRoutingRules replaces the latest rules while preserving other settings.
 func (a *App) SetRoutingRules(rules []config.RoutingRule) error {
-	next := *a.Cfg
-	next.Routing.Rules = append([]config.RoutingRule(nil), rules...)
-	config.Normalize(&next)
-	if err := config.Validate(&next); err != nil {
-		return err
-	}
-	a.Cfg.Routing = next.Routing
-	if err := a.Save(); err != nil {
+	return a.setRoutingRules(rules, nil, false)
+}
+
+// SetRoutingRulesIfUnchanged compares and saves under the same disk lock used
+// by automatic learning and all config writers. Empty expected is meaningful.
+func (a *App) SetRoutingRulesIfUnchanged(rules, expected []config.RoutingRule) error {
+	return a.setRoutingRules(rules, expected, true)
+}
+
+func (a *App) setRoutingRules(rules, expected []config.RoutingRule, conditional bool) error {
+	_, err := a.updateConfig(func(next *config.Config) (bool, error) {
+		if conditional && !slices.Equal(expected, next.Routing.Rules) {
+			return false, fmt.Errorf("规则在保存前再次更新，未覆盖最新配置；请查看差异并重试")
+		}
+		next.Routing.Rules = slices.Clone(rules)
+		return true, nil
+	})
+	if err != nil {
 		return err
 	}
 	a.pokeReload()
 	return nil
 }
 
-// PromoteLearnedDirectRule appends a learned direct rule for host unless an
-// existing direct rule already covers it. Returns true when a rule was added.
-// Daemon-safe: takes the config write lock (fallback learner runs async).
-func (a *App) PromoteLearnedDirectRule(host string) (bool, error) {
+// updateConfig serializes in-process state with the cross-process transaction.
+func (a *App) updateConfig(edit func(*config.Config) (bool, error)) (bool, error) {
 	a.cfgMu.Lock()
 	defer a.cfgMu.Unlock()
-	for _, r := range a.Cfg.Routing.Rules {
-		if r.Learned && r.Action != config.EgressDirect {
-			continue
-		}
-		switch r.Type {
-		case config.RuleDomainSuffix:
-			if host == r.Value || strings.HasSuffix(host, "."+r.Value) {
-				return false, nil
-			}
-		case config.RuleDomain:
-			if host == r.Value {
-				return false, nil
-			}
-		}
-	}
-	next := *a.Cfg
-	group := learnedGroupName(host)
-	next.Routing.Rules = append(append([]config.RoutingRule(nil), a.Cfg.Routing.Rules...),
-		config.RoutingRule{Type: config.RuleDomain, Value: host, Action: config.EgressDirect, Group: group, Learned: true})
-	config.Normalize(&next)
-	if err := config.Validate(&next); err != nil {
+	changed := false
+	next, err := config.Update(a.Paths.ConfigFile, func(cfg *config.Config) (bool, error) {
+		var err error
+		changed, err = edit(cfg)
+		return changed, err
+	})
+	if err != nil {
 		return false, err
 	}
-	if err := config.Save(&next, a.Paths.ConfigFile); err != nil {
-		return false, err
-	}
-	a.Cfg = &next
-	return true, nil
+	a.Cfg = next
+	return changed, nil
 }
 
-// PromoteLearnedProxyRule persists an exact domain only if no existing domain
-// rule covers it. Recheck while locked: user edits may race with the response.
+// PromoteLearnedDirectRule appends a learned direct rule unless already covered.
+func (a *App) PromoteLearnedDirectRule(host string) (bool, error) {
+	return a.updateConfig(func(next *config.Config) (bool, error) {
+		for _, r := range next.Routing.Rules {
+			if r.Learned && r.Action != config.EgressDirect {
+				continue
+			}
+			if (r.Type == config.RuleDomain && host == r.Value) ||
+				(r.Type == config.RuleDomainSuffix && (host == r.Value || strings.HasSuffix(host, "."+r.Value))) {
+				return false, nil
+			}
+		}
+		next.Routing.Rules = append(next.Routing.Rules, config.RoutingRule{
+			Type: config.RuleDomain, Value: host, Action: config.EgressDirect, Group: learnedGroupName(host), Learned: true})
+		return true, nil
+	})
+}
+
+// PromoteLearnedProxyRule rechecks coverage in the latest disk configuration,
+// so a daemon snapshot cannot overwrite a just-saved manual edit.
 func (a *App) PromoteLearnedProxyRule(host string) (bool, error) {
 	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
 	if host == "" {
@@ -183,30 +193,21 @@ func (a *App) PromoteLearnedProxyRule(host string) (bool, error) {
 	if _, err := netip.ParseAddr(host); err == nil {
 		return false, nil
 	}
-	a.cfgMu.Lock()
-	defer a.cfgMu.Unlock()
-	if a.Cfg.Egress.Mode != config.EgressProxy {
-		return false, nil
-	}
-	for _, r := range a.Cfg.Routing.Rules {
-		value := strings.ToLower(strings.Trim(r.Value, "."))
-		if (r.Type == config.RuleDomain && host == value) ||
-			(r.Type == config.RuleDomainSuffix && (host == value || strings.HasSuffix(host, "."+value))) {
+	return a.updateConfig(func(next *config.Config) (bool, error) {
+		if next.Egress.Mode != config.EgressProxy {
 			return false, nil
 		}
-	}
-	next := *a.Cfg
-	next.Routing.Rules = append(append([]config.RoutingRule(nil), a.Cfg.Routing.Rules...),
-		config.RoutingRule{Type: config.RuleDomain, Value: host, Action: config.EgressProxy, Group: learnedGroupName(host), Learned: true})
-	config.Normalize(&next)
-	if err := config.Validate(&next); err != nil {
-		return false, err
-	}
-	if err := config.Save(&next, a.Paths.ConfigFile); err != nil {
-		return false, err
-	}
-	a.Cfg = &next
-	return true, nil
+		for _, r := range next.Routing.Rules {
+			value := strings.ToLower(strings.Trim(r.Value, "."))
+			if (r.Type == config.RuleDomain && host == value) ||
+				(r.Type == config.RuleDomainSuffix && (host == value || strings.HasSuffix(host, "."+value))) {
+				return false, nil
+			}
+		}
+		next.Routing.Rules = append(next.Routing.Rules, config.RoutingRule{
+			Type: config.RuleDomain, Value: host, Action: config.EgressProxy, Group: learnedGroupName(host), Learned: true})
+		return true, nil
+	})
 }
 
 // learnedGroupName returns a sub-grouped name for auto-learned rules based
@@ -226,69 +227,37 @@ func learnedGroupName(host string) string {
 // migrateLearnedGroups reclassifies existing learned rules that sit in the
 // legacy flat "自动学习" group into service-specific sub-groups. Idempotent.
 func (a *App) migrateLearnedGroups() {
-	a.cfgMu.Lock()
-	defer a.cfgMu.Unlock()
-	changed := false
-	next := *a.Cfg
-	next.Routing.Rules = append([]config.RoutingRule(nil), a.Cfg.Routing.Rules...)
-	for i := range next.Routing.Rules {
-		r := &next.Routing.Rules[i]
-		if !r.Learned || r.Group != "自动学习" {
-			continue
+	_, _ = a.updateConfig(func(next *config.Config) (bool, error) {
+		changed := false
+		for i := range next.Routing.Rules {
+			r := &next.Routing.Rules[i]
+			if !r.Learned || r.Group != "自动学习" {
+				continue
+			}
+			if g := learnedGroupName(r.Value); g != "自动学习" {
+				r.Group = g
+				changed = true
+			}
 		}
-		g := learnedGroupName(r.Value)
-		if g != "自动学习" {
-			r.Group = g
-			changed = true
-		}
-	}
-	if !changed {
-		return
-	}
-	a.Cfg = &next
-	_ = a.Save()
+		return changed, nil
+	})
 }
 
-// RemoveLearnedDirectRule drops the learned direct rule for host when the
-// proxy-recovery probe succeeds. Only learned (auto-generated) rules are
-// removed; user-authored rules are preserved.
+// RemoveLearnedDirectRule preserves manual edits committed by other processes.
 func (a *App) RemoveLearnedDirectRule(host string) (bool, error) {
-	a.cfgMu.Lock()
-	defer a.cfgMu.Unlock()
-	changed := false
-	next := *a.Cfg
-	next.Routing.Rules = make([]config.RoutingRule, 0, len(a.Cfg.Routing.Rules))
-	for _, r := range a.Cfg.Routing.Rules {
-		if !r.Learned {
-			next.Routing.Rules = append(next.Routing.Rules, r)
-			continue
-		}
-		covers := false
-		switch r.Type {
-		case config.RuleDomainSuffix:
-			covers = host == r.Value || strings.HasSuffix(host, "."+r.Value)
-		case config.RuleDomain:
-			covers = host == r.Value
-		}
-		if covers {
-			changed = true
-			continue
-		}
-		next.Routing.Rules = append(next.Routing.Rules, r)
+	changed, err := a.updateConfig(func(next *config.Config) (bool, error) {
+		before := len(next.Routing.Rules)
+		next.Routing.Rules = slices.DeleteFunc(next.Routing.Rules, func(r config.RoutingRule) bool {
+			return r.Learned && r.Action == config.EgressDirect &&
+				((r.Type == config.RuleDomain && host == r.Value) ||
+					(r.Type == config.RuleDomainSuffix && (host == r.Value || strings.HasSuffix(host, "."+r.Value))))
+		})
+		return len(next.Routing.Rules) != before, nil
+	})
+	if err == nil && changed {
+		a.pokeReload()
 	}
-	if !changed {
-		return false, nil
-	}
-	config.Normalize(&next)
-	if err := config.Validate(&next); err != nil {
-		return false, err
-	}
-	a.Cfg = &next
-	if err := a.Save(); err != nil {
-		return false, err
-	}
-	a.pokeReload()
-	return true, nil
+	return changed, err
 }
 
 // TestEgress probes the currently configured egress end-to-end.
@@ -420,16 +389,17 @@ type Status struct {
 }
 
 type HTTPProxyStatus struct {
-	Enabled     bool   `json:"enabled"`
-	Port        int    `json:"port"`
-	Auth        string `json:"auth"`
-	Username    string `json:"username"`
-	PasswordSet bool   `json:"password_set"`
+	Enabled       bool     `json:"enabled"`
+	Port          int      `json:"port"`
+	Auth          string   `json:"auth"`
+	Username      string   `json:"username"`
+	PasswordSet   bool     `json:"password_set"`
+	AuthBypassIPs []string `json:"auth_bypass_ips,omitempty"`
 }
 
 func (a *App) HTTPProxyStatus() HTTPProxyStatus {
 	p := a.getCfg().HTTPProxy
-	return HTTPProxyStatus{Enabled: p.Enabled, Port: p.Port, Auth: p.Auth, Username: p.Username, PasswordSet: p.Password != ""}
+	return HTTPProxyStatus{Enabled: p.Enabled, Port: p.Port, Auth: p.Auth, Username: p.Username, PasswordSet: p.Password != "", AuthBypassIPs: append([]string(nil), p.AuthBypassIPs...)}
 }
 
 type DNSStatus struct {

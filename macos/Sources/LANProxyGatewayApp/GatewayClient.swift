@@ -145,12 +145,17 @@ struct GatewayClient {
         try await output(arguments: ["learning", action, host], privileged: false)
     }
 
-    func setRoutingRules(_ rules: [RoutingRule]) async throws -> String {
+    func setRoutingRules(_ rules: [RoutingRule], expected: [RoutingRule]? = nil) async throws -> String {
         let data = try JSONEncoder().encode(rules)
         guard let json = String(data: data, encoding: .utf8) else {
             throw GatewayClientError.invalidOutput("无法编码分流规则")
         }
-        return try await output(arguments: ["routing", "set", "--rules-json", json], privileged: false)
+        var arguments = ["routing", "set", "--rules-json", json]
+        if let expected {
+            let baseline = try JSONEncoder().encode(expected)
+            arguments += ["--expected-rules-json", String(decoding: baseline, as: UTF8.self)]
+        }
+        return try await output(arguments: arguments, privileged: false)
     }
 
     func setConnectionRoutingRule(_ shortcut: ConnectionRoutingShortcut, action: ConnectionRouteAction) async throws -> String {
@@ -163,9 +168,9 @@ struct GatewayClient {
         return "已保存精确域名规则"
     }
 
-    func setLANHTTPProxy(enabled: Bool, port: Int, auth: String, username: String, password: String?) async throws -> String {
+    func setLANHTTPProxy(enabled: Bool, port: Int, auth: String, username: String, password: String?, authBypassIPs: [String]) async throws -> String {
         guard let engineURL else { throw GatewayClientError.engineNotFound }
-        var config: [String: Any] = ["enabled": enabled, "port": port, "auth": auth, "username": username]
+        var config: [String: Any] = ["enabled": enabled, "port": port, "auth": auth, "username": username, "auth_bypass_ips": authBypassIPs]
         if let password { config["password"] = password }
         let input = try JSONSerialization.data(withJSONObject: config)
         return try await runProcess(executable: engineURL, arguments: ["http-proxy", "set"], input: input).text

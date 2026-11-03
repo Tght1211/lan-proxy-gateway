@@ -1,7 +1,15 @@
 import Foundation
 
 @main struct ModelDecodingTests {
-    static func main() throws { try ModelDecodingTests().testUsageCompatibility(); try ModelDecodingTests().testIngressCompatibility(); try ModelDecodingTests().testHotspotCompatibility(); try ModelDecodingTests().testHotspotControlStates(); try ModelDecodingTests().testPlayBridgeMetrics(); ModelDecodingTests().testThroughputWindows(); ModelDecodingTests().testUsageDates(); try ModelDecodingTests().testResponseOutcomes(); print("Model decoding tests passed") }
+    static func main() throws { try ModelDecodingTests().testHTTPProxyCompatibility(); try ModelDecodingTests().testUsageCompatibility(); try ModelDecodingTests().testIngressCompatibility(); try ModelDecodingTests().testHotspotCompatibility(); try ModelDecodingTests().testHotspotControlStates(); try ModelDecodingTests().testPlayBridgeMetrics(); ModelDecodingTests().testThroughputWindows(); ModelDecodingTests().testUsageDates(); try ModelDecodingTests().testResponseOutcomes(); print("Model decoding tests passed") }
+    func testHTTPProxyCompatibility() throws {
+        let old = #"{"enabled":true,"port":17890,"auth":"basic","username":"user","password_set":true}"#
+        let legacy = try JSONDecoder().decode(LANHTTPProxyStatus.self, from: Data(old.utf8))
+        precondition(legacy.authBypassIPs == nil)
+        let current = #"{"enabled":true,"port":17890,"auth":"basic","username":"user","password_set":true,"auth_bypass_ips":["127.0.0.1"]}"#
+        let status = try JSONDecoder().decode(LANHTTPProxyStatus.self, from: Data(current.utf8))
+        precondition(status.authBypassIPs == ["127.0.0.1"] && status != legacy)
+    }
     func testUsageDates() {
         let date = ISO8601DateFormatter().date(from: "2026-01-01T00:30:00Z")!
         precondition(usageDate(date, timeZone: TimeZone(identifier: "Asia/Shanghai")!) == "2026-01-01")

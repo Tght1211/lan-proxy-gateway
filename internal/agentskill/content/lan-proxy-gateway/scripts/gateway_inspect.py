@@ -68,7 +68,7 @@ def bounded_snapshot(snapshot, *, view="summary", state="saved", service="", act
               "status": pick_fields(status, ("configured", "running", "access_mode", "egress", "proxy", "dns", "ports", "ipv6_policy", "proxy_fail_action")),
               "routing": {"count": len(rules), "learned_count": sum(bool(rule.get("learned")) for rule in rules),
                           "by_action": dict(Counter(rule.get("action", "unknown") for rule in rules))}}
-    output["status"]["http_proxy"] = pick_fields(status.get("http_proxy") or {}, ("enabled", "port", "auth", "password_set"))
+    output["status"]["http_proxy"] = pick_fields(status.get("http_proxy") or {}, ("enabled", "port", "auth", "password_set", "auth_bypass_ips"))
     if "runtime_error" in snapshot:
         output["runtime_error"] = snapshot["runtime_error"]
     runtime = snapshot.get("runtime")
@@ -77,7 +77,7 @@ def bounded_snapshot(snapshot, *, view="summary", state="saved", service="", act
         return output
     relay = runtime.get("relay") or {}
     output["runtime"] = {**pick_fields(runtime, ("schema_version", "uptime_sec", "egress", "proxy")),
-                         "http_proxy": pick_fields(runtime.get("http_proxy") or {}, ("enabled", "port", "auth", "password_set")),
+                         "http_proxy": pick_fields(runtime.get("http_proxy") or {}, ("enabled", "port", "auth", "password_set", "auth_bypass_ips")),
                          "health": pick_fields(runtime.get("health") or {}, ("target", "checked_at", "healthy", "latency_ms", "jitter_ms", "availability", "fail_count")),
                          "relay": {**pick_fields(relay, ("up_total", "down_total")),
                                    "active_sample_count": len(relay.get("active") or []),

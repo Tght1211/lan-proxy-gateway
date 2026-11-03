@@ -270,8 +270,8 @@ final class AppModel: ObservableObject {
     }
 
     @discardableResult
-    func applyRoutingRules(_ rules: [RoutingRule]) async -> Bool {
-        await performAsync("分流规则已更新") { try await self.client.setRoutingRules(rules) }
+    func applyRoutingRules(_ rules: [RoutingRule], expected: [RoutingRule]? = nil) async -> Bool {
+        await performAsync("分流规则已更新") { try await self.client.setRoutingRules(rules, expected: expected) }
     }
 
     func setConnectionRoute(_ connection: ConnectionInfo, action: ConnectionRouteAction) async {

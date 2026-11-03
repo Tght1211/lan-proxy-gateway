@@ -11,8 +11,9 @@ import (
 )
 
 var (
-	routingRulesJSON string
-	routingListJSON  bool
+	routingRulesJSON    string
+	routingExpectedJSON string
+	routingListJSON     bool
 )
 
 var routingCmd = &cobra.Command{
@@ -32,7 +33,16 @@ var routingSetCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := a.SetRoutingRules(rules); err != nil {
+		if cmd.Flags().Changed("expected-rules-json") {
+			var expected []config.RoutingRule
+			if err := json.Unmarshal([]byte(routingExpectedJSON), &expected); err != nil {
+				return fmt.Errorf("解析规则基线 JSON: %w", err)
+			}
+			err = a.SetRoutingRulesIfUnchanged(rules, expected)
+		} else {
+			err = a.SetRoutingRules(rules)
+		}
+		if err != nil {
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "已应用 %d 条分流规则\n", len(rules))
@@ -71,6 +81,7 @@ var routingListCmd = &cobra.Command{
 }
 
 func init() {
+	routingSetCmd.Flags().StringVar(&routingExpectedJSON, "expected-rules-json", "", "仅当现有规则与此基线一致时应用")
 	routingSetCmd.Flags().StringVar(&routingRulesJSON, "rules-json", "[]", "规则 JSON 数组")
 	routingListCmd.Flags().BoolVar(&routingListJSON, "json", false, "JSON 输出")
 	routingCmd.AddCommand(routingSetCmd, routingListCmd)

@@ -36,11 +36,13 @@ func TestHTTPProxyConfigCredentials(t *testing.T) {
 
 	a := &App{Cfg: cfg, Paths: config.Paths{ConfigFile: filepath.Join(root, "gateway.yaml"), PIDFile: filepath.Join(root, "gateway.pid")}}
 	password := "a-secret"
-	update := HTTPProxyUpdate{Port: 17894, Auth: "basic", Username: "user", Password: &password}
+	bypass := []string{"127.0.0.1"}
+	update := HTTPProxyUpdate{AuthBypassIPs: &bypass, Port: 17894, Auth: "basic", Username: "user", Password: &password}
 	if err := a.SetHTTPProxy(update); err != nil {
 		t.Fatal(err)
 	}
 	update.Password = nil
+	update.AuthBypassIPs = nil
 	update.Port = 17895
 	if err := a.SetHTTPProxy(update); err != nil {
 		t.Fatal(err)
@@ -52,6 +54,26 @@ func TestHTTPProxyConfigCredentials(t *testing.T) {
 	if saved.HTTPProxy.Password != password {
 		t.Fatal("blank update discarded password")
 	}
+	if len(saved.HTTPProxy.AuthBypassIPs) != 1 || saved.HTTPProxy.AuthBypassIPs[0] != "127.0.0.1" {
+		t.Fatal("omitted bypass update discarded policy")
+	}
+	if len(a.HTTPProxyStatus().AuthBypassIPs) != 1 {
+		t.Fatal("status omitted bypass policy")
+	}
+	empty := []string{}
+	update.AuthBypassIPs = &empty
+	if err := a.SetHTTPProxy(update); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.getCfg().HTTPProxy.AuthBypassIPs) != 0 {
+		t.Fatal("explicit empty list did not clear policy")
+	}
+	invalid := []string{"localhost"}
+	update.AuthBypassIPs = &invalid
+	if err := a.SetHTTPProxy(update); err == nil {
+		t.Fatal("invalid bypass saved")
+	}
+	update.AuthBypassIPs = nil
 	info, _ := os.Stat(a.Paths.ConfigFile)
 	if info.Mode().Perm() != 0600 {
 		t.Fatal("credentials not private")
@@ -88,6 +110,29 @@ func TestHTTPProxyConflictingPortPreservesListener(t *testing.T) {
 		t.Fatal(err)
 	}
 	original := rt.httpProxy
+	for _, allow := range []bool{true, false} {
+		cfg.HTTPProxy.AuthBypassIPs = nil
+		if allow {
+			cfg.HTTPProxy.AuthBypassIPs = []string{"127.0.0.1"}
+		}
+		if err := rt.syncHTTPProxy(cfg); err != nil {
+			t.Fatal(err)
+		}
+		if rt.httpProxy != original {
+			t.Fatal("policy update replaced listener")
+		}
+		request := httptest.NewRequest("GET", "/", nil)
+		request.RemoteAddr = "127.0.0.1:1234"
+		w := httptest.NewRecorder()
+		rt.httpProxy.ServeHTTP(w, request)
+		want := http.StatusProxyAuthRequired
+		if allow {
+			want = http.StatusBadRequest
+		} // Passed auth, rejected malformed proxy URL.
+		if w.Code != want {
+			t.Fatalf("allow=%v: got %d, want %d", allow, w.Code, want)
+		}
+	}
 	cfg.HTTPProxy.Port = occupied.Addr().(*net.TCPAddr).Port
 	if err := rt.syncHTTPProxy(cfg); err == nil {
 		t.Fatal("port conflict accepted")

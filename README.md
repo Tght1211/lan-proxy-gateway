@@ -16,7 +16,7 @@
 
 首页支持上下滚动：顶部查看关键指标，中间查看连接拓扑，下方查看出口卡片（最多三列）。出口不再是独立菜单。季度流量区分已记录的代理与直连；出口健康是全局摘要，具体异常查看各出口卡片。
 
-v4.5.5：缩短代理端口故障检测间隔，修复并发与代理切换问题，复用 TCP 转发缓冲区，并修正 macOS UDP 转发地址与 PlayStation STUN 的 fake-IP 行为。支持从 v4.5.4 在 App 内更新，启用新版核心时会短暂断开连接。
+v4.5.6：HTTP / HTTPS 代理支持指定来源 IP 免密；规则编辑器新增 Diff、自动合并与冲突选择，修复虚假修改和重复预设崩溃。规则保存与后台学习使用跨进程事务，避免互相覆盖；升级后需同时更新并重启核心。
 
 v4.5.2 起，本机直连独立探测百度并记录历史，不借用代理结果；拓扑图标和文字都可点击。配置规则按全部 / 代理 / 直连 / 拒绝筛选，不再区分资产视角。从更早版本升级后需重启核心，才能启用新版直连探测。
 
@@ -65,7 +65,11 @@ sudo gateway install
 
 切换热点 / 手动网关模式需重启核心；重启会中断现有连接。涉及防火墙、系统服务等操作时，系统可能要求管理员授权。
 
+HTTP 代理使用用户名和密码时，可在「免密来源 IP」中填写指定客户端地址（例如 `127.0.0.1`），其他来源仍需密码。名单按实际 TCP 来源精确匹配，支持热更新；本机使用时还需关闭系统 HTTP / HTTPS 代理的密码选项。隧道转发若以该 IP 接入，也会免密。
+
 ### 3. 查看并调整
+
+规则编辑保留全局优先级，“查看变更”可对比新增、删除、修改和顺序调整。后台更新会与草稿合并；同一规则的冲突可逐条选择版本，合并到草稿后再应用。
 
 “网络总览”查看拓扑与出口，“设备接入”核对设备用量，“流量记录”筛选连接与自学习记录，“配置规则”管理分流，“设置”管理接入、CLI、Agent 和运行选项。页面切换保留已访问页面的筛选与滚动位置。
 
@@ -102,13 +106,13 @@ SwiftUI App 与 CLI 使用同一个核心和配置。macOS 使用 `pf`，Linux �
 make build
 make test
 make build-app
-make dmg VERSION=v4.5.5
-make skill VERSION=v4.5.5
+make dmg VERSION=v4.5.6
+make skill VERSION=v4.5.6
 ```
 
 完整 Xcode 或 GitHub macOS Runner 打包 universal App；只有 Command Line Tools 时，SwiftUI 外壳为本机架构。
 
-[App 文档](docs/app.md) · [架构说明](docs/architecture.md) · [故障排查](docs/faq.md) · [Changelog](CHANGELOG.md) · [v4.5.5 更新说明](docs/releases/v4.5.5.md)
+[App 文档](docs/app.md) · [架构说明](docs/architecture.md) · [故障排查](docs/faq.md) · [Changelog](CHANGELOG.md) · [v4.5.6 更新说明](docs/releases/v4.5.6.md)
 
 ## License
 

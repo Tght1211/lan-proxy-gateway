@@ -16,7 +16,7 @@
 
 Scroll from key metrics to the topology and compact exit cards (up to three columns). Exits no longer have a separate menu. Quarterly traffic separates recorded proxy/direct usage; global health summarizes observed exits, with per-exit details below.
 
-v4.5.5 checks proxy availability more frequently, fixes concurrent health access and dialer switching, reuses TCP forwarding buffers, and corrects macOS UDP relay addressing and PlayStation STUN fake-IP handling. Update in-app from v4.5.4; restarting the updated core briefly interrupts active connections.
+v4.5.6 adds exact source-IP authentication exemptions for HTTP/HTTPS proxies, rule diffs, automatic merging and conflict resolution. It fixes false draft changes and repeated-preset crashes, and prevents concurrent rule edits and background learning from overwriting each other. Update both the app and the running core.
 
 Since v4.5.2, the core independently probes Baidu over the host's direct connection and records its own history. Topology icons and text are both clickable. Rules use one all / proxy / direct / reject filter instead of asset perspectives. Restart the core when upgrading from an older version to enable independent direct probes.
 
@@ -102,13 +102,13 @@ The app and CLI share the same core/configuration. macOS uses `pf`; Linux uses `
 make build
 make test
 make build-app
-make dmg VERSION=v4.5.5
-make skill VERSION=v4.5.5
+make dmg VERSION=v4.5.6
+make skill VERSION=v4.5.6
 ```
 
 Full Xcode or the GitHub macOS runner produces a universal app; Command Line Tools-only builds use the host architecture for the SwiftUI shell.
 
-[App documentation](docs/app.md) · [Architecture](docs/architecture.md) · [Troubleshooting](docs/faq.md) · [Changelog](CHANGELOG.md) · [v4.5.5 release notes](docs/releases/v4.5.5.md)
+[App documentation](docs/app.md) · [Architecture](docs/architecture.md) · [Troubleshooting](docs/faq.md) · [Changelog](CHANGELOG.md) · [v4.5.6 release notes](docs/releases/v4.5.6.md)
 
 ## License
 

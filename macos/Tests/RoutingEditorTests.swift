@@ -5,7 +5,117 @@ import Foundation
         try testFilteringPreservesRules()
         testPagingAndStableIndices()
         testEmptyGroupsAndClamping()
-        print("Routing editor filtering and paging tests passed")
+        testInterleavedOrderAndTextRoundTrip()
+        testPresetReinsertion()
+        testDiffAndMoves()
+        testMergeLearningAndDraft()
+        testConflictsAndResolution()
+        testConcurrentAdditionsAndDuplicates()
+        testLargeMerge()
+        print("Routing editor filtering, priority, diff and three-way merge tests passed")
+    }
+
+
+    static func rule(_ value: String, group: String = "A") -> RoutingRule {
+        RoutingRule(type: "domain", value: value, action: "proxy", group: group)
+    }
+    static func decoded(_ rules: [RoutingRule]) -> [RoutingRule] {
+        try! JSONDecoder().decode([RoutingRule].self, from: JSONEncoder().encode(rules))
+    }
+    static func testInterleavedOrderAndTextRoundTrip() {
+        let original = [rule("a"), rule("b", group: "B"), rule("c"), RoutingRule(type: "domain", value: "learned", action: "proxy", group: "B", learned: true)]
+        let groups = makeGroupDrafts(original)
+        let restored = RoutingDraftOrder.rules(flattenGroups(groups), order: original.map(\.id))
+        precondition(RoutingRuleComparison.same(restored, original), "display must not regroup global priorities")
+        precondition(RoutingRuleComparison.changes(from: original, to: restored).isEmpty)
+        let parsed = parseRuleLines(serializeRuleLines(restored) + "\n# comment\n")
+        precondition(parsed.skipped.isEmpty && RoutingRuleComparison.same(parsed.rules, original))
+        let order = RoutingDraftOrder.replacingSlots(original.map(\.id), with: [original[2].id, original[0].id])
+        precondition(order == [original[2].id, original[1].id, original[0].id, original[3].id])
+    }
+    static func testPresetReinsertion() {
+        let preset = [rule("preset.example")]
+        var draft = RoutingPresetInsertion.rules(preset, excluding: [])
+        precondition(draft[0].id != preset[0].id)
+        precondition(RoutingPresetInsertion.rules(preset, excluding: draft).isEmpty)
+        let order = draft.map(\.id)
+        draft[0].value = "edited.example"
+        draft += RoutingPresetInsertion.rules(preset, excluding: draft)
+        let ordered = RoutingDraftOrder.rules(draft, order: order)
+        precondition(ordered.map(\.value) == ["edited.example", "preset.example"])
+        precondition(Set(ordered.map(\.id)).count == 2)
+        precondition(RoutingRuleComparison.changes(from: [], to: ordered).count == 2)
+    }
+
+    static func testDiffAndMoves() {
+        let base = [rule("a"), rule("b"), rule("c")]
+        precondition(RoutingRuleComparison.changes(from: base, to: decoded(base)).isEmpty)
+        let added = RoutingRuleComparison.changes(from: base, to: [rule("new")] + decoded(base))
+        precondition(added.count == 1 && added[0].kind == "新增", "insertions must not label all later rules moved")
+        var edited = base; edited[1].action = "direct"
+        let changes = RoutingRuleComparison.changes(from: base, to: decoded(edited))
+        precondition(changes.count == 1 && changes[0].kind == "修改" && changes[0].details == "动作")
+        let reordered = RoutingRuleComparison.changes(from: base, to: [base[1], base[0], base[2]])
+        precondition(reordered.count == 1 && reordered[0].kind == "调整顺序")
+        let removed = RoutingRuleComparison.changes(from: base, to: [base[0], base[2]])
+        precondition(removed.count == 1 && removed[0].kind == "删除" && removed[0].title == "b")
+    }
+    static func testMergeLearningAndDraft() {
+        let base = [rule("a"), rule("b", group: "B"), rule("c")]
+        var draft = base; draft[0].action = "direct"
+        var learned = rule("new", group: "自动学习"); learned.learned = true
+        let latest = decoded(base + [learned])
+        let merged = RoutingRuleMerge(baseline: base, local: draft, latest: latest).resolved()!
+        precondition(merged.map(\.value) == ["a", "b", "c", "new"] && merged[0].action == "direct" && merged[3].learned)
+        var external = base; external[2].group = "Moved group"
+        let both = RoutingRuleMerge(baseline: base, local: draft, latest: decoded(external)).resolved()!
+        precondition(both[0].action == "direct" && both[2].group == "Moved group")
+        let reordering = RoutingRuleMerge(baseline: base, local: [base[2], base[0], base[1]], latest: latest).resolved()!
+        precondition(reordering.map(\.value) == ["c", "a", "b", "new"], "background appends stay at the end after local reordering")
+        let noEdit = RoutingRuleMerge(baseline: base, local: base, latest: decoded([base[1], base[0], base[2]])).resolved()!
+        precondition(noEdit.map(\.value) == ["b", "a", "c"])
+    }
+    static func testConflictsAndResolution() {
+        let base = [rule("a"), rule("b"), rule("c")]
+        var mine = base; mine[0].action = "direct"
+        var remote = base; remote[0].action = "reject"; remote.append(rule("learned"))
+        let conflict = RoutingRuleMerge(baseline: base, local: mine, latest: decoded(remote))
+        precondition(conflict.conflicts.count == 1 && conflict.resolved() == nil)
+        let ours = conflict.resolved(choices: [base[0].id: .local])!
+        let theirs = conflict.resolved(choices: [base[0].id: .latest])!
+        precondition(ours[0].action == "direct" && theirs[0].action == "reject" && ours.last?.value == "learned")
+        let deletion = RoutingRuleMerge(baseline: base, local: mine, latest: decoded(Array(base.dropFirst())))
+        precondition(deletion.conflicts.count == 1 && deletion.resolved() == nil)
+        precondition(deletion.resolved(choices: [base[0].id: .latest])!.map(\.value) == ["b", "c"])
+        let orders = RoutingRuleMerge(baseline: base, local: [base[1],base[0],base[2]], latest: decoded([base[0],base[2],base[1]]))
+        precondition(orders.orderConflict && orders.resolved() == nil)
+        precondition(orders.resolved(order: .local)!.map(\.value) == ["b","a","c"])
+        precondition(orders.resolved(order: .latest)!.map(\.value) == ["a","c","b"])
+        let same = RoutingRuleMerge(baseline: base, local: mine, latest: decoded(mine))
+        precondition(!same.needsResolution && same.resolved()![0].action == "direct")
+    }
+    static func testConcurrentAdditionsAndDuplicates() {
+        let a = rule("a"), new = rule("new")
+        let same = RoutingRuleMerge(baseline: [a], local: [a,new], latest: decoded([a,new]))
+        precondition(same.resolved()!.count == 2)
+        var other = new; other.action = "reject"
+        let conflict = RoutingRuleMerge(baseline: [a], local: [a,new], latest: decoded([a,other]))
+        precondition(conflict.conflicts.count == 1 && conflict.resolved() == nil)
+        let duplicate = [rule("a"), rule("a")]
+        precondition(RoutingRuleComparison.changes(from: duplicate, to: decoded(duplicate)).isEmpty)
+        var changed = duplicate; changed[1].action = "direct"
+        let diff = RoutingRuleComparison.changes(from: duplicate, to: decoded(changed))
+        precondition(diff.count == 1 && diff[0].kind == "修改")
+        let result = RoutingRuleMerge(baseline: duplicate, local: changed, latest: decoded(duplicate + [new])).resolved()!
+        precondition(result.count == 3 && result[1].action == "direct")
+    }
+    static func testLargeMerge() {
+        let base = (0..<10_000).map { rule("host-\($0)", group: "group-\($0 % 10)") }
+        var local = base; local[4321].action = "direct"
+        let start = Date()
+        let merged = RoutingRuleMerge(baseline: base, local: local, latest: decoded(base + [rule("new")])).resolved()!
+        precondition(merged.count == 10_001 && merged[4321].action == "direct")
+        print("10,000-rule merge: \(Date().timeIntervalSince(start) * 1000) ms")
     }
 
     static func testFilteringPreservesRules() throws {

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,13 +18,21 @@ import (
 	"time"
 )
 
-type Credentials struct{ Username, Password string }
+type Credentials struct {
+	Username, Password string
+	AuthBypassIPs      []string
+}
+
+type authentication struct {
+	username, password string
+	bypass             map[netip.Addr]struct{}
+}
 type DialFunc func(context.Context, string, string) (net.Conn, error)
 
 type Server struct {
 	http    *http.Server
 	dial    DialFunc
-	auth    atomic.Pointer[Credentials]
+	auth    atomic.Pointer[authentication]
 	mu      sync.Mutex
 	tunnels map[net.Conn]struct{}
 	closed  bool
@@ -36,8 +45,16 @@ func New(dial DialFunc, credentials Credentials) *Server {
 	s.http = &http.Server{Handler: s, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 64 << 10}
 	return s
 }
-func (s *Server) SetCredentials(c Credentials) { s.auth.Store(&c) }
-func (s *Server) Running() bool                { return s.running.Load() }
+func (s *Server) SetCredentials(c Credentials) {
+	next := &authentication{username: c.Username, password: c.Password, bypass: make(map[netip.Addr]struct{}, len(c.AuthBypassIPs))}
+	for _, value := range c.AuthBypassIPs {
+		if ip, err := netip.ParseAddr(value); err == nil && ip.Zone() == "" {
+			next.bypass[ip.Unmap()] = struct{}{}
+		}
+	}
+	s.auth.Store(next)
+}
+func (s *Server) Running() bool { return s.running.Load() }
 func (s *Server) Serve(ln net.Listener) error {
 	s.running.Store(true)
 	defer s.running.Store(false)
@@ -69,10 +86,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := s.auth.Load()
-	if c.Username != "" {
+	// Only the TCP peer grants an exemption, never client-supplied headers.
+	peer, _ := netip.ParseAddr(src)
+	_, bypass := c.bypass[peer.Unmap()]
+	if c.username != "" && !bypass {
 		scheme, token, _ := strings.Cut(r.Header.Get("Proxy-Authorization"), " ")
 		supplied, err := base64.StdEncoding.DecodeString(token)
-		want := sha256.Sum256([]byte(c.Username + ":" + c.Password))
+		want := sha256.Sum256([]byte(c.username + ":" + c.password))
 		got := sha256.Sum256(supplied)
 		if !strings.EqualFold(scheme, "Basic") || err != nil || subtle.ConstantTimeCompare(want[:], got[:]) != 1 {
 			w.Header().Set("Proxy-Authenticate", `Basic realm="LAN Proxy Gateway", charset="UTF-8"`)
