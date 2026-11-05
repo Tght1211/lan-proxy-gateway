@@ -1,0 +1,8 @@
+PASS client DNS port 53 redirects to gateway 1053: 198.18.0.1
+PASS client TCP -> iptables REDIRECT -> original destination -> SOCKS5 -> origin
+FAIL client fake-IP UDP echo: TimeoutError('timed out')
+Traceback (most recent call last):
+  File "/audit/transparent-client.py", line 19, in <module>
+    payload=s.recv(4096)
+            ^^^^^^^^^^^^
+TimeoutError: timed out

@@ -1,0 +1,55 @@
+VERSION gateway version dev
+PASS initialize + status JSON
+PASS network detection
+PASS daemon start + API
+PASS enable forwarding
+PASS real iptables installed
+PASS HTTP forwarding
+PASS CONNECT tunnel
+PASS PAC download
+PASS routing hot reload rejects request
+PASS routing list
+PASS HTTP auth rejects missing credentials
+PASS HTTP auth accepts credentials
+PASS http upstream proxy + domain rule
+PASS socks5 upstream proxy + domain rule
+PASS fake-IP DNS
+PASS learning ignore
+PASS learning restore
+PASS agent runtime snapshot
+PASS API devices endpoint
+PASS hotspot reports unsupported
+PASS system-proxy status falls back to LAN egress
+PASS skill export
+PASS restart keeps configuration
+PASS switch back to direct
+PASS stop removes iptables
+PASS stop restores forwarding
+PASS stopped status
+DAEMON LOG time=2026-11-05T17:06:13.161Z level=INFO msg="gateway 守护进程已就绪" egress=direct lan_ip=172.17.0.3 redir_port=17892 dns_port=1053
+time=2026-11-05T17:06:13.161Z level=INFO msg="DNS 服务已启动" udp=[::]:1053 tcp=[::]:1053 fake_ip=false
+time=2026-11-05T17:06:13.161Z level=INFO msg=透明转发已启动 listen=0.0.0.0:17892
+time=2026-11-05T17:06:13.472Z level=INFO msg=配置已热应用 egress=direct
+time=2026-11-05T17:06:13.584Z level=INFO msg=配置已热应用 egress=direct
+time=2026-11-05T17:06:13.660Z level=INFO msg=配置已热应用 egress=direct
+time=2026-11-05T17:06:13.744Z level=INFO msg=配置已热应用 egress=direct
+time=2026-11-05T17:06:13.842Z level=INFO msg=配置已热应用 egress=proxy
+time=2026-11-05T17:06:14.005Z level=INFO msg=配置已热应用 egress=proxy
+time=2026-11-05T17:06:14.026Z level=INFO msg="http: panic serving 127.0.0.1:54592: sync/atomic: store of inconsistently typed value into Value\ngoroutine 213 [running]:\nnet/http.(*conn).serve.func1()\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/net/http/server.go:1943 +0xb4\npanic({0x3f87c0?, 0x577220?})\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/runtime/panic.go:783 +0x120\nsync/atomic.(*Value).Store(0x40000e5ce8, {0x427720, 0x4000261080})\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/sync/atomic/value.go:78 +0xd4\ngithub.com/tght/lan-proxy-gateway/internal/relay.(*egressMonitor).setProxy(0x40000e5ce0, {0x400000e250?, 0x48?}, {0x578be0, 0x4000261080})\n\t<workspace>/internal/relay/egresshealth.go:38 +0x78\ngithub.com/tght/lan-proxy-gateway/internal/relay.(*Server).SetEgressProbe(...)\n\t<workspace>/internal/relay/relay.go:146\ngithub.com/tght/lan-proxy-gateway/internal/app.(*daemonRuntime).setEgressProbe(0x40001fc000?, 0x40003d1dc0, {0x578be0, 0x4000261080})\n\t<workspace>/internal/app/daemon_config.go:94 +0x130\ngithub.com/tght/lan-proxy-gateway/internal/app.(*daemonRuntime).applyRouting(0x40000e8870, 0x40003d1dc0)\n\t<workspace>/internal/app/daemon_config.go:58 +0x16c\ngithub.com/tght/lan-proxy-gateway/internal/app.(*daemonRuntime).applyConfig(0x40000e8870, 0x40000d2180, 0x40003d1dc0)\n\t<workspace>/internal/app/daemon_config.go:35 +0x230\ngithub.com/tght/lan-proxy-gateway/internal/app.(*apiServer).handleReload(0x40001b3950, {0x57bcf8, 0x40001fc1e0}, 0x40?)\n\t<workspace>/internal/app/api.go:347 +0x98\nnet/http.HandlerFunc.ServeHTTP(0x40000d2e40?, {0x57bcf8?, 0x40001fc1e0?}, 0x353b80?)\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/net/http/server.go:2322 +0x38\nnet/http.(*ServeMux).ServeHTTP(0x40005a8050?, {0x57bcf8, 0x40001fc1e0}, 0x40000f3180)\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/net/http/server.go:2861 +0x190\ngithub.com/tght/lan-proxy-gateway/internal/app.newAPIServer.authenticateAPI.func1({0x57bcf8, 0x40001fc1e0}, 0x40000f3180)\n\t<workspace>/internal/app/api_auth.go:54 +0x108\nnet/http.HandlerFunc.ServeHTTP(0x0?, {0x57bcf8?, 0x40001fc1e0?}, 0x400051bb50?)\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/net/http/server.go:2322 +0x38\nnet/http.serverHandler.ServeHTTP({0x40002605c0?}, {0x57bcf8?, 0x40001fc1e0?}, 0x1?)\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/net/http/server.go:3340 +0xb0\nnet/http.(*conn).serve(0x40000e8900, {0x57c5e0, 0x40003f6540})\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/net/http/server.go:2109 +0x528\ncreated by net/http.(*Server).Serve in goroutine 57\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/net/http/server.go:3493 +0x384"
+time=2026-11-05T17:06:14.040Z level=INFO msg="http: panic serving 127.0.0.1:54600: sync/atomic: store of inconsistently typed value into Value\ngoroutine 215 [running]:\nnet/http.(*conn).serve.func1()\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/net/http/server.go:1943 +0xb4\npanic({0x3f87c0?, 0x577220?})\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/runtime/panic.go:783 +0x120\nsync/atomic.(*Value).Store(0x40000e5ce8, {0x427720, 0x40002618c0})\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/sync/atomic/value.go:78 +0xd4\ngithub.com/tght/lan-proxy-gateway/internal/relay.(*egressMonitor).setProxy(0x40000e5ce0, {0x4000454550?, 0x48?}, {0x578be0, 0x40002618c0})\n\t<workspace>/internal/relay/egresshealth.go:38 +0x78\ngithub.com/tght/lan-proxy-gateway/internal/relay.(*Server).SetEgressProbe(...)\n\t<workspace>/internal/relay/relay.go:146\ngithub.com/tght/lan-proxy-gateway/internal/app.(*daemonRuntime).setEgressProbe(0x40001fc000?, 0x4000582380, {0x578be0, 0x40002618c0})\n\t<workspace>/internal/app/daemon_config.go:94 +0x130\ngithub.com/tght/lan-proxy-gateway/internal/app.(*daemonRuntime).applyRouting(0x40000e8870, 0x4000582380)\n\t<workspace>/internal/app/daemon_config.go:58 +0x16c\ngithub.com/tght/lan-proxy-gateway/internal/app.(*daemonRuntime).applyConfig(0x40000e8870, 0x40000d2180, 0x4000582380)\n\t<workspace>/internal/app/daemon_config.go:35 +0x230\ngithub.com/tght/lan-proxy-gateway/internal/app.(*apiServer).handleReload(0x40001b3950, {0x57bcf8, 0x40001fc2d0}, 0x40?)\n\t<workspace>/internal/app/api.go:347 +0x98\nnet/http.HandlerFunc.ServeHTTP(0x40000d2e40?, {0x57bcf8?, 0x40001fc2d0?}, 0x353b80?)\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/net/http/server.go:2322 +0x38\nnet/http.(*ServeMux).ServeHTTP(0x40005a8230?, {0x57bcf8, 0x40001fc2d0}, 0x40000f32c0)\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/net/http/server.go:2861 +0x190\ngithub.com/tght/lan-proxy-gateway/internal/app.newAPIServer.authenticateAPI.func1({0x57bcf8, 0x40001fc2d0}, 0x40000f32c0)\n\t<workspace>/internal/app/api_auth.go:54 +0x108\nnet/http.HandlerFunc.ServeHTTP(0x0?, {0x57bcf8?, 0x40001fc2d0?}, 0x400051bb50?)\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/net/http/server.go:2322 +0x38\nnet/http.serverHandler.ServeHTTP({0x40002610c0?}, {0x57bcf8?, 0x40001fc2d0?}, 0x1?)\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/net/http/server.go:3340 +0xb0\nnet/http.(*conn).serve(0x40000e9170, {0x57c5e0, 0x40003f6540})\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/net/http/server.go:2109 +0x528\ncreated by net/http.(*Server).Serve in goroutine 57\n\t<go-module-cache>/golang.org/toolchain@v0.0.1-go1.25.0.darwin-arm64/src/net/http/server.go:3493 +0x384"
+time=2026-11-05T17:06:14.112Z level=INFO msg=收到退出信号，开始清理
+time=2026-11-05T17:06:14.516Z level=INFO msg="fake-ip 缓存已恢复" entries=1
+time=2026-11-05T17:06:14.516Z level=INFO msg="gateway 守护进程已就绪" egress=proxy lan_ip=172.17.0.3 redir_port=17892 dns_port=1053
+time=2026-11-05T17:06:14.516Z level=INFO msg="DNS 服务已启动" udp=[::]:1053 tcp=[::]:1053 fake_ip=true
+time=2026-11-05T17:06:14.516Z level=INFO msg="UDP fake-IP 转发已启动" listen=0.0.0.0:17893
+time=2026-11-05T17:06:14.516Z level=INFO msg=透明转发已启动 listen=0.0.0.0:17892
+time=2026-11-05T17:06:14.735Z level=INFO msg=配置已热应用 egress=direct
+time=2026-11-05T17:06:14.754Z level=INFO msg=收到退出信号，开始清理
+
+Traceback (most recent call last):
+  File "/audit/smoke.py", line 121, in <module>
+    check('no daemon panic', 'panic' not in pathlib.Path('/root/.config/lan-proxy-gateway/gateway.log').read_text())
+  File "/audit/smoke.py", line 12, in check
+    assert condition,name
+           ^^^^^^^^^
+AssertionError: no daemon panic

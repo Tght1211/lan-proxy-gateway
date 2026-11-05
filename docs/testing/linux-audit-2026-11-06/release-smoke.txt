@@ -1,0 +1,30 @@
+VERSION gateway version v4.5.6
+PASS initialize + status JSON
+PASS network detection
+PASS daemon start + API
+PASS enable forwarding
+PASS real iptables installed
+PASS HTTP forwarding
+PASS CONNECT tunnel
+PASS PAC download
+PASS routing hot reload rejects request
+PASS routing list
+PASS HTTP auth rejects missing credentials
+PASS HTTP auth accepts credentials
+PASS http upstream proxy + domain rule
+PASS socks5 upstream proxy + domain rule
+PASS fake-IP DNS
+PASS learning ignore
+PASS learning restore
+PASS agent runtime snapshot
+PASS API devices endpoint
+PASS hotspot reports unsupported
+PASS system-proxy status falls back to LAN egress
+PASS skill export
+PASS restart keeps configuration
+PASS switch back to direct
+PASS stop removes iptables
+PASS stop restores forwarding
+PASS stopped status
+PASS no daemon panic
+RESULT 28 checks passed

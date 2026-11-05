@@ -1,0 +1,4 @@
+time=2026-11-05T17:05:09.027Z level=INFO msg="UDP fake-IP 转发已启动" listen=0.0.0.0:17893
+time=2026-11-05T17:05:09.027Z level=INFO msg="DNS 服务已启动" udp=[::]:1053 tcp=[::]:1053 fake_ip=true
+time=2026-11-05T17:05:09.027Z level=INFO msg="gateway 守护进程已就绪" egress=proxy lan_ip=172.17.0.2 redir_port=17892 dns_port=1053
+time=2026-11-05T17:05:09.027Z level=INFO msg=透明转发已启动 listen=0.0.0.0:17892

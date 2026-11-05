@@ -35,6 +35,7 @@
 | [配置文件](advanced.md) | `gateway.yaml` 和高级设置 |
 | [架构](architecture.md) | DNS、转发、防火墙与控制面 |
 | [从 v3 升级](migration-v4.md) | 历史版本迁移 |
+| [Linux CLI 验证](testing/linux-audit-2026-11-06.md) | 2026-11-06 Docker 实测、功能差异和已知缺陷 |
 | [实机结果](real-device-results.md) | 历史测试记录，不作为当前网络效果保证 |
 | [更新记录](../CHANGELOG.md) | 源码中的版本记录；已发布版本以 Release 为准 |
 
