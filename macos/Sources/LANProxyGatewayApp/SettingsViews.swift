@@ -62,10 +62,32 @@ struct SettingsView: View {
                 case "updates":
                     Panel {
                         SettingsRow(title: "LAN Proxy Gateway", detail: model.updateStatus ?? model.buildVersion.detail) {
-                            Button(model.isCheckingUpdate ? "检查中…" : "检查更新") { model.checkForUpdates() }.disabled(model.isCheckingUpdate)
-                            if model.updateAvailable { Link("下载新版本 ↗", destination: URL(string: "https://github.com/Tght1211/lan-proxy-gateway/releases/latest")!) }
+                            Button(model.isCheckingUpdate ? "检查中…" : "检查更新") { model.checkForUpdates() }
+                                .disabled(model.isCheckingUpdate || model.isUpdatingApp)
+                            if model.isUpdatingApp {
+                                Button(model.isInstallingAppUpdate ? "安装中…" : "取消更新") { model.cancelAppUpdate() }
+                                    .disabled(model.isInstallingAppUpdate)
+                            } else if model.updateAvailable {
+                                Button("下载并安装更新") { model.installAppUpdate() }
+                                    .disabled(!model.canInstallAppUpdate || model.isBusy)
+                            }
                         }
-                        Text("新版本通过项目发布页安装。").font(.caption).foregroundStyle(Theme.muted)
+                        if model.isUpdatingApp {
+                            if let progress = model.updateProgress {
+                                HStack {
+                                    ProgressView(value: progress)
+                                    Text("\(Int(progress * 100))% ").font(.caption.monospacedDigit()).foregroundStyle(Theme.muted)
+                                }
+                            } else { ProgressView().controlSize(.small) }
+                        }
+                        Text(model.appUpdateHelp).font(.caption).foregroundStyle(Theme.muted)
+                        if model.coreUpdatePending {
+                            Divider()
+                            SettingsRow(title: "新版核心已随 App 下载", detail: model.isRunning ? "启用时会短暂中断设备连接，配置和规则保留。" : "安装到命令行和后台服务使用的位置。") {
+                                Button(model.isRunning ? "更新并重启核心" : "更新核心") { model.applyUpdatedCore() }
+                                    .disabled(model.isBusy || model.isUpdatingApp)
+                            }
+                        }
                     }
                 case "agent":
                     Panel {
@@ -97,6 +119,9 @@ struct SettingsView: View {
                 }
             }
         }.task { model.updateServiceStatus(); model.reloadLog(); await model.refreshHotspot() }
+            .onChange(of: category) { value in
+                if value == "updates", model.updateStatus == nil { model.checkForUpdates() }
+            }
     }
 }
 

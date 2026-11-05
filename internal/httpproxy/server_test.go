@@ -185,3 +185,107 @@ func TestRejectPublicClientAndMalformedConnect(t *testing.T) {
 		t.Fatal("origin auth accepted as proxy auth")
 	}
 }
+
+func TestAuthBypassUsesExactPeerIP(t *testing.T) {
+	for _, method := range []string{"GET", "CONNECT"} {
+		for _, tc := range []struct {
+			name, remote, header string
+			status               int
+		}{
+			{"listed", "192.168.1.50:1234", "", 502},
+			{"loopback", "127.0.0.1:1234", "", 502},
+			{"mapped", "[::ffff:192.168.1.50]:1234", "", 502},
+			{"other", "192.168.1.51:1234", "", 407},
+			{"other-loopback", "127.0.0.2:1234", "", 407},
+			{"spoofed", "192.168.1.51:1234", "192.168.1.50", 407},
+			{"public", "8.8.8.8:1234", "", 403},
+			{"malformed", "invalid", "", 403},
+		} {
+			t.Run(method+"/"+tc.name, func(t *testing.T) {
+				dialed := false
+				s := New(func(context.Context, string, string) (net.Conn, error) {
+					dialed = true
+					return nil, fmt.Errorf("test upstream unavailable")
+				}, Credentials{Username: "user", Password: "secret", AuthBypassIPs: []string{"192.168.1.50", "127.0.0.1", "8.8.8.8"}})
+				r := httptest.NewRequest(method, "http://example.com:443", nil)
+				r.Host = "example.com:443"
+				r.RemoteAddr = tc.remote
+				r.Header.Set("X-Forwarded-For", tc.header)
+				r.Header.Set("X-Real-IP", tc.header)
+				r.Header.Set("Forwarded", "for="+tc.header)
+				w := httptest.NewRecorder()
+				s.ServeHTTP(w, r)
+				if w.Code != tc.status || dialed != (tc.status == 502) {
+					t.Fatalf("status=%d dialed=%v, want %d", w.Code, dialed, tc.status)
+				}
+				if tc.status == 407 && w.Header().Get("Proxy-Authenticate") == "" {
+					t.Fatal("missing challenge")
+				}
+			})
+		}
+	}
+}
+
+func TestAuthBypassHTTPAndHTTPSHotUpdate(t *testing.T) {
+	for _, https := range []bool{false, true} {
+		t.Run(fmt.Sprint("https=", https), func(t *testing.T) {
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Proxy-Authorization") != "" {
+					t.Error("credential leaked to origin")
+				}
+				fmt.Fprint(w, "origin reached")
+			})
+			var origin *httptest.Server
+			if https {
+				origin = httptest.NewTLSServer(handler)
+			} else {
+				origin = httptest.NewServer(handler)
+			}
+			defer origin.Close()
+			credentials := Credentials{Username: "user", Password: "secret"}
+			proxy, addr := startProxy(t, credentials)
+			check := func(allowed bool, user, password string) {
+				t.Helper()
+				resp, err := proxyClient(t, addr, user, password).Get(origin.URL)
+				if !allowed {
+					if https {
+						if err == nil {
+							resp.Body.Close()
+							t.Fatal("unauthorized CONNECT succeeded")
+						}
+						return
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer resp.Body.Close()
+					if resp.StatusCode != 407 {
+						t.Fatalf("got %d, want 407", resp.StatusCode)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer resp.Body.Close()
+				body, err := io.ReadAll(resp.Body)
+				if err != nil || string(body) != "origin reached" {
+					t.Fatalf("body=%q err=%v", body, err)
+				}
+			}
+			check(false, "", "")
+			credentials.AuthBypassIPs = []string{"127.0.0.1"}
+			proxy.SetCredentials(credentials)
+			// The caller cannot change the active policy by mutating its input slice.
+			credentials.AuthBypassIPs[0] = "192.168.1.50"
+			check(true, "", "")
+			check(true, "user", "wrong")
+			proxy.SetCredentials(credentials)
+			check(false, "", "")
+			check(true, "user", "secret")
+			credentials.AuthBypassIPs = nil
+			proxy.SetCredentials(credentials)
+			check(false, "", "")
+		})
+	}
+}

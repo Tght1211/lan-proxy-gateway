@@ -3,10 +3,15 @@ package relay
 import (
 	"io"
 	"net"
+	"sync"
 	"time"
 )
 
 const pipeDrainTimeout = 2 * time.Minute
+
+// Reuse a moderately sized buffer per direction rather than allocating one
+// for every new video/CDN connection. Larger reads also reduce accounting work.
+var pipeBuffers = sync.Pool{New: func() any { return new([64 * 1024]byte) }}
 
 // pipe relays bytes between a (client) and b (upstream) in both directions,
 // accounting them to the tracked connection. Half-closes are propagated so
@@ -48,7 +53,11 @@ func pipeWithDrainTimeout(a, b net.Conn, tc *TrackedConn, drainTimeout time.Dura
 func copyOne(dst, src net.Conn, count func(int64)) error {
 	// Count each successful write so live streams appear in throughput and
 	// bytes are assigned to the day they were transferred, not the close date.
-	_, err := io.Copy(trafficWriter{Conn: dst, count: count}, src)
+	buf := pipeBuffers.Get().(*[64 * 1024]byte)
+	defer pipeBuffers.Put(buf)
+	// Hide TCPConn.WriteTo: its fallback would allocate its own buffer and
+	// ignore the pooled buffer supplied to CopyBuffer.
+	_, err := io.CopyBuffer(trafficWriter{Conn: dst, count: count}, struct{ io.Reader }{src}, buf[:])
 	// propagate EOF to the far side as a half-close when possible
 	if tc, ok := dst.(interface{ CloseWrite() error }); ok {
 		_ = tc.CloseWrite()

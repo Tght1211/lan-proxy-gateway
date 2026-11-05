@@ -9,6 +9,7 @@ struct LANHTTPProxySettingsPanel: View {
     @State private var username = ""
     @State private var password = ""
     @State private var passwordSet = false
+    @State private var authBypassIPs = ""
     @State private var loaded = false
     @State private var saving = false
     @State private var result = ""
@@ -75,6 +76,14 @@ struct LANHTTPProxySettingsPanel: View {
                             .textFieldStyle(StudioFieldStyle()).frame(width: 220)
                     }
                 }
+                if auth == "basic" {
+                    SettingsRow(title: "免密来源 IP", detail: "仅这些来源免密，其他设备仍需密码。多个 IP 用逗号或空格分隔；留空关闭免密。") {
+                        TextField("例如 127.0.0.1, 192.168.1.50", text: $authBypassIPs)
+                            .textFieldStyle(StudioFieldStyle()).frame(width: 280)
+                    }
+                    Text("本机免密可填写 127.0.0.1，并关闭系统 HTTP / HTTPS 代理的密码选项。按实际连接来源判断；经本机隧道转发的访问也可能显示为 127.0.0.1。")
+                        .font(.caption).foregroundStyle(Theme.muted)
+                }
                 if model.status?.egress == "direct" {
                     Text("当前出口为直连。要共享 VPN，请先在网络总览中将出口切换到本机 VPN 的 HTTP/SOCKS5 代理。")
                         .font(.caption).foregroundStyle(Theme.yellow)
@@ -100,6 +109,7 @@ struct LANHTTPProxySettingsPanel: View {
         auth = current.auth
         username = current.username
         passwordSet = current.passwordSet
+        authBypassIPs = (current.authBypassIPs ?? []).joined(separator: ", ")
         loaded = true
     }
 
@@ -112,7 +122,8 @@ struct LANHTTPProxySettingsPanel: View {
             do {
                 result = try await model.client.setLANHTTPProxy(
                     enabled: enabled, port: port, auth: auth, username: username,
-                    password: password.isEmpty && passwordSet ? nil : password
+                    password: password.isEmpty && passwordSet ? nil : password,
+                    authBypassIPs: authBypassIPs.split(whereSeparator: { $0.isWhitespace || $0 == "," || $0 == "，" }).map(String.init)
                 )
                 password = ""
                 await model.refresh(silent: true)

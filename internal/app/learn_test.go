@@ -38,6 +38,9 @@ func TestLearningActionsPreserveUserRules(t *testing.T) {
 	cfg.Egress.Mode = config.EgressProxy
 	config.Normalize(cfg)
 	a := &App{Cfg: cfg, Paths: config.Paths{ConfigFile: dir + "/gateway.yaml"}}
+	if err := a.Save(); err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 3; i++ {
 		l.Record("example.com")
 	}
@@ -87,6 +90,9 @@ func TestPromoteLearnedDirectRule(t *testing.T) {
 	a := &App{Cfg: config.Default(), Paths: config.Paths{ConfigFile: t.TempDir() + "/gateway.yaml"}}
 
 	a.Cfg.Routing.Rules = nil
+	if err := a.Save(); err != nil {
+		t.Fatal(err)
+	}
 	added, err := a.PromoteLearnedDirectRule("example.com")
 	if err != nil || !added {
 		t.Fatalf("first promote = %v, %v", added, err)
@@ -125,6 +131,9 @@ func TestPromoteLearnedDirectRuleSkipsWhenUserRuleCovers(t *testing.T) {
 		{Type: config.RuleDomainSuffix, Value: "example.com", Action: config.EgressDirect},
 	}
 	a := &App{Cfg: cfg, Paths: config.Paths{ConfigFile: t.TempDir() + "/gateway.yaml"}}
+	if err := a.Save(); err != nil {
+		t.Fatal(err)
+	}
 
 	added, err := a.PromoteLearnedDirectRule("www.example.com")
 	if err != nil || added {
@@ -139,6 +148,9 @@ func TestLearnProxyRulePersistsAndPreservesExplicitRules(t *testing.T) {
 	a := &App{Cfg: config.Default(), Paths: config.Paths{ConfigFile: t.TempDir() + "/gateway.yaml"}}
 	a.Cfg.Egress.Mode = config.EgressProxy
 	a.Cfg.Routing.Rules = nil
+	if err := a.Save(); err != nil {
+		t.Fatal(err)
+	}
 	added, err := a.PromoteLearnedProxyRule("UNKNOWN.example.")
 	if err != nil || !added {
 		t.Fatalf("promote: %v %v", added, err)
@@ -154,6 +166,9 @@ func TestLearnProxyRulePersistsAndPreservesExplicitRules(t *testing.T) {
 		t.Fatal("duplicate", err)
 	}
 	a.Cfg.Routing.Rules = append(a.Cfg.Routing.Rules, config.RoutingRule{Type: config.RuleDomainSuffix, Value: "manual.example", Action: config.EgressDirect})
+	if err := a.Save(); err != nil {
+		t.Fatal(err)
+	}
 	if added, err = a.PromoteLearnedProxyRule("www.manual.example"); added || err != nil {
 		t.Fatal("overrode explicit rule", err)
 	}
@@ -167,6 +182,9 @@ func TestProxyLearningConfigurationAndUndo(t *testing.T) {
 	a := &App{Cfg: config.Default(), Paths: config.Paths{ConfigFile: dir + "/gateway.yaml"}}
 	a.Cfg.Egress.Mode = config.EgressProxy
 	a.Cfg.Routing.Rules = nil
+	if err := a.Save(); err != nil {
+		t.Fatal(err)
+	}
 	l := newFallbackLearner(dir+"/learn.json", slog.Default())
 	configure := func(enabled, auto bool, count int) {
 		t.Helper()

@@ -24,6 +24,14 @@ egress:
     username: ""
     password: ""
 
+# ========== HTTP / HTTPS 代理接入 ==========
+http_proxy:
+  enabled: false
+  port: 17894
+  auth: none              # none | basic；basic 时需设置 username 和 password
+  # auth_bypass_ips: ["127.0.0.1"] # 精确来源 IP 免密；默认为空，其他来源仍需认证
+  # 按 TCP 对端匹配；本机隧道转发也可能以 127.0.0.1 接入。
+
 # ========== 分流规则 ==========
 # src-ip 是设备级前置策略，不受后续域名规则顺序影响。
 routing:

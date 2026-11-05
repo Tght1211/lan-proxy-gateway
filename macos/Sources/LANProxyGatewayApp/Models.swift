@@ -360,9 +360,11 @@ struct LANHTTPProxyStatus: Decodable, Equatable {
     let auth: String
     let username: String
     let passwordSet: Bool
+    let authBypassIPs: [String]?
     enum CodingKeys: String, CodingKey {
         case enabled, port, auth, username
         case passwordSet = "password_set"
+        case authBypassIPs = "auth_bypass_ips"
     }
 }
 

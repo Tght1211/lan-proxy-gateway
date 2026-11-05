@@ -54,6 +54,7 @@ struct StudioSelect: View {
     let title: String
     @Binding var selection: String
     let options: [(String, String)]
+    var compact = false
     @State private var expanded = false
     @Environment(\.isEnabled) private var enabled
     var body: some View {
@@ -62,7 +63,8 @@ struct StudioSelect: View {
                 Text(options.first { $0.0 == selection }?.1 ?? selection).lineLimit(1)
                 Spacer(minLength:8)
                 Image(systemName:"chevron.down").font(.system(size:10)).foregroundStyle(Theme.muted)
-            }.font(.system(size:12)).foregroundStyle(Theme.text).padding(10)
+            }.font(.system(size:compact ? 11 : 12)).foregroundStyle(Theme.text)
+                .padding(.horizontal, compact ? 7 : 10).padding(.vertical, compact ? 5 : 10)
                 .background(Theme.panelRaised)
                 .overlay(RoundedRectangle(cornerRadius:7).stroke(Theme.border,lineWidth:0.8))
                 .clipShape(RoundedRectangle(cornerRadius:7)).contentShape(Rectangle())

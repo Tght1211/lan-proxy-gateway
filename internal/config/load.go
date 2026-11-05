@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -82,7 +83,12 @@ func loadFrom(path string) (*Config, error) {
 		}
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	return parseFile(path, data)
+	cfg, err := parseFile(path, data)
+	if err == nil {
+		cfg.sourcePath, _ = filepath.Abs(path)
+		cfg.sourceHash = sha256.Sum256(data)
+	}
+	return cfg, err
 }
 
 // Parse converts raw v4 YAML into Config. Preferred for in-memory tests.
@@ -147,31 +153,6 @@ func backupLegacy(path string) (string, error) {
 		return "", err
 	}
 	return bak, nil
-}
-
-// Save writes the config back to disk with mode 0600.
-// When run under sudo, the file and its parent directory are chowned back to
-// the calling user so non-root operations can still read it.
-func Save(cfg *Config, path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
-	}
-	Normalize(cfg)
-	if err := Validate(cfg); err != nil {
-		return err
-	}
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return err
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return err
-	}
-	ReclaimToSudoUser(filepath.Dir(path))
-	return nil
 }
 
 // Normalize fills in missing defaults so downstream code can rely on invariants.
@@ -253,6 +234,12 @@ func Validate(cfg *Config) error {
 	}
 
 	p := cfg.HTTPProxy
+	for _, value := range p.AuthBypassIPs {
+		ip, err := netip.ParseAddr(value)
+		if err != nil || ip.Zone() != "" || !(ip.Unmap().IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()) {
+			return fmt.Errorf("http_proxy.auth_bypass_ips 必须是独立的局域网或回环 IP 地址，不能使用网段或主机名: %q", value)
+		}
+	}
 	if p.Port < 1 || p.Port > 65535 {
 		return errors.New("http_proxy.port 必须在 1–65535 之间")
 	}

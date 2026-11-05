@@ -25,3 +25,22 @@ func TestHTTPProxyValidation(t *testing.T) {
 		t.Fatalf("unexpected migration defaults: %+v", cfg.HTTPProxy)
 	}
 }
+
+func TestHTTPProxyAuthBypassValidation(t *testing.T) {
+	for _, value := range []string{"127.0.0.1", "192.168.1.50", "::1", "::ffff:192.168.1.50", "fd00::1", "fe80::1"} {
+		cfg := Default()
+		Normalize(cfg)
+		cfg.HTTPProxy.AuthBypassIPs = []string{value}
+		if err := Validate(cfg); err != nil {
+			t.Fatalf("%s: %v", value, err)
+		}
+	}
+	for _, value := range []string{"", "localhost", "192.168.1.0/24", "*", "8.8.8.8", "0.0.0.0", "::", "fe80::1%en0", "127.0.0.1:1234"} {
+		cfg := Default()
+		Normalize(cfg)
+		cfg.HTTPProxy.AuthBypassIPs = []string{value}
+		if err := Validate(cfg); err == nil {
+			t.Fatalf("accepted %q", value)
+		}
+	}
+}

@@ -14,8 +14,8 @@ import (
 // proxy-recovery probe loop.
 type egressMonitor struct {
 	health    *proxyHealth
-	dialer    atomic.Value // Dialer for probes
-	addr      atomic.Value // string "host:port"
+	dialer    atomic.Pointer[dialerHolder] // Dialer for probes
+	addr      atomic.Value                 // string "host:port"
 	down      atomic.Bool
 	since     time.Time
 	actionsMu sync.Mutex
@@ -35,7 +35,7 @@ func newEgressMonitor(ph *proxyHealth) *egressMonitor {
 func (m *egressMonitor) setProxy(addr string, d Dialer) {
 	m.addr.Store(addr)
 	if d != nil {
-		m.dialer.Store(d)
+		m.dialer.Store(&dialerHolder{dialer: d})
 	}
 }
 
@@ -45,10 +45,11 @@ func (m *egressMonitor) snapshot() EgressSnapshot {
 	var actions []EgressAction
 	m.actionsMu.Lock()
 	actions = append(actions, m.actions...)
+	since := m.since
 	m.actionsMu.Unlock()
 	return EgressSnapshot{
 		ProxyDown: m.down.Load(),
-		Since:     m.since,
+		Since:     since,
 		Actions:   actions,
 		Alerts:    m.health.alertedHosts(time.Now()),
 	}
@@ -65,12 +66,13 @@ func (m *egressMonitor) recordAction(text string) {
 }
 
 // probePort TCP-dials the configured proxy address to decide liveness.
-func (m *egressMonitor) probePort() bool {
+func (m *egressMonitor) probePort(ctx context.Context) bool {
 	addr, _ := m.addr.Load().(string)
 	if addr == "" {
 		return true
 	}
-	c, err := net.DialTimeout("tcp", addr, 3*time.Second)
+	d := net.Dialer{Timeout: 3 * time.Second}
+	c, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return false
 	}
@@ -78,29 +80,57 @@ func (m *egressMonitor) probePort() bool {
 	return true
 }
 
-// runLoop performs port probes every 30s and per-host recovery probes every
-// 3 minutes until the context is cancelled.
+// Check local proxy availability promptly, independently of potentially slow
+// per-host recovery probes. One unreachable host must not delay port recovery.
 func (m *egressMonitor) runLoop(ctx context.Context, probeHosts func() []string, onRecovered func(string)) {
-	ticker := time.NewTicker(30 * time.Second)
+	m.runLoopWithIntervals(ctx, probeHosts, onRecovered, 5*time.Second, probeInterval)
+}
+
+func (m *egressMonitor) runLoopWithIntervals(ctx context.Context, probeHosts func() []string, onRecovered func(string), portInterval, hostInterval time.Duration) {
+	ctx, cancel := context.WithCancel(ctx)
+	hostDone := make(chan struct{})
+	go func() {
+		defer close(hostDone)
+		m.runHostProbes(ctx, probeHosts, onRecovered, hostInterval)
+	}()
+	defer func() { cancel(); <-hostDone }()
+	ticker := time.NewTicker(portInterval)
 	defer ticker.Stop()
-	probeTicker := time.NewTicker(probeInterval)
-	defer probeTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			ok := m.probePort()
+			ok := m.probePort(ctx)
+			if ctx.Err() != nil {
+				return
+			}
 			if ok && m.down.Load() {
 				m.down.Store(false)
 				m.recordAction("代理端口已恢复，恢复代理出口")
 			} else if !ok && !m.down.Load() {
-				m.down.Store(true)
+				m.actionsMu.Lock()
 				m.since = time.Now()
+				m.actionsMu.Unlock()
+				m.down.Store(true)
 				m.recordAction("代理端口不可用，已将全部设备切换为直连")
 			}
+		}
+	}
+}
+
+func (m *egressMonitor) runHostProbes(ctx context.Context, probeHosts func() []string, onRecovered func(string), interval time.Duration) {
+	probeTicker := time.NewTicker(interval)
+	defer probeTicker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
 		case <-probeTicker.C:
 			for _, host := range probeHosts() {
+				if ctx.Err() != nil {
+					return
+				}
 				m.probeHostRecovery(ctx, host, onRecovered)
 			}
 		}
@@ -111,14 +141,14 @@ func (m *egressMonitor) runLoop(ctx context.Context, probeHosts func() []string,
 // returns to proxy egress (and any learned direct rule is removed by the
 // onRecovered callback).
 func (m *egressMonitor) probeHostRecovery(ctx context.Context, host string, onRecovered func(string)) {
-	d, ok := m.dialer.Load().(Dialer)
-	if !ok || d == nil {
+	holder := m.dialer.Load()
+	if holder == nil || holder.dialer == nil {
 		return
 	}
 	target := net.JoinHostPort(host, probeHost)
 	dctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	c, err := d.DialContext(dctx, "tcp", target)
+	c, err := holder.dialer.DialContext(dctx, "tcp", target)
 	if err != nil {
 		m.health.markProbeFail(host, time.Now())
 		return

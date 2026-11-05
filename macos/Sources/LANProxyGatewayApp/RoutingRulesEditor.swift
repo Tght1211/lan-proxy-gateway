@@ -3,13 +3,6 @@ import Charts
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct RuleGroupDraft: Identifiable, Equatable {
-    var id = UUID()
-    var name: String // "" = ungrouped
-    var rules: [RoutingRule]
-    var collapsed = false
-}
-
 struct RuleGroupPreset {
     let name: String
     let rules: [RoutingRule]
@@ -23,30 +16,6 @@ let ruleGroupPresets: [RuleGroupPreset] = {
     return makeGroupDrafts(rules).map { RuleGroupPreset(name: $0.name, rules: $0.rules) }
 }()
 
-func makeGroupDrafts(_ rules: [RoutingRule]) -> [RuleGroupDraft] {
-    var order: [String] = []
-    var bucket: [String: [RoutingRule]] = [:]
-    for rule in rules {
-        if bucket[rule.group] == nil {
-            order.append(rule.group)
-            bucket[rule.group] = []
-        }
-        bucket[rule.group]?.append(rule)
-    }
-    return order.map { RuleGroupDraft(name: $0, rules: bucket[$0] ?? []) }
-}
-
-func flattenGroups(_ groups: [RuleGroupDraft]) -> [RoutingRule] {
-    groups.flatMap { group -> [RoutingRule] in
-        let name = group.name.trimmingCharacters(in: .whitespaces)
-        return group.rules.map { rule in
-            var copy = rule
-            copy.group = name
-            return copy
-        }
-    }
-}
-
 struct RoutingRulesEditor: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -58,8 +27,16 @@ struct RoutingRulesEditor: View {
     @State private var parseNote: String?
     @State private var selectedGroupID: UUID?
     @State private var source = "all"
+    @State private var ruleSearch = ""
+    @State private var originFilter = "all"
+    @State private var rulePage = 0
+    @State private var pageSize = 50
     @State private var baselineRules: [RoutingRule]
     @State private var configurationConflict = false
+    @State private var ruleOrder: [UUID]
+    @State private var externalChanges: [RoutingRuleChange] = []
+    @State private var syncNotice: String?
+    @State private var review: RoutingReview?
 
     private let embedded: Bool
 
@@ -67,17 +44,37 @@ struct RoutingRulesEditor: View {
         self.embedded = embedded
         _groups = State(initialValue: makeGroupDrafts(rules))
         _baselineRules = State(initialValue: rules)
+        _ruleOrder = State(initialValue: rules.map(\.id))
     }
 
-    private var flatRules: [RoutingRule] { flattenGroups(groups) }
-    private var visibleIndices: [Int] {
-        groups.indices.filter { source == "all" || groups[$0].rules.contains { $0.action == source } || groups[$0].rules.isEmpty }
+    private var flatRules: [RoutingRule] { RoutingDraftOrder.rules(flattenGroups(groups), order: ruleOrder) }
+    private var localChangeCount: Int {
+        guard let draft = currentDraft() else { return 0 }
+        return RoutingRuleComparison.changes(from: baselineRules, to: draft).count
     }
+    private var filter: RoutingEditorFilter {
+        RoutingEditorFilter(query: ruleSearch, action: source, origin: originFilter)
+    }
+    private var projection: RoutingEditorProjection {
+        RoutingEditorProjection(groups: groups.map { (name: $0.name, rules: $0.rules) }, filter: filter)
+    }
+    private var visibleIndices: [Int] { projection.visibleGroupIndices }
     private var selectedIndex: Int {
-        guard let id = selectedGroupID, let idx = groups.firstIndex(where: { $0.id == id }), visibleIndices.contains(idx) else {
-            return visibleIndices.first ?? -1
+        selectedIndex(in: visibleIndices)
+    }
+
+    private func selectedIndex(in indices: [Int]) -> Int {
+        guard let id = selectedGroupID, let idx = groups.firstIndex(where: { $0.id == id }), indices.contains(idx) else {
+            return indices.first ?? -1
         }
         return idx
+    }
+
+    private func filterBinding(_ binding: Binding<String>) -> Binding<String> {
+        Binding(get: { binding.wrappedValue }, set: { value in
+            binding.wrappedValue = value
+            rulePage = 0
+        })
     }
 
     var body: some View {
@@ -117,11 +114,12 @@ struct RoutingRulesEditor: View {
             Divider().overlay(Theme.border)
 
             HStack(spacing: 16) {
-                StudioTabs(title: "规则动作筛选", selection:$source, items:[("all","全部规则",""),("proxy","代理出口","cloud"),("direct","本机直连","globe"),("reject","拒绝","ban")], compact:true)
-                    .help("按规则动作筛选分组；混合分组保留其他动作的规则。筛选不改变全局顺序，保存时保留未显示的规则。")
+                StudioTabs(title: "规则动作筛选", selection:filterBinding($source), items:[("all","全部规则",""),("proxy","代理出口","cloud"),("direct","本机直连","globe"),("reject","拒绝","ban")], compact:true)
+                    .help("按规则动作筛选，混合分组只显示匹配动作的规则。筛选不改变全局顺序，保存时保留未显示的规则。")
                 Spacer()
-                Text("每条规则只指定一种动作").font(.caption).foregroundStyle(Theme.muted)
+                Text("\(flatRules.count) 条规则 · \(groups.count) 个分组").font(.caption).foregroundStyle(Theme.muted)
             }.padding(.horizontal, 20).padding(.vertical, 10)
+            if editorMode == "list" && !groups.isEmpty { searchToolbar }
             if editorMode == "text" {
                 VStack(alignment: .leading, spacing: 8) {
 					Text("每行一条：类型,值,动作。支持 DOMAIN / DOMAIN-SUFFIX / IP-CIDR / SRC-IP；DIRECT / REJECT，其他目标视为代理。SRC-IP 是设备级前置规则，优先于域名规则。「# == 分组: 名称 ==」行开始一个分组，「# == 未分组 ==」结束分组；其他 # 行为注释。")
@@ -154,131 +152,213 @@ struct RoutingRulesEditor: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                HStack(spacing: 0) {
-                    // 左侧分组目录
-                    VStack(spacing: 0) {
-                        HStack {
-                            Text("分组").font(.caption.weight(.bold)).foregroundStyle(Theme.muted)
-                            Spacer()
-                            Menu {
-                                Section("预设分组 · 走上游代理") {
-                                    ForEach(ruleGroupPresets, id: \.name) { preset in
-                                        Button(preset.name) { addPreset(preset); selectLastGroup() }
-                                    }
-                                }
-                                Divider()
-                                Button { addCustomGroup(); selectLastGroup() } label: { Label("自定义分组", systemImage: "folder.badge.plus") }
-                                Button { addUngroupedRule(); selectUngrouped() } label: { Label("单条规则", systemImage: "plus") }
-                            } label: {
-                                Image(systemName: "plus.circle.fill").font(.system(size: 14)).foregroundStyle(Theme.cyan)
-                            }
-                            .menuStyle(.borderlessButton)
-                            .menuIndicator(.hidden)
-                        }
-                        .padding(.horizontal, 12).padding(.vertical, 8)
-                        Divider().overlay(Theme.border)
-                        ScrollView(.vertical, showsIndicators: true) {
-                            VStack(spacing: 2) {
-                                ForEach(visibleIndices, id: \.self) { index in
-                                    groupDirectoryRow(index: index, group: groups[index], selected: index == selectedIndex)
-                                }
-                            }
-                            .padding(.horizontal, 8).padding(.vertical, 6)
-                        }
-                        .background(Theme.panel)
-                    }
-                    .frame(width: 190)
-                    Divider().overlay(Theme.border)
-                    // 右侧规则窗格
-                    VStack(spacing: 0) {
-                        if selectedIndex >= 0 {
-                            groupPaneToolbar(groupIndex: selectedIndex)
-                            Divider().overlay(Theme.border)
-                            List {
-                                ForEach(Array($groups[selectedIndex].rules.enumerated()), id: \.element.id) { ruleIndex, $rule in
-                                    ruleRow(number: ruleIndex + 1, rule: $rule, groupIndex: selectedIndex)
-                                        .listRowSeparator(.hidden)
-                                        .listRowBackground(Color.clear)
-                                        .listRowInsets(EdgeInsets(top: 3, leading: 20, bottom: 3, trailing: 20))
-                                }
-                                .onMove { indices, offset in
-                                    groups[selectedIndex].rules.move(fromOffsets: indices, toOffset: offset)
-                                }
-                            }
-                            .listStyle(.plain)
-                            .scrollContentBackground(.hidden)
-                            .scrollIndicators(.hidden)
-                        } else {
-                            Text("选择左侧分组查看规则").font(.callout).foregroundStyle(Theme.muted)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                    }
+                HSplitView {
+                    groupDirectory.frame(minWidth: 170, idealWidth: 240, maxWidth: 380)
+                    rulePane.frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
 
             Divider().overlay(Theme.border)
-            HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
                 if let saveError {
                     Label(saveError, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(Theme.coral).lineLimit(2)
-                } else {
-                    RuleCountChip(label: "代理", count: count("proxy"), color: Theme.cyan)
-                    RuleCountChip(label: "直连", count: count("direct"), color: Theme.lime)
-                    RuleCountChip(label: "拒绝", count: count("reject"), color: Theme.coral)
-                    if let duplicateRuleNotice {
-                        Label(duplicateRuleNotice, systemImage: "exclamationmark.triangle")
-                            .font(.caption2).foregroundStyle(Theme.yellow)
-                            .lineLimit(1)
-                            .help(duplicateRuleNotice + "。同一规则出现在多个位置时，只有排在最前面的一条生效，建议删除多余的。")
-                    }
+                        .font(.caption).foregroundStyle(Theme.coral).textSelection(.enabled)
                 }
-                Spacer()
-                Button(embedded ? "撤销修改" : "取消") {
-                    if embedded {
-                        loadLatest(model.status?.routing ?? baselineRules)
-                    } else { dismiss() }
-                }.buttonStyle(StudioButtonStyle()).disabled(isSaving)
-                Button {
-                    save()
-                } label: {
-                    if isSaving {
-                        ProgressView().controlSize(.small).frame(width: 56)
-                    } else {
-                        Text("应用规则")
-                    }
+                if let syncNotice {
+                    Label(syncNotice, systemImage: configurationConflict ? "exclamationmark.arrow.triangle.2.circlepath" : "arrow.triangle.2.circlepath")
+                        .font(.caption).foregroundStyle(configurationConflict ? Theme.yellow : Theme.muted)
                 }
-                .buttonStyle(ActionButtonStyle(tint: Theme.cyan))
-                .disabled((editorMode == "list" && hasInvalidRule) || isSaving || model.isBusy || configurationConflict)
+                HStack(spacing: 8) {
+                    Text(localChangeCount == 0 ? "没有未应用的修改" : "\(localChangeCount) 条未应用变更")
+                        .font(.caption).foregroundStyle(Theme.muted)
+                    Button(configurationConflict ? "查看差异并处理" : "查看变更") { openReview() }
+                        .buttonStyle(StudioButtonStyle()).disabled(isSaving)
+                    Spacer()
+                    Button(embedded ? "撤销我的修改" : "取消") {
+                        if embedded { loadLatest(model.status?.routing ?? baselineRules) }
+                        else { dismiss() }
+                    }.buttonStyle(StudioButtonStyle()).disabled(isSaving)
+                    Button { save() } label: {
+                        if isSaving { ProgressView().controlSize(.small).frame(width: 56) }
+                        else { Text("应用规则") }
+                    }
+                    .buttonStyle(ActionButtonStyle(tint: Theme.cyan))
+                    .disabled((editorMode == "list" && hasInvalidRule) || isSaving || model.isBusy || configurationConflict || localChangeCount == 0)
+                }
+                if let duplicateRuleNotice {
+                    Text(duplicateRuleNotice).font(.caption2).foregroundStyle(Theme.yellow).lineLimit(1).help(duplicateRuleNotice)
+                }
             }
             .padding(.horizontal, 20).padding(.vertical, 14)
             .background(Theme.panel)
         }
         .frame(minWidth: embedded ? 0 : 940, maxWidth: embedded ? .infinity : 940, minHeight: 600, maxHeight: embedded ? .infinity : 600).background(Theme.canvasBackground)
-        .onReceive(model.$status) { status in
-            guard !isSaving, let status else { return }
-            let changed = editorMode == "text" ? text != serializeRuleLines(baselineRules) : NetworkRuleRevision.signature(flatRules) != NetworkRuleRevision.signature(baselineRules)
-            switch NetworkRuleRevision.assess(baseline: baselineRules, latest: status.routing ?? [], draftChanged: changed) {
-            case .unchanged: break
-            case .reload: loadLatest(status.routing ?? [])
-            case .conflict:
-                configurationConflict = true
-                saveError = "规则已在其他位置更新。请先复制草稿，再撤销修改并重新编辑，避免覆盖新规则。"
+        .disabled(isSaving)
+        .onChange(of: pageSize) { _ in rulePage = 0 }
+        .sheet(item: $review) { snapshot in
+            RoutingChangesSheet(review: snapshot) { merged, latest in
+                baselineRules = latest
+                replaceDraft(merged)
+                configurationConflict = false; saveError = nil
+                syncNotice = "已合并到草稿，请检查变更后应用。"
             }
         }
+        .onReceive(model.$status) { status in
+            guard !isSaving, let latest = status?.routing else { return }
+            receiveLatest(latest)
+        }
+    }
+
+    private var searchToolbar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
+            TextField("搜索分组、域名或 IP", text: filterBinding($ruleSearch)).textFieldStyle(.plain)
+                .accessibilityLabel("搜索规则").frame(minWidth: 160)
+            if !ruleSearch.isEmpty {
+                Button { ruleSearch = ""; rulePage = 0 } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain).foregroundStyle(Theme.muted).help("清除规则搜索")
+            }
+            Divider().frame(height: 18)
+            StudioSelect(title: "规则来源筛选", selection: filterBinding($originFilter),
+                         options: [("all", "全部来源"), ("manual", "手动规则"), ("learned", "自动学习")], compact: true)
+                .frame(width: 120)
+            Text("匹配 \(projection.matchedCount) / \(projection.totalCount)")
+                .font(.caption.monospacedDigit()).foregroundStyle(Theme.muted)
+        }
+        .padding(.horizontal, 20).padding(.vertical, 8)
+        .background(Theme.panel)
+        .help("搜索、来源和出口筛选只改变显示；应用时保留全部规则。")
+    }
+
+    private var groupDirectory: some View {
+        let currentProjection = projection
+        let indices = currentProjection.visibleGroupIndices
+        let currentSelectedIndex = selectedIndex(in: indices)
+        return VStack(spacing: 0) {
+            HStack {
+                Text("分组").font(.caption.weight(.bold)).foregroundStyle(Theme.muted)
+                Text("\(indices.count) / \(groups.count)").font(.caption2.monospacedDigit()).foregroundStyle(Theme.muted)
+                Spacer()
+                Menu {
+                    Section("预设分组 · 走上游代理") {
+                        ForEach(ruleGroupPresets, id: \.name) { preset in
+                            Button(preset.name) { addPreset(preset); selectLastGroup() }
+                        }
+                    }
+                    Divider()
+                    Button { addCustomGroup(); selectLastGroup() } label: { Label("自定义分组", systemImage: "folder.badge.plus") }
+                    Button { addUngroupedRule(); selectUngrouped() } label: { Label("单条规则", systemImage: "plus") }
+                } label: {
+                    Image(systemName: "plus.circle.fill").font(.system(size: 14)).foregroundStyle(Theme.cyan)
+                }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            Divider().overlay(Theme.border)
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(spacing: 2) {
+                    ForEach(indices, id: \.self) { index in
+                        groupDirectoryRow(index: index, group: groups[index], selected: index == currentSelectedIndex,
+                                          matchingCount: currentProjection.filter.isActive ? currentProjection.ruleIndices[index].count : nil)
+                    }
+                }
+                .padding(.horizontal, 8).padding(.vertical, 6)
+            }
+            .background(Theme.panel)
+        }
+        .help("拖动右侧分隔条调整分组栏宽度，完整名称也可悬停查看。")
+    }
+
+    @ViewBuilder
+    private var rulePane: some View {
+        if selectedIndex >= 0 {
+            pagedRuleList(groupIndex: selectedIndex)
+        } else {
+            VStack(spacing: 10) {
+                Image(systemName: "line.3.horizontal.decrease.circle").font(.title2)
+                Text("没有匹配的规则").font(.callout)
+                Button("清除筛选") { clearFilters() }.buttonStyle(StudioButtonStyle())
+            }
+            .foregroundStyle(Theme.muted).frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func pagedRuleList(groupIndex: Int) -> some View {
+        let page = projection.page(groupIndex: groupIndex, rules: groups[groupIndex].rules, number: rulePage, pageSize: pageSize)
+        return VStack(spacing: 0) {
+            groupPaneToolbar(groupIndex: groupIndex)
+            Divider().overlay(Theme.border)
+            HStack(spacing: 8) {
+                Text("全局序号").frame(width: 40)
+                Text("匹配类型").frame(width: 104, alignment: .leading)
+                Text("目标域名 / IP").frame(maxWidth: .infinity, alignment: .leading)
+                Text("来源").frame(width: 30)
+                Text("出口").frame(width: 82, alignment: .leading)
+                Color.clear.frame(width: 22, height: 1)
+            }
+            .font(.system(size: 10, weight: .medium)).foregroundStyle(Theme.muted)
+            .padding(.horizontal, 20).padding(.vertical, 7).background(Theme.panelRaised.opacity(0.5))
+            GeometryReader { geometry in
+                List {
+                    ForEach(page.entries) { entry in
+                        ruleRow(number: ruleNumber(groupIndex: groupIndex, ruleIndex: entry.ruleIndex),
+                                rule: $groups[groupIndex].rules[entry.ruleIndex], groupIndex: groupIndex,
+                                targetWidth: max(110, geometry.size.width - 358))
+                            .frame(width: max(0, geometry.size.width - 40))
+                            .listRowSeparator(.visible)
+                            .listRowSeparatorTint(Theme.border)
+                            .listRowBackground(entry.ruleIndex.isMultiple(of: 2) ? Theme.panel.opacity(0.6) : Color.clear)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
+                            .moveDisabled(!page.canDragReorder)
+                    }
+                    .onMove { indices, offset in
+                        guard page.canDragReorder else { return }
+                        let order = flatRules.map(\.id)
+                        groups[groupIndex].rules.move(fromOffsets: indices, toOffset: offset)
+                        ruleOrder = RoutingDraftOrder.replacingSlots(order, with: groups[groupIndex].rules.map(\.id))
+                    }
+                }
+                .listStyle(.plain).scrollContentBackground(.hidden)
+                .environment(\.defaultMinListRowHeight, 34)
+                .scrollIndicators(.visible)
+            }
+            Divider().overlay(Theme.border)
+            HStack(spacing: 8) {
+                Text("\(page.firstRecord)–\(page.lastRecord) / \(page.total) 条")
+                    .font(.caption.monospacedDigit()).foregroundStyle(Theme.muted)
+                Spacer()
+                Picker("每页规则数", selection: $pageSize) {
+                    ForEach([25, 50, 100], id: \.self) { size in Text("\(size) / 页").tag(size) }
+                }
+                .labelsHidden().pickerStyle(.menu).controlSize(.small).frame(width: 88)
+                Button { rulePage = page.number - 1 } label: { Image(systemName: "chevron.left") }
+                    .disabled(page.number == 0).help("上一页规则")
+                Text("\(page.number + 1) / \(page.pageCount)").font(.caption.monospacedDigit())
+                Button { rulePage = page.number + 1 } label: { Image(systemName: "chevron.right") }
+                    .disabled(page.number + 1 >= page.pageCount).help("下一页规则")
+            }
+            .buttonStyle(.borderless).padding(.horizontal, 12).padding(.vertical, 8).background(Theme.panel)
+            .help("分页只改变显示。筛选或多页时，请用规则更多菜单的上移 / 下移调整真实优先级，避免误排隐藏规则。")
+        }
+    }
+
+    private func clearFilters() {
+        ruleSearch = ""; source = "all"; originFilter = "all"; rulePage = 0
     }
 
     // MARK: group header (sidebar + pane)
 
-    private func selectLastGroup() { selectedGroupID = groups.last?.id }
+    private func selectLastGroup() { clearFilters(); selectedGroupID = groups.last?.id }
     private func selectUngrouped() {
+        clearFilters()
         selectedGroupID = groups.first(where: { $0.name.isEmpty })?.id ?? groups.last?.id
     }
 
-    private func groupDirectoryRow(index: Int, group: RuleGroupDraft, selected: Bool) -> some View {
+    private func groupDirectoryRow(index: Int, group: RuleGroupDraft, selected: Bool, matchingCount: Int?) -> some View {
         let summary = groupActionSummary(group)
         let color = summary == "mixed" ? Theme.yellow : actionColor(summary)
         return Button {
-            selectedGroupID = group.id
+            selectedGroupID = group.id; rulePage = 0
         } label: {
             HStack(spacing: 8) {
                 // 左侧优先级色条：选中时高亮，未选中时淡显
@@ -291,7 +371,7 @@ struct RoutingRulesEditor: View {
                         .font(.system(size: 12, weight: selected ? .bold : .semibold))
                         .foregroundStyle(selected ? Color.primary : Color.primary.opacity(0.85))
                         .lineLimit(1)
-                    Text("\(group.rules.count) 条 · \(groupActionLabel(group))")
+                    Text("\(matchingCount.map { "\($0) / " } ?? "")\(group.rules.count) 条 · \(groupActionLabel(group))")
                         .font(.system(size: 9)).foregroundStyle(Theme.muted)
                 }
                 Spacer()
@@ -302,7 +382,7 @@ struct RoutingRulesEditor: View {
             .clipShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
-        .help("优先级 \(index + 1)：组顺序即匹配优先级块")
+        .help("\(group.name.isEmpty ? "未分组" : group.name) · \(group.rules.count) 条规则。按分组显示，实际优先级以规则的全局序号为准")
     }
 
     private func groupActionLabel(_ group: RuleGroupDraft) -> String {
@@ -315,33 +395,34 @@ struct RoutingRulesEditor: View {
         let group = groups[groupIndex]
         let count = group.rules.count
         let first = ruleNumber(groupIndex: groupIndex, ruleIndex: 0)
-        let globalRange = count > 0 ? "全局 #\(first)\(count > 1 ? "–\(first + count - 1)" : "")" : ""
+        let last = count > 0 ? ruleNumber(groupIndex: groupIndex, ruleIndex: count - 1) : first
+        let globalRange = count > 0 ? "全局 #\(first)\(count > 1 ? "–\(last)" : "")\(last - first + 1 != count ? "（交错）" : "")" : ""
         return AnyView(
             HStack(spacing: 10) {
                 TextField("分组名", text: $groups[groupIndex].name)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13, weight: .bold))
-                    .frame(maxWidth: 200)
+                    .frame(minWidth: 90, maxWidth: 200)
                 Text("\(count) 条").font(.caption).foregroundStyle(Theme.muted)
                 if !globalRange.isEmpty {
                     Text(globalRange).font(.caption2).foregroundStyle(Theme.muted.opacity(0.8))
-                        .help("该分组在全局匹配顺序中的位置；组顺序即优先级块")
+                        .help("分组仅用于展示，交错规则保留原有全局顺序。手动移动分组才会调整优先级。")
                 }
                 Spacer()
                 HStack(spacing: 6) {
                     Circle().fill(groupActionSummaryColor(group)).frame(width: 7, height: 7)
-                    StudioSelect(title:"分组动作",selection:groupActionBinding(groupIndex),options:(groupActionSummary(group) == "mixed" ? [("mixed","混合")]:[])+[("proxy","上游代理"),("direct","本机直连"),("reject","拒绝")]).frame(width:130)
+                    StudioSelect(title:"分组动作",selection:groupActionBinding(groupIndex),options:(groupActionSummary(group) == "mixed" ? [("mixed","混合")]:[])+[("proxy","上游代理"),("direct","本机直连"),("reject","拒绝")],compact:true).frame(width:104)
                 }
                 Button {
-                    groups[groupIndex].rules.append(RoutingRule(type: "domain-suffix", value: "", action: dominantAction(groups[groupIndex])))
+                    addRule(to: groupIndex)
                 } label: { Image(systemName: "plus").font(.system(size: 11, weight: .bold)) }
                 .buttonStyle(.plain).foregroundStyle(Theme.cyan).help("向此分组添加规则")
-                Button { guard groupIndex > 0 else { return }; groups.swapAt(groupIndex, groupIndex - 1) } label: {
+                Button { guard groupIndex > 0 else { return }; moveGroupPriority(groupIndex, offset: -1) } label: {
                     Image(systemName: "arrow.up").font(.system(size: 10))
                         .foregroundStyle(groupIndex > 0 ? Theme.muted : Theme.muted.opacity(0.3))
                 }
                 .buttonStyle(.plain).disabled(groupIndex == 0).help("上移分组（提高优先级）")
-                Button { guard groupIndex < groups.count - 1 else { return }; groups.swapAt(groupIndex, groupIndex + 1) } label: {
+                Button { guard groupIndex < groups.count - 1 else { return }; moveGroupPriority(groupIndex, offset: 1) } label: {
                     Image(systemName: "arrow.down").font(.system(size: 10))
                         .foregroundStyle(groupIndex < groups.count - 1 ? Theme.muted : Theme.muted.opacity(0.3))
                 }
@@ -354,7 +435,7 @@ struct RoutingRulesEditor: View {
                 } label: { Image(systemName: "trash").font(.system(size: 11)).foregroundStyle(Theme.coral.opacity(0.8)) }
                 .buttonStyle(.plain).help("删除整个分组及其规则")
             }
-            .padding(.horizontal, 20).padding(.vertical, 10)
+            .padding(.horizontal, 12).padding(.vertical, 8)
             .background(Theme.panel)
         )
     }
@@ -408,14 +489,14 @@ struct RoutingRulesEditor: View {
             .buttonStyle(.plain).help("向此分组添加规则")
             Button {
                 guard groupIndex > 0 else { return }
-                groups.swapAt(groupIndex, groupIndex - 1)
+                moveGroupPriority(groupIndex, offset: -1)
             } label: {
                 Image(systemName: "arrow.up").font(.system(size: 10)).foregroundStyle(groupIndex > 0 ? Theme.muted : Theme.muted.opacity(0.3))
             }
             .buttonStyle(.plain).disabled(groupIndex == 0).help("上移分组（提高优先级）")
             Button {
                 guard groupIndex < groups.count - 1 else { return }
-                groups.swapAt(groupIndex, groupIndex + 1)
+                moveGroupPriority(groupIndex, offset: 1)
             } label: {
                 Image(systemName: "arrow.down").font(.system(size: 10)).foregroundStyle(groupIndex < groups.count - 1 ? Theme.muted : Theme.muted.opacity(0.3))
             }
@@ -433,29 +514,31 @@ struct RoutingRulesEditor: View {
     // MARK: rule row
 
     @ViewBuilder
-    private func ruleRow(number: Int, rule: Binding<RoutingRule>, groupIndex: Int) -> some View {
-        HStack(spacing: 10) {
+    private func ruleRow(number: Int, rule: Binding<RoutingRule>, groupIndex: Int, targetWidth: CGFloat) -> some View {
+        HStack(spacing: 8) {
             Text("\(number)")
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundStyle(Theme.muted)
-                .frame(width: 22, height: 20)
-                .background(Theme.panelRaised)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-            StudioSelect(title:"匹配类型",selection:rule.type,options:[("domain","完整域名"),("domain-suffix","域名后缀"),("ip-cidr","IP-CIDR"),("src-ip","设备 IP")]).frame(width:120)
+                .frame(width: 40)
+                .help("全局优先级 #\(number)，不是当前页的行号")
+            StudioSelect(title:"匹配类型",selection:rule.type,options:[("domain","完整域名"),("domain-suffix","域名后缀"),("ip-cidr","IP-CIDR"),("src-ip","设备 IP")],compact:true).frame(width:104)
             TextField(placeholder(for: rule.wrappedValue.type), text: rule.value)
-                .textFieldStyle(DarkFieldStyle())
+                .textFieldStyle(.plain)
                 .font(.system(size: 12, design: .monospaced))
-            if rule.wrappedValue.learned {
-                Text("学习")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(Theme.yellow)
-                    .padding(.horizontal, 5).padding(.vertical, 2)
-                    .background(Theme.yellow.opacity(0.14))
-                    .clipShape(Capsule())
-                    .help("根据收到的有效响应自动学习；明确规则优先，可随时删除")
-            }
+                .padding(.horizontal, 7).frame(width: targetWidth, height: 26)
+                .background(Theme.panelRaised.opacity(0.5)).clipShape(RoundedRectangle(cornerRadius: 4))
+                .help(rule.wrappedValue.value)
+            Text(rule.wrappedValue.learned ? "学习" : "手动")
+                .font(.system(size: 9)).foregroundStyle(rule.wrappedValue.learned ? Theme.yellow : Theme.muted)
+                .frame(width: 30)
+                .help(rule.wrappedValue.learned ? "自动学习规则，保留原有动作与匹配范围" : "明确配置的手动规则")
             actionPill(rule.action)
             Menu {
+                Button("上移一条（提高优先级）") { moveRulePriority(rule.wrappedValue.id, in: groupIndex, offset: -1) }
+                    .disabled(groups[groupIndex].rules.first?.id == rule.wrappedValue.id)
+                Button("下移一条（降低优先级）") { moveRulePriority(rule.wrappedValue.id, in: groupIndex, offset: 1) }
+                    .disabled(groups[groupIndex].rules.last?.id == rule.wrappedValue.id)
+                Divider()
                 Section("移动到分组") {
                     ForEach(Array(groups.enumerated()), id: \.element.id) { targetIndex, target in
                         if targetIndex != groupIndex {
@@ -479,27 +562,47 @@ struct RoutingRulesEditor: View {
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
-            .help("更多操作：移动到分组或删除")
+            .help("更多操作：调整优先级、移动到分组或删除")
         }
-        .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(Theme.panel)
-        .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(Theme.border, lineWidth: 0.8))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.radius))
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
     private func actionPill(_ action: Binding<String>) -> some View {
         let value = action.wrappedValue
         let color = actionColor(value)
-        StudioSelect(title:"规则出口",selection:action,options:[("proxy","代理"),("direct","直连"),("reject","拒绝")])
-            .frame(width:100).foregroundStyle(color)
+        StudioSelect(title:"规则出口",selection:action,options:[("proxy","代理"),("direct","直连"),("reject","拒绝")],compact:true)
+            .frame(width:82).foregroundStyle(color)
         .help("选择该规则的出口动作")
     }
 
     // MARK: group helpers
 
+    private func addRule(to groupIndex: Int) {
+        guard groups.indices.contains(groupIndex) else { return }
+        groups[groupIndex].rules.append(RoutingRule(type: "domain-suffix", value: "", action: dominantAction(groups[groupIndex])))
+        clearFilters()
+        selectedGroupID = groups[groupIndex].id
+        rulePage = (groups[groupIndex].rules.count - 1) / pageSize
+    }
+
+    private func moveRulePriority(_ id: UUID, in groupIndex: Int, offset: Int) {
+        guard groups.indices.contains(groupIndex),
+              let index = groups[groupIndex].rules.firstIndex(where: { $0.id == id }),
+              groups[groupIndex].rules.indices.contains(index + offset) else { return }
+        let order = flatRules.map(\.id)
+        groups[groupIndex].rules.swapAt(index, index + offset)
+        ruleOrder = RoutingDraftOrder.replacingSlots(order, with: groups[groupIndex].rules.map(\.id))
+        if let position = projection.ruleIndices[groupIndex].firstIndex(of: index + offset) {
+            rulePage = position / pageSize
+        }
+    }
+
     private func ruleNumber(groupIndex: Int, ruleIndex: Int) -> Int {
-        groups.prefix(groupIndex).reduce(0) { $0 + $1.rules.count } + ruleIndex + 1
+        guard groups.indices.contains(groupIndex), groups[groupIndex].rules.indices.contains(ruleIndex) else { return 0 }
+        let id = groups[groupIndex].rules[ruleIndex].id
+        return (flatRules.firstIndex(where: { $0.id == id }) ?? 0) + 1
     }
 
     private func groupActionSummary(_ group: RuleGroupDraft) -> String {
@@ -533,8 +636,7 @@ struct RoutingRulesEditor: View {
     }
 
     private func addPreset(_ preset: RuleGroupPreset) {
-        let existing = Set(flatRules.map { "\($0.type)|\($0.value.lowercased())" })
-        let newRules = preset.rules.filter { !existing.contains("\($0.type)|\($0.value.lowercased())") }
+        let newRules = RoutingPresetInsertion.rules(preset.rules, excluding: flatRules)
         guard !newRules.isEmpty else { return }
         if let index = groups.firstIndex(where: { $0.name == preset.name }) {
             groups[index].rules.append(contentsOf: newRules)
@@ -566,9 +668,12 @@ struct RoutingRulesEditor: View {
     private func moveRule(_ id: UUID, from sourceIndex: Int, to targetIndex: Int) {
         guard groups.indices.contains(sourceIndex), groups.indices.contains(targetIndex),
               let ruleIndex = groups[sourceIndex].rules.firstIndex(where: { $0.id == id }) else { return }
+        let order = flatRules.map(\.id)
         let rule = groups[sourceIndex].rules.remove(at: ruleIndex)
         groups[targetIndex].rules.append(rule)
         groups[targetIndex].collapsed = false
+        ruleOrder = order
+        groups[targetIndex].rules = RoutingDraftOrder.rules(groups[targetIndex].rules, order: order)
         if groups[sourceIndex].rules.isEmpty && groups[sourceIndex].name.isEmpty {
             groups.remove(at: sourceIndex)
         }
@@ -577,6 +682,7 @@ struct RoutingRulesEditor: View {
     private func moveRuleToNewGroup(_ id: UUID, from sourceIndex: Int) {
         guard groups.indices.contains(sourceIndex),
               let ruleIndex = groups[sourceIndex].rules.firstIndex(where: { $0.id == id }) else { return }
+        let order = flatRules.map(\.id)
         let rule = groups[sourceIndex].rules.remove(at: ruleIndex)
         var name = "新分组"
         var counter = 2
@@ -585,6 +691,7 @@ struct RoutingRulesEditor: View {
             counter += 1
         }
         groups.append(RuleGroupDraft(name: name, rules: [rule]))
+        ruleOrder = order
         if groups[sourceIndex].rules.isEmpty && groups[sourceIndex].name.isEmpty {
             groups.remove(at: sourceIndex)
         }
@@ -617,35 +724,106 @@ struct RoutingRulesEditor: View {
 
     // MARK: save / text sync
 
+    private func replaceDraft(_ rules: [RoutingRule]) {
+        let selectedName = selectedIndex >= 0 ? groups[selectedIndex].name : nil
+        let existing = groups
+        groups = makeGroupDrafts(rules).map { group in
+            var copy = group
+            if let old = existing.first(where: { $0.name == group.name }) { copy.id = old.id }
+            return copy
+        }
+        ruleOrder = rules.map(\.id)
+        if let selectedName { selectedGroupID = groups.first(where: { $0.name == selectedName })?.id }
+        text = serializeRuleLines(rules)
+    }
+
     private func loadLatest(_ rules: [RoutingRule]) {
         baselineRules = rules
-        groups = makeGroupDrafts(rules)
-        text = serializeRuleLines(rules)
-        configurationConflict = false; saveError = nil; parseNote = nil
+        replaceDraft(rules)
+        configurationConflict = false; saveError = nil; parseNote = nil; syncNotice = nil
+        externalChanges = []
+    }
+
+    private func currentDraft() -> [RoutingRule]? {
+        if editorMode != "text" { return flatRules }
+        let parsed = parseRuleLines(text)
+        guard parsed.skipped.isEmpty else { return nil }
+        return RoutingRuleComparison.aligned(parsed.rules, to: flatRules)
+    }
+
+    private func receiveLatest(_ latest: [RoutingRule]) {
+        guard !RoutingRuleComparison.same(baselineRules, latest) else { return }
+        externalChanges = RoutingRuleComparison.changes(from: baselineRules, to: latest)
+        guard let draft = currentDraft() else {
+            syncNotice = "检测到外部更新。请先修正文本格式，再查看差异；草稿已保留。"
+            return
+        }
+        let merge = RoutingRuleMerge(baseline: baselineRules, local: draft, latest: latest)
+        configurationConflict = merge.needsResolution
+        if merge.needsResolution {
+            syncNotice = "有 \(merge.conflicts.count + (merge.orderConflict ? 1 : 0)) 处冲突。点击“查看差异并处理”选择版本，草稿已保留。"
+        } else if editorMode == "text" {
+            syncNotice = "检测到 \(externalChanges.count) 条外部变更，可查看差异；应用时会合并并保留你的修改。"
+        } else if let merged = merge.resolved() {
+            baselineRules = merge.latest
+            replaceDraft(merged)
+            syncNotice = "已同步 \(externalChanges.count) 条外部变更，你的未应用修改已保留。"
+        }
+    }
+
+    private func openReview() {
+        guard let draft = currentDraft() else { _ = syncTextToDraft(); return }
+        let latest = model.status?.routing ?? baselineRules
+        let hasExternal = !RoutingRuleComparison.same(baselineRules, latest)
+        review = RoutingReview(localChanges: RoutingRuleComparison.changes(from: baselineRules, to: draft),
+            externalChanges: hasExternal ? RoutingRuleComparison.changes(from: baselineRules, to: latest) : externalChanges,
+            merge: hasExternal ? RoutingRuleMerge(baseline: baselineRules, local: draft, latest: latest) : nil)
+    }
+
+    private func moveGroupPriority(_ index: Int, offset: Int) {
+        let target = index + offset
+        guard groups.indices.contains(index), groups.indices.contains(target) else { return }
+        let current = flatRules.map(\.id)
+        let moved = groups[index].rules.map(\.id)
+        let members = Set(moved), anchors = Set(groups[target].rules.map(\.id))
+        var order = current.filter { !members.contains($0) }
+        let position = offset < 0 ? order.firstIndex(where: { anchors.contains($0) }) : order.lastIndex(where: { anchors.contains($0) }).map { $0 + 1 }
+        order.insert(contentsOf: moved, at: position ?? order.count)
+        ruleOrder = order
+        groups.swapAt(index, target)
     }
 
     private func save() {
-        guard let status = model.status else {
-            saveError = "当前配置不可用，请刷新后重试。"; return
-        }
-        let latest = status.routing ?? []
-        guard NetworkRuleRevision.signature(latest) == NetworkRuleRevision.signature(baselineRules) else {
-            configurationConflict = true
-            saveError = "规则已更新，请撤销修改后重新编辑。"; return
-        }
         if editorMode == "text", !syncTextToDraft() { return }
-        saveError = nil
-        isSaving = true
-        let rules = flattenGroups(groups)
+        let draft = flatRules
+        saveError = nil; isSaving = true
         Task {
-            let ok = await model.applyRoutingRules(rules)
-            isSaving = false
-            if ok {
-                loadLatest(model.status?.routing ?? rules)
-                if !embedded { dismiss() }
-            } else {
-                saveError = model.errorMessage ?? "保存失败，请检查规则"
-            }
+            defer { isSaving = false }
+            do {
+                // Re-read immediately before writing, including learning updates
+                // that arrived since the last UI refresh.
+                let fresh = try await model.client.status()
+                guard let latest = fresh.routing else { throw GatewayClientError.invalidOutput("无法读取最新规则") }
+                let merge = RoutingRuleMerge(baseline: baselineRules, local: draft, latest: latest)
+                guard let rules = merge.resolved() else {
+                    configurationConflict = true
+                    syncNotice = "保存前发现新的冲突，请选择要保留的版本。"
+                    review = RoutingReview(localChanges: RoutingRuleComparison.changes(from: baselineRules, to: draft),
+                        externalChanges: RoutingRuleComparison.changes(from: baselineRules, to: latest), merge: merge)
+                    return
+                }
+                baselineRules = merge.latest
+                replaceDraft(rules)
+                let ok = await model.applyRoutingRules(rules, expected: merge.latest)
+                if ok {
+                    loadLatest(model.status?.routing ?? rules)
+                    if !embedded { dismiss() }
+                } else {
+                    saveError = model.errorMessage ?? "保存失败，请检查规则"
+                    await model.refresh(silent: true)
+                    if let current = model.status?.routing { receiveLatest(current) }
+                }
+            } catch { saveError = "保存失败：\(error.localizedDescription)" }
         }
     }
 
@@ -677,7 +855,9 @@ struct RoutingRulesEditor: View {
             saveError = parseNote
             return false
         }
-        groups = makeGroupDrafts(result.rules)
+        let rules = RoutingRuleComparison.aligned(result.rules, to: flatRules)
+        groups = makeGroupDrafts(rules)
+        ruleOrder = rules.map(\.id)
         parseNote = nil; saveError = nil
         return true
     }

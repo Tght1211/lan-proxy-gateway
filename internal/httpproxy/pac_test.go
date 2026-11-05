@@ -14,7 +14,7 @@ func TestPACBootstrapAndAuthentication(t *testing.T) {
 	s := New(func(context.Context, string, string) (net.Conn, error) {
 		t.Fatal("PAC must not dial upstream")
 		return nil, fmt.Errorf("unexpected dial")
-	}, Credentials{"user", "secret"})
+	}, Credentials{Username: "user", Password: "secret"})
 	for _, host := range []string{"192.168.12.100:17890", "vipvip.xiaomiqiu.com:31991", "[::1]:17890"} {
 		r := httptest.NewRequest("GET", "/proxy.pac", nil)
 		r.Host = host

@@ -8,6 +8,7 @@ import (
 	"github.com/tght/lan-proxy-gateway/internal/config"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -75,27 +76,19 @@ func (a *App) applyLearningAction(l *fallbackLearner, action, host string) error
 		}
 		l.saveLocked()
 	case "undo":
-		a.cfgMu.Lock()
-		next := *a.Cfg
-		next.Routing.Rules = make([]config.RoutingRule, 0, len(a.Cfg.Routing.Rules))
-		removed := false
-		for _, rule := range a.Cfg.Routing.Rules {
-			if rule.Learned && rule.Value == host {
-				removed = true
-				continue
+		_, err := a.updateConfig(func(next *config.Config) (bool, error) {
+			before := len(next.Routing.Rules)
+			next.Routing.Rules = slices.DeleteFunc(next.Routing.Rules, func(rule config.RoutingRule) bool {
+				return rule.Learned && rule.Value == host
+			})
+			if len(next.Routing.Rules) == before {
+				return false, fmt.Errorf("该学习规则已不存在")
 			}
-			next.Routing.Rules = append(next.Routing.Rules, rule)
-		}
-		if !removed {
-			a.cfgMu.Unlock()
-			return fmt.Errorf("该学习规则已不存在")
-		}
-		if err := config.Save(&next, a.Paths.ConfigFile); err != nil {
-			a.cfgMu.Unlock()
+			return true, nil
+		})
+		if err != nil {
 			return err
 		}
-		a.Cfg = &next
-		a.cfgMu.Unlock()
 		l.ignored[host] = true
 		delete(l.counts, host)
 		l.saveLocked()

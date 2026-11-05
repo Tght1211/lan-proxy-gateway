@@ -145,17 +145,32 @@ struct GatewayClient {
         try await output(arguments: ["learning", action, host], privileged: false)
     }
 
-    func setRoutingRules(_ rules: [RoutingRule]) async throws -> String {
+    func setRoutingRules(_ rules: [RoutingRule], expected: [RoutingRule]? = nil) async throws -> String {
         let data = try JSONEncoder().encode(rules)
         guard let json = String(data: data, encoding: .utf8) else {
             throw GatewayClientError.invalidOutput("无法编码分流规则")
         }
-        return try await output(arguments: ["routing", "set", "--rules-json", json], privileged: false)
+        var arguments = ["routing", "set", "--rules-json", json]
+        if let expected {
+            let baseline = try JSONEncoder().encode(expected)
+            arguments += ["--expected-rules-json", String(decoding: baseline, as: UTF8.self)]
+        }
+        return try await output(arguments: arguments, privileged: false)
     }
 
-    func setLANHTTPProxy(enabled: Bool, port: Int, auth: String, username: String, password: String?) async throws -> String {
+    func setConnectionRoutingRule(_ shortcut: ConnectionRoutingShortcut, action: ConnectionRouteAction) async throws -> String {
+        try await shortcut.save(action: action, readRules: {
+            guard let rules = try await self.status().routing else { throw ConnectionRoutingError.unavailable }
+            return rules
+        }, writeRules: { rules in
+            _ = try await self.setRoutingRules(rules)
+        })
+        return "已保存精确域名规则"
+    }
+
+    func setLANHTTPProxy(enabled: Bool, port: Int, auth: String, username: String, password: String?, authBypassIPs: [String]) async throws -> String {
         guard let engineURL else { throw GatewayClientError.engineNotFound }
-        var config: [String: Any] = ["enabled": enabled, "port": port, "auth": auth, "username": username]
+        var config: [String: Any] = ["enabled": enabled, "port": port, "auth": auth, "username": username, "auth_bypass_ips": authBypassIPs]
         if let password { config["password"] = password }
         let input = try JSONSerialization.data(withJSONObject: config)
         return try await runProcess(executable: engineURL, arguments: ["http-proxy", "set"], input: input).text
@@ -200,17 +215,26 @@ struct GatewayClient {
         try await output(arguments: ["service", "status"], privileged: false)
     }
 
-    func installCLI() async throws -> String {
+    func updateBundledCore(restart: Bool) async throws -> String {
+        if restart {
+            let service = try await serviceStatus()
+            if service == "运行中" || service == "已加载" { return try await restartInstalledCore() }
+        }
+        return try await installCLI(restart: restart)
+    }
+
+    func installCLI(restart: Bool = false) async throws -> String {
         guard let source = bundledEngineURL,
               FileManager.default.isExecutableFile(atPath: source.path) else {
             throw GatewayClientError.engineNotFound
         }
-        let command = [
+        var commands = [
             "/bin/mkdir -p /usr/local/bin",
             "/bin/cp \(shellQuote(source.path)) /usr/local/bin/gateway",
             "/bin/chmod 755 /usr/local/bin/gateway"
-        ].joined(separator: " && ")
-        return try await runPrivilegedShell(command).text
+        ]
+        if restart { commands.append("/usr/bin/env \(privilegedEnvironment()) /usr/local/bin/gateway restart") }
+        return try await runPrivilegedShell(commands.joined(separator: " && ")).text
     }
 
     func natDiag(apiPort: Int, configFile: String) async throws -> NATDiagResult {
@@ -242,7 +266,7 @@ struct GatewayClient {
         return try await runProcess(executable: engineURL, arguments: arguments)
     }
 
-    private func runPrivilegedShell(_ command: String) async throws -> CommandResult {
+    func runPrivilegedShell(_ command: String) async throws -> CommandResult {
         let escaped = command
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
@@ -279,7 +303,7 @@ struct GatewayClient {
             guard process.terminationStatus == 0 else {
                 let message = String(decoding: errorData.isEmpty ? outputData : errorData, as: UTF8.self)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                throw GatewayClientError.commandFailed(message.isEmpty ? "gateway 命令执行失败。" : message)
+                throw GatewayClientError.commandFailed(message.isEmpty ? "\(executable.lastPathComponent) 执行失败（退出码 \(process.terminationStatus)）。" : message)
             }
             return CommandResult(data: outputData)
         }.value

@@ -36,6 +36,10 @@ const (
 
 // Config is the root of gateway.yaml.
 type Config struct {
+	// Disk revision follows value copies, but is never serialized.
+	sourcePath string
+	sourceHash [32]byte
+
 	HTTPProxy    HTTPProxyConfig    `yaml:"http_proxy"`
 	Version      int                `yaml:"version"`
 	Gateway      GatewayConfig      `yaml:"gateway"`
@@ -106,11 +110,12 @@ type ProxyConfig struct {
 // HTTPProxyConfig exposes an explicit HTTP/HTTPS proxy to LAN clients.
 // This authentication is separate from the upstream proxy credentials.
 type HTTPProxyConfig struct {
-	Enabled  bool   `yaml:"enabled" json:"enabled"`
-	Port     int    `yaml:"port" json:"port"`
-	Auth     string `yaml:"auth" json:"auth"` // none | basic
-	Username string `yaml:"username,omitempty" json:"username"`
-	Password string `yaml:"password,omitempty" json:"password"`
+	Enabled       bool     `yaml:"enabled" json:"enabled"`
+	Port          int      `yaml:"port" json:"port"`
+	Auth          string   `yaml:"auth" json:"auth"` // none | basic
+	Username      string   `yaml:"username,omitempty" json:"username"`
+	Password      string   `yaml:"password,omitempty" json:"password"`
+	AuthBypassIPs []string `yaml:"auth_bypass_ips,omitempty" json:"auth_bypass_ips,omitempty"`
 }
 
 // DNSConfig controls the LAN DNS service.

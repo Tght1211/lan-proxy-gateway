@@ -48,6 +48,20 @@ enum NetworkRuleRevision {
     }
 }
 
+struct NetworkTopologyDevices {
+    let devices: [UsageAggregate]
+    let inactiveDevices: [UsageAggregate]
+    var hasInactiveGroup: Bool { inactiveDevices.count > 1 }
+    var nodeCount: Int { devices.count + (hasInactiveGroup ? 1 : 0) }
+
+    init(_ devices: [UsageAggregate], inactive: Set<String>, expanded: Bool = false) {
+        let ordered = NetworkTopologyLayout.orderedDevices(devices, inactive: inactive)
+        inactiveDevices = ordered.filter { inactive.contains($0.name) }
+        self.devices = inactiveDevices.count > 1 && !expanded
+            ? ordered.filter { !inactive.contains($0.name) } : ordered
+    }
+}
+
 enum NetworkTopologyLayout {
     static let topInset: Double = 64
     static let bottomInset: Double = 82
