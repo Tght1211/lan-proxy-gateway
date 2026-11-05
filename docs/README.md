@@ -2,42 +2,40 @@
 
 [返回项目首页](../README.md)
 
-## 第一次使用
+**第一次使用只需要一份文档：[完整图文使用手册](user-guide.md)。** 按安装、代理配置、设备接入、验证的顺序走，不必先读命令行或架构。
 
-1. 按 [设备接入总览](device-setup.md) 理解需要填写的网络参数。
-2. 根据设备选择教程：[手机 / 平板](phone-setup.md)、[Nintendo Switch](switch-setup.md)、[PS5](ps5-setup.md)、[Apple TV](appletv-setup.md) 或 [智能电视](tv-setup.md)。
-3. 遇到问题先看 [常见问题](faq.md)，再用 `gateway status` 和运行日志定位。
+## 从这里开始
 
-也可以把 [AI 配置提示词](ai-setup.md) 交给能够操作本机终端的 Codex、Claude Code 等工具，完成电脑端的检查、安装和启动。安装后的日常运维、监控和诊断见 [外部 Agent Skill](agent-skill.md)。
-
-## 使用指南
-
-| 文档 | 内容 |
+| 你的问题 | 文档 |
 |---|---|
-| [macOS App](app.md) | 页面功能、数据与隐私、安装和本机构建 |
-| [外部 Agent Skill](agent-skill.md) | Skill 导出、安装、CLI 控制与运行快照 |
-| [命令说明](commands.md) | 生命周期、系统代理、开机自启和更新命令 |
-| [外部 Agent Skill](agent-skill.md) | 面向 AI agent 的全功能操作参考，也可作为人类速查手册 |
-| [配置文件](advanced.md) | `gateway.yaml`、fake-IP 缓存和常见上游 |
-| [典型场景](scenarios.md) | 同机代理、直连网关、远程上游和排错清单 |
-| [实机结果](real-device-results.md) | 手机与 Switch 的实际测速和访问效果 |
+| Release 附件太多，不知道选哪个 | [下载与安装包对照表](download.md) |
+| 刚装好，想接通第一台设备 | [完整使用手册](user-guide.md) |
+| Mac 有网线，想给手机 / 游戏机开热点 | [热点路线](user-guide.md#wifi) |
+| 不想建热点，只给浏览器或手机配置代理 | [HTTP 代理](user-guide.md#http) / [PAC](user-guide.md#pac) |
+| 想在原来的网络里设置静态网关 | [静态网关路线](user-guide.md#static) |
+| 已连接但打不开网页 / 商店 / 游戏 | [常见问题](faq.md) |
+| 想更新、停用或卸载 | [更新](user-guide.md#update) / [停止与恢复](user-guide.md#stop) |
+| Linux 或纯命令行用户 | [CLI 安装](download.md#linux) |
 
-## 项目说明
+## 按设备查设置菜单
 
-| 文档 | 内容 |
+这些页面补充设备端的菜单路径。先在主手册选好一种接入方式，再看对应设备；不要同时套用热点自动获取和静态地址教程。
+
+[手机 / 平板](phone-setup.md) · [Switch](switch-setup.md) · [PS5](ps5-setup.md) · [Apple TV](appletv-setup.md) · [电视 / 盒子](tv-setup.md)
+
+## 进阶与参考
+
+| 文档 | 用途 |
 |---|---|
-| [架构](architecture.md) | DNS、透明 TCP relay、防火墙和系统代理 |
-| [从 v3 升级](migration-v4.md) | 破坏性变化、备份与迁移步骤 |
-| [Changelog](../CHANGELOG.md) | 各版本新增功能与修复 |
-| [示例配置](../gateway.example.yaml) | 完整的 v4 配置字段 |
+| [App 功能参考](app.md) | 页面职责、统计口径、运行机制和本机构建 |
+| [热点详细说明](hotspot-setup.md) | 信道建议、系统共享、检测与接管边界 |
+| [设备接入对照](device-setup.md) | 三类接入的参数差别 |
+| [命令行](commands.md) | 状态、启停、出口、系统服务和更新 |
+| [外部 Agent Skill](agent-skill.md) | 导出、安装和使用本机 AI Agent |
+| [配置文件](advanced.md) | `gateway.yaml` 和高级设置 |
+| [架构](architecture.md) | DNS、转发、防火墙与控制面 |
+| [从 v3 升级](migration-v4.md) | 历史版本迁移 |
+| [实机结果](real-device-results.md) | 历史测试记录，不作为当前网络效果保证 |
+| [更新记录](../CHANGELOG.md) | 源码中的版本记录；已发布版本以 Release 为准 |
 
-## 支持范围
-
-- 宿主系统：macOS、Linux（amd64 / arm64）。
-- 透明转发：IPv4 TCP；HTTP CONNECT 或 SOCKS5 上游。
-- 平台网络：macOS `pf`、Linux `iptables`。
-- 不支持：Windows、Docker、普通路由器/OpenWrt、IPv6 透明代理、通用 UDP 代理和 TUN 模式。
-
-项目不提供代理节点、订阅或流媒体解锁。复杂节点选择与规则集应继续交给 Clash、Mihomo 或 sing-box。
-
-- [Switch / PS5 代理 Wi-Fi 接入（有线 Mac）](hotspot-setup.md)：自动分配地址、首次系统共享设置、停止与排错。
+软件运行在 macOS / 完整 Linux 上。它共享已有 HTTP/SOCKS5 代理，不提供节点、订阅或通用 UDP 代理。图形 App 要求 macOS 13+；完整附件适用范围见 [下载表](download.md)。

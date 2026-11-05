@@ -1,113 +1,84 @@
 # LAN Proxy Gateway
 
 [![Release](https://img.shields.io/github/v/release/Tght1211/lan-proxy-gateway)](https://github.com/Tght1211/lan-proxy-gateway/releases/latest)
-[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev/)
 [![License](https://img.shields.io/github/license/Tght1211/lan-proxy-gateway)](LICENSE)
 
-**Share your existing proxy with LAN devices.** An Ethernet-connected Mac can provide proxy Wi-Fi for a PS5, Switch, Apple TV or phone. Mac / Linux also support a manual gateway; proxy-aware clients can use HTTP / PAC.
+**Share an existing proxy on your computer with phones, TVs, and game consoles.**
 
-[Download](https://github.com/Tght1211/lan-proxy-gateway/releases/latest) · [中文](README.md) · [Documentation](docs/README.md)
+Configure your upstream in the Mac app, connect a device to the Mac's Wi-Fi hotspot, and manage routing and traffic in one place. Client devices do not install this project.
 
-> No proxy nodes or subscriptions are provided. Bring an existing Clash, Mihomo, sing-box or HTTP/SOCKS5 endpoint. Availability depends on your upstream and the destination.
+**[Download](https://github.com/Tght1211/lan-proxy-gateway/releases/latest) · [Illustrated manual (Chinese)](docs/user-guide.md) · [中文](README.md)**
 
-## Application
+![Live network overview showing devices, access methods, rules, and exits](docs/images/manual/01-overview.png)
 
-![Network overview: devices, quarterly proxy/direct traffic, throughput, exit health and topology](docs/images/app-network-overview.png)
+## What you need
 
-Scroll from key metrics to the topology and compact exit cards (up to three columns). Exits no longer have a separate menu. Quarterly traffic separates recorded proxy/direct usage; global health summarizes observed exits, with per-exit details below.
+- A Mac or full Linux computer that stays powered on and connected. macOS has a graphical app; Linux uses the CLI.
+- A working HTTP/SOCKS5 upstream, such as the local proxy port exposed by Clash, Mihomo, or sing-box. This project does not provide nodes or subscriptions.
+- For the recommended hotspot route: an Ethernet-connected Mac with Wi-Fi available for sharing.
 
-v4.5.2 independently probes Baidu over the host's direct connection and records its own history. Topology icons and text are both clickable. Rules use one all / proxy / direct / reject filter instead of asset perspectives. Restart the core after upgrading to enable independent direct probes.
+## Choose the right download
 
-<details>
-<summary>More running screenshots: exit cards, traffic and classified learning</summary>
-<p align="center">
-  <img src="docs/images/app-network-exits.png" alt="Compact exit cards below the topology" width="49%">
-  <img src="docs/images/app-access-log.png" alt="Traffic records and outcome filters" width="49%">
-</p>
-<p align="center"><img src="docs/images/app-learning.png" alt="Learning status, service, route, scope and pagination" width="65%"></p>
-</details>
+Open the latest Release and expand **Assets**. Choose for the **computer running the gateway**, not for the phone or console.
 
-Captured from the current running application. Addresses, visited domains and local paths are redacted; metrics are not fabricated demo values.
-
-## Features
-
-- **Three access options:** macOS Internet Sharing hotspot, manual gateway, or HTTP proxy / PAC. Preserve the Mac's system proxy and DNS.
-- **Routing:** device policy takes precedence; exact domains, domain suffixes and IP-CIDR rules select proxy, direct or reject.
-- **Automatic proxy learning:** unmatched targets try direct first, then the proxy on eligible dial/initial-response failures. Only observed proxy response data adds evidence. Save automatically or review manually at the configured threshold; explicit rules and deny-direct protections take precedence.
-- **Large learning lists:** distinguish pending, saved and paused records; combine service, route, scope and text filters with 50-row pages. Legacy direct rules stay identifiable. Pausing learning does not block traffic.
-- **Usage and diagnosis:** daily recorded device, ingress, destination and actual-exit totals, plus live connections, failures and exit health.
-- **External AI Agents:** export a Skill for CLI-based diagnosis and authorized control. No in-app model or API key is required.
-
-## Quick start
-
-### 1. Install and choose an upstream
-
-On macOS, download the [DMG from Releases](https://github.com/Tght1211/lan-proxy-gateway/releases/latest) and drag the app into Applications. Configure your existing upstream's actual type, address and port in Network Overview. The LAN HTTP sharing port is not the upstream port.
-
-CLI installation on macOS / Linux:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Tght1211/lan-proxy-gateway/main/install.sh | bash
-sudo gateway install
-```
-
-### 2. Choose access
-
-| Method | Host requirements | Client setup |
+| Device / purpose | Download | Installation |
 |---|---|---|
-| **Wi-Fi hotspot** | Ethernet-connected Mac; enable Internet Sharing in macOS, then hotspot takeover in the app | Join the hotspot, keep IP/gateway/DNS automatic; no client proxy app |
-| **Manual gateway** | Mac / Linux on the same LAN | Choose an unused static IP in the actual subnet; point gateway and DNS to the host |
-| **HTTP / PAC** | Enable the app's LAN HTTP listener and save port/authentication | Set server/port manually or use its `proxy.pac` URL; no gateway/DNS change |
+| **Mac, graphical app (recommended)** | **`LANProxyGateway-vVERSION-macos-universal.dmg`** | macOS 13+; both Apple Silicon and Intel. Drag the app into Applications |
+| Linux, Intel / AMD 64-bit | `gateway-linux-amd64.tar.gz` | CLI; see the [installation guide](docs/download.md#linux) |
+| Linux, ARM 64-bit | `gateway-linux-arm64.tar.gz` | CLI; verify the OS architecture with `uname -m` |
+| Phone, tablet, PS5, Switch, Apple TV, TV | **No download** | Connect to the configured gateway network |
+| Windows as the gateway host | Not available | Windows hosting is currently unsupported |
 
-[Hotspot guide](docs/hotspot-setup.md) · [Device guides](docs/device-setup.md) · [HTTP / PAC](docs/app.md#局域网-http-代理接入)
+Mac CLI users can choose `gateway-darwin-arm64` or `gateway-darwin-amd64`, with or without `.tar.gz`. `darwin` means macOS; `amd64` also covers Intel x86-64. Download either the archive or the executable, not both. The optional Skill ZIP is for AI agents; Source code is for developers; SHA256SUMS is a checksum list.
 
-Hotspot/manual-gateway mode changes need a core restart, which interrupts existing connections. Firewall and system-service operations may require OS administrator authorization.
+## Connect your first device
 
-### 3. Inspect and adjust
+For **Ethernet-connected Mac → Wi-Fi hotspot → client device**:
 
-Use Network Overview for topology/exits, Device Access for usage, Traffic Records for connections and learning, Routing Rules for policy, and Settings for access, CLI, Agent and runtime options. Visited pages retain filters and scroll position when switching.
+1. **Install.** Open the universal DMG, drag LAN Proxy Gateway to Applications, and launch it there. If stopped, use the top-right **… → 启动核心** (Start core). Complete the administrator prompt when needed.
+2. **Configure the upstream.** In **网络总览** (Overview), choose **编辑代理源** (Edit proxy source). Enter the actual protocol, host, and port from your proxy software. Test, then apply. `127.0.0.1:7897` is only an example.
+3. **Create and take over the hotspot.** Open **设备接入 → Wi-Fi 热点 · 推荐 → 设置 Wi-Fi 与连接设备**. In macOS Internet Sharing, share Ethernet over Wi-Fi, configure the Wi-Fi options, and enable sharing. Return to the app and enable hotspot takeover.
+4. **Connect and verify.** Join the new Wi-Fi network on the client. Keep IP and DNS automatic and client proxy settings off. Open a website or store, then check that the device produces new entries in **流量记录** (Connections).
 
-## Control with an AI Agent
+![Device access screen and Wi-Fi setup entry](docs/images/manual/03-devices.png)
 
-Export the Skill ZIP from **Settings → CLI and Agent (设置 → CLI 与 Agent)**, then give it and the copied installation prompt to a Skill-capable agent such as Codex with command access on the gateway host. Install the entire `lan-proxy-gateway/` directory. Re-export and update the installed copy after application upgrades.
+The app's Wi-Fi name/password fields are a **memo**. Actual hotspot settings must be entered in macOS Internet Sharing. “Takeover enabled” confirms the core applied its rules; verify the website or game on the client as well.
 
-The Skill includes a read-only summary and classified pagination helper so thousands of rules need not fill the conversation. The management API remains local and independently authenticated. Agents inspect first and change only within user authorization; they must not silently restart the core or expose remote management.
+The screenshots show an already configured installation, not a clean first launch. Addresses, ports, and counters are examples. [Capture notes](docs/images/manual/README.md).
 
-[Installation and command reference](docs/agent-skill.md)
+## Other access methods
 
-## Limits and accounting
+Choose one route for initial setup; do not combine their client instructions.
 
-- **One HTTP/SOCKS5 upstream** is configured. Multiple exit cards do not mean multiple proxy nodes are supported.
-- No Windows, OpenWrt or IPv6 transparent proxy support. The HTTP listener cannot carry arbitrary UDP. Proxy mode blocks QUIC (UDP/443) to encourage TCP fallback; other UDP remains direct. Test game NAT and connectivity on the actual console.
-- Usage counts forwarded gateway bytes only—not bypass traffic, other Mac apps' proxy traffic, protocol overhead or a provider's bill. Older records without exit classification cannot be reconstructed as proxy usage.
-- Daily aggregates persist; individual connections remain memory-only for up to 72 hours and 2,000 records. Response data does not prove application-level success; HTTPS is not decrypted.
+| Method | When to use it | Client configuration |
+|---|---|---|
+| Wi-Fi hotspot | Ethernet-connected Mac | Join the Mac hotspot; automatic IP/DNS, proxy off |
+| HTTP proxy / PAC | Apps that honor proxy settings, including when the Mac has no Ethernet | Enable and save the gateway's HTTP listener; enter its LAN address and port or PAC URL. Keep existing IP/gateway/DNS |
+| Static gateway | Transparent access on an existing LAN, Mac or Linux host | Reserve a free client IP in the actual subnet; point its gateway at the host and configure gateway DNS as required |
 
-## Architecture and development
+The HTTP listener defaults to port **17894**. It is separate from the **upstream proxy port**. The screenshots use a customized listener port, 17890. On another device, `127.0.0.1` refers to that device itself; use the gateway computer's LAN IP.
 
-```mermaid
-flowchart LR
-    Device[LAN devices] --> Access[Hotspot / gateway / HTTP and PAC]
-    Access --> Core[Go core: device policy and ordered routing]
-    Core --> Direct[Host direct network]
-    Core --> Proxy[Existing HTTP / SOCKS5 upstream]
-    Core --> Reject[Reject]
-    App[SwiftUI app / CLI / Agent Skill] --> Core
-```
+[HTTP steps](docs/user-guide.md#http) · [PAC](docs/user-guide.md#pac) · [Static gateway](docs/user-guide.md#static)
 
-The app and CLI share the same core/configuration. macOS uses `pf`; Linux uses `iptables`. Shutdown restores state changed by the gateway.
+## After setup
 
-```bash
-make build
-make test
-make build-app
-make dmg VERSION=v4.5.2
-make skill VERSION=v4.5.2
-```
+Use Overview for health and usage, Device Access for individual devices, Connections for actual routing/results, Rules for domain/device policies and automatic learning, and Settings for startup, updates, logs, CLI and Agent Skill.
 
-Full Xcode or the GitHub macOS runner produces a universal app; Command Line Tools-only builds use the host architecture for the SwiftUI shell.
+[Daily management](docs/user-guide.md#daily) · [Update app and core](docs/user-guide.md#update) · [Stop and restore networking](docs/user-guide.md#stop) · [Troubleshooting](docs/faq.md)
 
-[App documentation](docs/app.md) · [Architecture](docs/architecture.md) · [Troubleshooting](docs/faq.md) · [Changelog](CHANGELOG.md) · [v4.5.2 release notes](docs/releases/v4.5.2.md)
+## Scope
 
-## License
+- One HTTP/SOCKS5 upstream. Keep the upstream software running; node selection belongs there.
+- Primarily IPv4 TCP. HTTP/PAC only handles applications that honor proxy settings. No general UDP proxy or guaranteed NAT/latency improvement for games.
+- Hotspot and static gateway are alternate transparent access modes; changing modes affects existing clients. HTTP/PAC can run alongside either.
+- Traffic totals only cover data forwarded by this gateway, not all device traffic or a provider's bill. Daily aggregates persist; individual connections are limited to 72 hours / 2,000 entries in memory.
+- Closing the app window does not stop the background core. Restore client network settings before stopping/uninstalling.
+- Windows/OpenWrt hosting and IPv6 transparent proxying are unsupported.
 
-[MIT](LICENSE)
+## Documentation and development
+
+[Documentation index](docs/README.md) · [App reference and building](docs/app.md#build) · [CLI](docs/commands.md) · [Agent Skill](docs/agent-skill.md) · [Architecture](docs/architecture.md) · [Changelog](CHANGELOG.md)
+
+For normal use, download a Release. Documentation describes released behavior; source branches may differ from release tags.
+
+[MIT License](LICENSE)

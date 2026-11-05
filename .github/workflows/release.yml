@@ -39,11 +39,19 @@ jobs:
         working-directory: dist
         run: shasum -a 256 gateway-* *.dmg *.zip > SHA256SUMS
 
+      - name: Prepare release notes with download guide
+        run: |
+          python3 scripts/render-release-notes.py \
+            --tag "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --assets-dir dist \
+            --output dist/release-notes.md
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
-          body_path: docs/releases/latest.md
+          body_path: dist/release-notes.md
           files: |
             dist/gateway-*
             dist/*.dmg
